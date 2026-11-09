@@ -144,6 +144,41 @@ class AssistantTests(unittest.TestCase):
         self.assertFalse(result["executed"])
         self.assertTrue(result["recovery"])
 
+    def test_ai_guides_without_a_tool_or_module_selection(self):
+        provider = ScriptedProvider("gemini", {
+            "action": "", "target": "",
+            "reply": "まず募集投稿の目的と対象読者を整理しましょう。",
+            "question": "どの層に届けたいですか？",
+        })
+        result = Assistant(providers=[provider]).turn("今週のTumblr運用を相談したい")
+        self.assertEqual("guidance", result["state"])
+        self.assertFalse(result["executed"])
+        self.assertEqual("gemini", result["provider"])
+        self.assertTrue(result["recovery"])
+        self.assertIn("目的と対象読者", result["text"])
+        self.assertIn("どの層", result["text"])
+
+    def test_ai_guidance_does_not_call_adapter(self):
+        adapter = RecordingAdapter()
+        provider = ScriptedProvider("gemini", {
+            "action": "", "reply": "下書きの構成案は導入、本文、誘導文です。",
+        })
+        result = Assistant(bridge=Bridge({"tumblr": adapter}), providers=[provider]).turn("投稿の文章を考えて")
+        self.assertEqual("guidance", result["state"])
+        self.assertFalse(result["executed"])
+        self.assertEqual(0, adapter.calls)
+
+    def test_ai_empty_reply_asks_for_details_instead_of_guessing(self):
+        result = Assistant(providers=[ScriptedProvider("gemini", {})]).turn("よろしく")
+        self.assertEqual("unclear", result["state"])
+        self.assertFalse(result["executed"])
+        self.assertTrue(result["recovery"])
+
+    def test_ai_reply_wrong_type_is_rejected(self):
+        result = Assistant(providers=[ScriptedProvider("gemini", {"reply": ["unexpected"]})]).turn("相談")
+        self.assertEqual("invalid_response", result["state"])
+        self.assertFalse(result["executed"])
+
 
 if __name__ == "__main__":
     unittest.main()
