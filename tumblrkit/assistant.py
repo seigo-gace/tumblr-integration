@@ -7,9 +7,10 @@ prompt. Paid fallback is not attempted.
 """
 import json
 import os
+import socket
 import re
 import uuid
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from tumblrkit.bridge import ALLOWED, CONFIRM, Bridge, ActionRequest
@@ -85,9 +86,12 @@ class HttpProvider:
         if status != 200 or not isinstance(payload, dict):
             raise ProviderError("failed")
         try:
-            return json.loads(_provider_text(self.name, payload))
-        except (json.JSONDecodeError, TypeError, KeyError):
-            raise ProviderError("failed")
+            plan = json.loads(_provider_text(self.name, payload))
+            if not isinstance(plan, dict):
+                raise ProviderError('invalid_response')
+            return plan
+        except (json.JSONDecodeError, TypeError, KeyError, IndexError, AttributeError):
+            raise ProviderError('invalid_response') from None
 
     def _body(self, prompt):
         if self.name == "gemini":
@@ -149,6 +153,8 @@ class UrllibTransport:
             except json.JSONDecodeError:
                 payload = {}
             return error.code, payload
+        except (URLError, TimeoutError, socket.timeout, OSError):
+            raise ProviderError('network_unavailable') from None
 
 
 def _order(text, providers):
@@ -198,9 +204,13 @@ class Assistant:
             return self._pack(exc.code, self._failure_text(exc.code) + omitted, False, recovery=True)
         if plan is None:
             return self._local(local, cleaned, omitted)
-        action = plan.get("action") or ""
-        target = plan.get("target") or ""
-        question = plan.get("question") or ""
+        if not isinstance(plan, dict):
+            return self._pack("invalid_response", "AI応答形式が不正なため実行していません。" + omitted, False, recovery=True)
+        action, target, question = (plan.get(key, "") for key in ("action", "target", "question"))
+        if any(not isinstance(value, str) for value in (action, target, question)):
+            return self._pack("invalid_response", "AI応答形式が不正なため実行していません。" + omitted, False, recovery=True)
+        if len(action) > 128 or len(target) > 256 or len(question) > 2000:
+            return self._pack("invalid_response", "AI応答が長すぎるため実行していません。" + omitted, False, recovery=True)
         if action and action not in ALLOWED:
             return self._pack("invalid_tool", "AIの応答に未登録の操作があったため捨てました。実行していません。" + omitted, False, recovery=True)
         if not action:
@@ -266,6 +276,10 @@ class Assistant:
         return self._pack(result.state, "操作は完了していません。実行していません。", False, action=result.action, provider=provider, recovery=True)
 
     def _failure_text(self, code):
+        if code == "invalid_response":
+            return "AIの応答形式を安全に解釈できませんでした。実行していません。"
+        if code == "network_unavailable":
+            return "AI Providerへの通信に失敗しました。実行していません。"
         if code == "rate_limited":
             return "AI Providerの回数制限です。実行していません。"
         if code == "free_tier_exhausted":
