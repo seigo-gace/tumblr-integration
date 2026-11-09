@@ -108,6 +108,42 @@ class AssistantTests(unittest.TestCase):
         self.assertFalse(body["executed"])
         self.assertIn("実行していません", body["text"])
 
+    def test_malformed_provider_payload_fails_closed(self):
+        adapter = RecordingAdapter()
+        provider = ScriptedProvider("gemini", {"action": ["tumblr.publish_draft"], "target": "demo"})
+        result = Assistant(bridge=Bridge({"tumblr": adapter}), providers=[provider]).turn("投稿を希望")
+        self.assertEqual("invalid_response", result["state"])
+        self.assertFalse(result["executed"])
+        self.assertTrue(result["recovery"])
+        self.assertEqual(0, adapter.calls)
+
+    def test_provider_returns_non_object_fails_closed(self):
+        provider = ScriptedProvider("gemini", {"action": "tumblr.discover", "target": {"unsafe": True}})
+        result = Assistant(providers=[provider]).turn("検索して")
+        self.assertEqual("invalid_response", result["state"])
+        self.assertFalse(result["executed"])
+
+    def test_invalid_http_model_response_does_not_execute(self):
+        from tumblrkit.assistant import HttpProvider
+        class Transport:
+            def post(self, url, headers, body):
+                return 200, {"choices": [{"message": {"content": "[1,2,3]"}}]}
+        provider = HttpProvider("groq", "https://example.invalid", {}, False, Transport())
+        result = Assistant(providers=[provider]).turn("検索して")
+        self.assertEqual("invalid_response", result["state"])
+        self.assertFalse(result["executed"])
+
+    def test_transport_unavailable_replies_without_execution(self):
+        from tumblrkit.assistant import UrllibTransport
+        from unittest.mock import patch
+        from urllib.error import URLError
+        with patch("tumblrkit.assistant.urlopen", side_effect=URLError("offline")):
+            provider = providers_from_env({"TUMBLR_GROQ_API_KEY": "test-key"}, transport=UrllibTransport())[0]
+            result = Assistant(providers=[provider]).turn("検索して")
+        self.assertEqual("network_unavailable", result["state"])
+        self.assertFalse(result["executed"])
+        self.assertTrue(result["recovery"])
+
 
 if __name__ == "__main__":
     unittest.main()
