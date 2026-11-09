@@ -179,6 +179,34 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual("invalid_response", result["state"])
         self.assertFalse(result["executed"])
 
+    def test_http_assistant_guidance_without_module_selection(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            release = build_release(ROOT / "app", Path(folder), SHA)
+            assistant = Assistant(providers=[ScriptedProvider("gemini", {
+                "action": "", "target": "", "reply": "募集文の構成を提案します。",
+                "question": "告知対象を教えてください。",
+            })])
+            with AppServer(release, TOKEN, assistant=assistant) as server:
+                status, body = post(f"http://127.0.0.1:{server.port}/assistant", TOKEN, {
+                    "message": "投稿案を相談したい",
+                })
+        self.assertEqual(200, status)
+        self.assertEqual("guidance", body["state"])
+        self.assertFalse(body["executed"])
+        self.assertIn("募集文の構成", body["text"])
+        self.assertIn("告知対象", body["text"])
+
+    def test_http_assistant_without_auth_rejected(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            release = build_release(ROOT / "app", Path(folder), SHA)
+            with AppServer(release, TOKEN, assistant=Assistant(providers=[])) as server:
+                status, _ = post(f"http://127.0.0.1:{server.port}/assistant", "invalid", {
+                    "message": "下書き案を作って",
+                })
+        self.assertEqual(401, status)
+
 
 if __name__ == "__main__":
     unittest.main()
