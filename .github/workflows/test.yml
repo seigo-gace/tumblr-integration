@@ -16,3 +16,9 @@ jobs:
         with:
           node-version: '22'
       - run: node --check app/app.js
+      - run: PYTHONPATH=. python -m tumblrkit.appserve build --commit "$GITHUB_SHA" --dest dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tumblr-operation-app
+          path: dist
+          if-no-files-found: error

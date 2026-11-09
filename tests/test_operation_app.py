@@ -11,7 +11,7 @@ class OperationAppTests(unittest.TestCase):
         cls.js=(ROOT/"app.js").read_text(encoding="utf-8")
         cls.css=(ROOT/"styles.css").read_text(encoding="utf-8")
     def test_entry_elements_exist(self):
-        for field in ('id="modules"','id="messages"','id="chat-form"','id="instruction"','id="connection"'):
+        for field in ('id="modules"','id="messages"','id="chat-form"','id="instruction"','id="connection"','id="revision"','__TUMBLR_COMMIT__'):
             self.assertIn(field,self.html)
     def test_catalog_reuses_all_nine_module_names(self):
         for name in ("account","discovery","library","media","engagement","publishing","campaigns","referrals","analytics"):
