@@ -11,13 +11,18 @@ class OperationAppTests(unittest.TestCase):
         cls.js=(ROOT/"app.js").read_text(encoding="utf-8")
         cls.css=(ROOT/"styles.css").read_text(encoding="utf-8")
     def test_entry_elements_exist(self):
-        for field in ('id="modules"','id="messages"','id="chat-form"','id="instruction"','id="connection"','id="revision"','__TUMBLR_COMMIT__'):
+        for field in ('id="messages"','id="chat-form"','id="instruction"','id="connection"','id="revision"','id="assist"','__TUMBLR_COMMIT__'):
             self.assertIn(field,self.html)
+        self.assertNotIn('id="modules"',self.html)
+    def test_send_does_not_require_a_module(self):
+        self.assertNotIn("操作分野を選んでください",self.js)
+        self.assertIn('fetch("/assistant"',self.js)
     def test_catalog_reuses_all_nine_module_names(self):
+        from tumblrkit.assistant import MODULES
         for name in ("account","discovery","library","media","engagement","publishing","campaigns","referrals","analytics"):
-            self.assertIn('"'+name+'"',self.js)
+            self.assertIn(name,MODULES)
     def test_no_external_requests_or_local_credentials(self):
-        for operation in ("fetch(", "XMLHttpRequest", "localStorage", "sessionStorage", "document.cookie", "innerHTML", "eval("):
+        for operation in ("XMLHttpRequest", "localStorage", "sessionStorage", "document.cookie", "innerHTML", "eval(", "https://", "http://"):
             self.assertNotIn(operation,self.js)
     def test_safe_text_rendering(self):
         self.assertIn("item.textContent=text",self.js)

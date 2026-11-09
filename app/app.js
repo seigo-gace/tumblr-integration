@@ -1,77 +1,74 @@
 "use strict";
-// Presentation-only controller: external operations are disabled until verified adapters exist.
-// The nine names are the repository's adopted module catalogue, not a replacement for
-// the six objective shortcuts whose final labels must be checked against the UI decision record.
-const catalog = Object.freeze([
-  ["account","アカウント","Tumblr OAuth接続とアカウント情報"],
-  ["discovery","検索・発見","Tumblr投稿・ブログの検索"],
-  ["library","ライブラリ","保存・お気に入り・後で見る"],
-  ["media","メディア","画像と動画の管理"],
-  ["engagement","交流","反応や交流の管理"],
-  ["publishing","投稿","下書き・公開・編集"],
-  ["campaigns","キャンペーン","集客とキャンペーン"],
-  ["referrals","紹介","紹介・参加資格連携"],
-  ["analytics","分析","閲覧・反応の集計"]
-]);
+// Assistant-first screen. A module button is not required before sending.
+// Same-origin /assistant only. Replies are text, never HTML.
 (function init(){
-  const nav=document.getElementById("modules");
-  const title=document.getElementById("selected-title");
-  const description=document.getElementById("selected-description");
   const messages=document.getElementById("messages");
   const form=document.getElementById("chat-form");
   const instruction=document.getElementById("instruction");
-  let current=null;
+  const connection=document.getElementById("connection");
+  const assist=document.getElementById("assist");
+  const confirm=document.getElementById("confirm");
+  let lastText="";
+  let pending=null;
   function display(text,role){
     const item=document.createElement("div");
     item.className="message "+role;
-    // Never render user input as HTML.
     item.textContent=text;
     messages.appendChild(item);
     messages.scrollTop=messages.scrollHeight;
   }
-  function selectModule(item){
-    current=item;
-    title.textContent=item[1];
-    description.textContent=item[2];
-    nav.querySelectorAll(".module").forEach(button=>{
-      const on=button.dataset.module===item[0];
-      button.classList.toggle("active",on);
-      button.setAttribute("aria-pressed",String(on));
-    });
-    display("「"+item[1]+"」を選択しました。現在は外部接続前の操作入口です。実操作は行われません。","system");
-    instruction.focus();
+  function showAssist(turn){
+    const open=Boolean(turn&&turn.recovery);
+    assist.hidden=!open;
+    confirm.hidden=!(turn&&turn.state==="confirmation_required"&&turn.request_id);
   }
-  catalog.forEach(item=>{
-    const button=document.createElement("button");
-    button.type="button";
-    button.className="module";
-    button.dataset.module=item[0];
-    button.setAttribute("aria-pressed","false");
-    const name=document.createElement("strong");
-    name.textContent=item[1];
-    const badge=document.createElement("span");
-    badge.textContent="未接続";
-    button.append(name,badge);
-    button.addEventListener("click",()=>selectModule(item));
-    nav.appendChild(button);
-  });
-  form.addEventListener("submit",event=>{
+  function apply(turn){
+    display(turn.text||"応答を表示できません。実行していません。","system");
+    connection.textContent=turn.executed?"外部操作：結果を確認":"外部接続：未実行";
+    pending=turn.request_id||null;
+    showAssist(turn);
+  }
+  function fail(){
+    apply({text:"画面から操作先へ届きませんでした。実行していません。",executed:false,recovery:true,state:"failed"});
+  }
+  function post(payload){
+    return fetch("/assistant",{
+      method:"POST",
+      credentials:"same-origin",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(payload)
+    }).then(function(response){
+      if(!response.ok) throw new Error("http");
+      return response.json();
+    }).then(apply,fail);
+  }
+  form.addEventListener("submit",function(event){
     event.preventDefault();
     const message=instruction.value.trim();
-    if(!message)return;
-    if(!current){
-      display("操作分野を選んでください。","system");
-      return;
-    }
+    if(!message) return;
+    lastText=message;
     display(message,"user");
     instruction.value="";
-    display("「"+current[1]+"」への指示を受け付けましたが、現在この画面は未接続です。外部送信・投稿・アカウント変更は実行していません。接続後に実行できるようになります。","system");
+    post({message:message});
   });
-  instruction.addEventListener("keydown",event=>{
+  document.getElementById("retry").addEventListener("click",function(){
+    if(!lastText) return;
+    post({message:lastText});
+  });
+  document.getElementById("draft").addEventListener("click",function(){
+    post({draft:true,message:lastText});
+  });
+  document.getElementById("abort").addEventListener("click",function(){
+    post({abort:true});
+  });
+  confirm.addEventListener("click",function(){
+    if(!pending) return;
+    post({confirm:true,request_id:pending});
+  });
+  instruction.addEventListener("keydown",function(event){
     if(event.key==="Enter"&&(event.ctrlKey||event.metaKey)){
       event.preventDefault();
       form.requestSubmit();
     }
   });
-  selectModule(catalog[0]);
 })();

@@ -53,10 +53,10 @@ class AppServeTests(unittest.TestCase):
             self.assertNotIn(b"<form", body)
             status, body, _ = fetch(base + "/")
             self.assertEqual(status, 401)
-            self.assertNotIn(b"id=\"modules\"", body)
+            self.assertNotIn(b"id=\"chat-form\"", body)
             status, body, _ = fetch(base + "/", TOKEN)
             self.assertEqual(status, 200)
-            self.assertIn(b"id=\"modules\"", body)
+            self.assertIn(b"id=\"chat-form\"", body)
             self.assertIn(SHA_A.encode(), body)
             status, _, _ = fetch(base + "/app.js", "wrong-access-token")
             self.assertEqual(status, 401)
@@ -77,7 +77,9 @@ class AppServeTests(unittest.TestCase):
             cookie = headers["Set-Cookie"].split(";", 1)[0]
             status, body, _ = fetch(base + "/app.js", headers={"Cookie": cookie})
             self.assertEqual(status, 200)
-            self.assertNotIn(b"fetch(", body)
+            self.assertIn(b'fetch("/assistant"', body)
+            self.assertNotIn(b"https://", body)
+            self.assertNotIn(b"localStorage", body)
 
     def test_rollback_restores_previous_commit(self):
         build_release(APP, self.tmp, SHA_A)

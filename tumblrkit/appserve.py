@@ -17,6 +17,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
+from tumblrkit.assistant import Assistant
+
 COMMIT_MARK = "__TUMBLR_COMMIT__"
 COMMIT_RE = re.compile(r"[0-9a-f]{7,40}\Z")
 STATIC_NAMES = ("index.html", "styles.css", "app.js")
@@ -267,6 +269,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(403, "forbidden\n", "text/plain; charset=utf-8")
             return
         parts = urlsplit(self.path)
+        if parts.path == "/assistant":
+            self._assistant()
+            return
         if parts.path != "/session" or parts.query:
             self._send(404, "not found\n", "text/plain; charset=utf-8")
             return
@@ -282,14 +287,37 @@ class _Handler(BaseHTTPRequestHandler):
             ("Set-Cookie", f"{COOKIE}={self.server.token}; HttpOnly; SameSite=Strict; Path=/"),
         ))
 
+    def _assistant(self):
+        if not _authorized(self):
+            self._unauthorized()
+            return
+        try:
+            payload = json.loads(self._read_body().decode("utf-8"))
+        except (ValueError, json.JSONDecodeError, UnicodeError):
+            self._send(400, "bad request\n", "text/plain; charset=utf-8")
+            return
+        if not isinstance(payload, dict):
+            self._send(400, "bad request\n", "text/plain; charset=utf-8")
+            return
+        message = payload.get("message") if isinstance(payload.get("message"), str) else ""
+        request_id = payload.get("request_id") if isinstance(payload.get("request_id"), str) else None
+        self._json(200, self.server.assistant.turn(
+            message=message,
+            confirm=payload.get("confirm") is True,
+            request_id=request_id,
+            draft=payload.get("draft") is True,
+            abort=payload.get("abort") is True,
+        ))
+
 
 class AppServer:
-    def __init__(self, release, token, host="127.0.0.1", port=0, ticket=False):
+    def __init__(self, release, token, host="127.0.0.1", port=0, ticket=False, assistant=None):
         self.release = Path(release)
         self.token = require_token(token)
         self.host = loopback_host(host)
         self.port = port
         self.ticket = ticket
+        self.assistant = assistant if assistant is not None else Assistant()
         self.ticket_path = None
         self.httpd = None
         self.thread = None
@@ -300,6 +328,7 @@ class AppServer:
         self.httpd.release = self.release
         self.httpd.token = self.token
         self.httpd.tickets = set()
+        self.httpd.assistant = self.assistant
         if self.ticket:
             ticket = secrets.token_urlsafe(24)
             self.httpd.tickets.add(ticket)

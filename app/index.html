@@ -3,11 +3,11 @@
 <meta name="color-scheme" content="dark light"><title>TGtumbler | Tumblr操作</title>
 <link rel="stylesheet" href="./styles.css"></head>
 <body><main class="layout">
-<header><div><span class="eyebrow">TGtumbler / Tumblr</span><h1>Tumblr 操作センター</h1><p>専用アカウントの運用とTelegram連携を、ひとつの窓口から。</p><p id="revision" data-commit="__TUMBLR_COMMIT__">revision __TUMBLR_COMMIT__</p></div><div class="connection" id="connection" role="status">外部接続：未設定</div></header>
-<nav aria-label="操作分野"><h2>操作分野</h2><div id="modules" class="modules"></div></nav>
+<header><div><span class="eyebrow">TGtumbler / Tumblr</span><h1>Tumblr 操作センター</h1><p>やりたいことを文章で書いてください。Assistantが手順を提案します。</p><p id="revision" data-commit="__TUMBLR_COMMIT__">revision __TUMBLR_COMMIT__</p></div><div class="connection" id="connection" role="status">外部接続：未設定</div></header>
 <section class="workspace" aria-label="操作チャット">
-<div class="workspace-heading"><h2 id="selected-title">操作チャット</h2><p id="selected-description">分野を選んで操作内容を入力してください。</p></div>
-<div id="messages" class="messages" role="log" aria-live="polite"><div class="message system">利用できる操作を選択してください。外部アカウント操作・公開は接続と確認が完了するまで実行しません。</div></div>
-<form id="chat-form"><label for="instruction">操作指示</label><div class="composer"><textarea id="instruction" rows="2" placeholder="例：投稿の下書きを確認したい" required maxlength="2000"></textarea><button id="send" type="submit">送信</button></div></form>
-<div class="footnote">この画面は操作入口です。AI・Tumblr OAuth・公開API・GATE・MPBは接続確認後に有効化します。送信内容を外部へ自動送信しません。</div>
+<div class="workspace-heading"><h2 id="selected-title">Assistant</h2><p id="selected-description">分野のボタンを選ばなくても送信できます。投稿・削除・公開設定は確認の前に実行しません。</p></div>
+<div id="messages" class="messages" role="log" aria-live="polite"><div class="message system">何をしたいかを書いてください。未接続の操作は実行したことにしません。</div></div>
+<form id="chat-form"><label for="instruction">やりたいこと</label><div class="composer"><textarea id="instruction" rows="2" placeholder="例：募集用ブログの下書きを確認したい" required maxlength="2000"></textarea><button id="send" type="submit">送信</button></div></form>
+<div id="assist" class="assist" hidden><span>補助・復旧</span><button type="button" id="retry">再試行</button><button type="button" id="draft">下書きを残す</button><button type="button" id="abort">中断</button><button type="button" id="confirm" hidden>この内容で実行する</button></div>
+<div class="footnote">ボタンは障害・迷い・中断のための補助です。AI・Tumblr OAuth・公開APIは接続と確認が済むまで外部へ送りません。</div>
 </section></main><script src="./app.js" defer></script></body></html>
