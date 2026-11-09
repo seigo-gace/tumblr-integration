@@ -206,22 +206,34 @@ class Assistant:
             return self._local(local, cleaned, omitted)
         if not isinstance(plan, dict):
             return self._pack("invalid_response", "AI応答形式が不正なため実行していません。" + omitted, False, recovery=True)
-        action, target, question = (plan.get(key, "") for key in ("action", "target", "question"))
-        if any(not isinstance(value, str) for value in (action, target, question)):
+        action, target, question, reply = (plan.get(key, "") for key in ("action", "target", "question", "reply"))
+        if any(not isinstance(value, str) for value in (action, target, question, reply)):
             return self._pack("invalid_response", "AI応答形式が不正なため実行していません。" + omitted, False, recovery=True)
-        if len(action) > 128 or len(target) > 256 or len(question) > 2000:
+        if len(action) > 128 or len(target) > 256 or len(question) > 2000 or len(reply) > 4000:
             return self._pack("invalid_response", "AI応答が長すぎるため実行していません。" + omitted, False, recovery=True)
         if action and action not in ALLOWED:
             return self._pack("invalid_tool", "AIの応答に未登録の操作があったため捨てました。実行していません。" + omitted, False, recovery=True)
         if not action:
-            return self._local(local, cleaned, omitted, question)
+            if reply or question:
+                answer = reply + ("\n" if reply and question else "") + question + omitted
+                return self._pack("guidance", answer, False,
+                                  recovery=bool(question), provider=provider_name)
+            return self._pack("unclear", "目的をもう少し詳しく教えてください。実行していません。" + omitted,
+                              False, recovery=True, provider=provider_name)
         return self._propose(action, target, cleaned, omitted, question, provider_name, ai=True)
 
     def _ask(self, cleaned):
         providers = _order(cleaned, self._available())
         if not providers:
             return None, "none"
-        prompt = "許可された操作だけをJSONで返す。操作一覧: " + ",".join(sorted(ALLOWED)) + "。利用者の文: " + cleaned
+        prompt = (
+            "Tumblr運用のAIアシスタントとして日本語で要望を理解し誘導する。"
+            "JSONオブジェクトのみ返す。キーはaction,target,reply,question。"
+            "操作しない相談・企画・説明はactionを空にしてreplyで案内する。"
+            "不足情報はquestionで一つずつ確認する。接続・公開済みと推測で主張しない。"
+            "実操作の提案は登録済アクションのみ。許可された操作: "
+            + ",".join(sorted(ALLOWED)) + "。利用者の文: " + cleaned
+        )
         primary = providers[0]
         fallback = next((item for item in providers[1:] if item.name == "openrouter" and not item.paid), None)
         try:
