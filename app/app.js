@@ -19,8 +19,8 @@
       button.classList.toggle("active",selected);
     });
     goalSelection.textContent=selectedGoals.size
-      ?"選択中："+Array.from(selectedGoals).join("・")+"｜文章を追加しても、そのまま送信しても構いません。"
-      :"選択なし｜文章だけでも相談できます。";
+      ?"選択中："+Array.from(selectedGoals).join("・")
+      :"";
     instruction.required=selectedGoals.size===0;
   }
   goalButtons.forEach(function(button){
