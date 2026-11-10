@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import re
+import resource
 import shutil
 import socket
 import sqlite3
@@ -163,6 +164,12 @@ class SafeDownloader:
             raise MediaError("MEDIA_SIZE_CHANGED")
         return downloaded
 
+def _bound_child():
+    """Limit FFmpeg/ffprobe even for malformed, compressed or hostile inputs."""
+    resource.setrlimit(resource.RLIMIT_CPU,(190,190))
+    resource.setrlimit(resource.RLIMIT_FSIZE,(MAX_OUTPUT_BYTES,MAX_OUTPUT_BYTES))
+    resource.setrlimit(resource.RLIMIT_AS,(2*1024*1024*1024,2*1024*1024*1024))
+
 class Transcoder:
     def __init__(self,ffprobe="ffprobe",ffmpeg="ffmpeg"):
         self.ffprobe=ffprobe
@@ -170,9 +177,10 @@ class Transcoder:
 
     def _probe(self,source):
         try:
-            result=subprocess.run([self.ffprobe,"-v","error","-show_entries",
+            result=subprocess.run([self.ffprobe,"-v","error","-protocol_whitelist","file,pipe","-show_entries",
                  "format=format_name,duration:stream=codec_type,codec_name,width,height",
-                 "-of","json",str(source)],capture_output=True,text=True,timeout=20,check=False)
+                 "-of","json",str(source)],capture_output=True,text=True,timeout=20,check=False,
+                                  preexec_fn=_bound_child)
         except (OSError,subprocess.TimeoutExpired):
             raise MediaError("MEDIA_PROBE_UNAVAILABLE") from None
         if result.returncode or len(result.stdout)>16000:
@@ -197,14 +205,15 @@ class Transcoder:
         # All outputs are MP4. Only verified compatible tracks may be stream-copied.
         compatible=before["video"]=="h264" and all(x=="aac" for x in before["audio"])
         args=[self.ffmpeg,"-hide_banner","-nostdin","-loglevel","error","-y",
-              "-i",str(source),"-map","0:v:0","-map","0:a:0?",
+              "-threads","2","-protocol_whitelist","file,pipe","-i",str(source),"-map","0:v:0","-map","0:a:0?",
               "-c:v","copy" if compatible else "libx264"]
         if not compatible:
             args+=["-preset","veryfast","-crf","24","-pix_fmt","yuv420p"]
         args+=["-c:a","copy" if compatible else "aac","-b:a","128k",
                "-movflags","+faststart","-f","mp4",str(destination)]
         try:
-            result=subprocess.run(args,capture_output=True,timeout=CONVERT_TIMEOUT,check=False)
+            result=subprocess.run(args,capture_output=True,timeout=CONVERT_TIMEOUT,check=False,
+                                  preexec_fn=_bound_child)
         except (OSError,subprocess.TimeoutExpired):
             raise MediaError("MEDIA_CONVERSION_UNAVAILABLE") from None
         if result.returncode or not destination.is_file():
