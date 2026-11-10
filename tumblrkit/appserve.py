@@ -28,6 +28,7 @@ from tumblrkit.account_runtime import OwnerOAuth, load_owner_blog, register_owne
 from tumblrkit.drafts import DraftStore
 from tumblrkit.discovery_store import DiscoveryStore
 from tumblrkit.library import Library
+from tumblrkit.media_save import MediaSave, MediaError
 from tumblrkit.attachments import AttachmentStore, AttachmentError, MAX_ATTACHMENT_BYTES, IMAGE_TYPES
 
 COMMIT_MARK = "__TUMBLR_COMMIT__"
@@ -341,6 +342,43 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, '<!doctype html><html lang="ja"><meta charset="utf-8"><title>Tumblr連携</title><p>Tumblrの本人確認が完了しました。</p><a href="/">操作画面に戻る</a></html>', "text/html; charset=utf-8")
             return
+        if parts.path == "/media/jobs":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            if parts.query:
+                self._json(400,{"error":"media_query_invalid"})
+                return
+            try:
+                self._json(200,self.server.media_save.list())
+            except (MediaError,ValueError,OSError,sqlite3.Error):
+                self._json(503,{"error":"media_store_unavailable"})
+            return
+        if parts.path.startswith("/media/file/"):
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            try:
+                filename=parts.path.rsplit("/",1)[1]
+                file=self.server.media_save.file(filename)
+                size=file.stat().st_size
+                self.send_response(200)
+                self.send_header("Content-Type","video/mp4")
+                self.send_header("Content-Length",str(size))
+                self.send_header("Content-Disposition",'attachment; filename="'+filename+'.mp4"')
+                self.send_header("Cache-Control","no-store")
+                self.send_header("X-Content-Type-Options","nosniff")
+                self.send_header("Referrer-Policy","no-referrer")
+                self.end_headers()
+                with open(file,"rb") as source:
+                    while True:
+                        chunk=source.read(65536)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+            except (MediaError,OSError):
+                self._json(404,{"error":"media_file_unavailable"})
+            return
         if parts.path == "/library":
             if not _authorized(self):
                 self._unauthorized()
@@ -468,6 +506,39 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": "oauth_blog_setup_failed"})
                 return
             self._json(200, {"configured": True, "blog": blog})
+            return
+        if parts.path == "/media/save":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            bearer_ok=self.headers.get("Authorization","").startswith("Bearer ") and _authorized(self)
+            if (self.headers.get("Origin") and not _same_origin(self)) or (not self.headers.get("Origin") and not bearer_ok):
+                self._send(403,"origin rejected\n","text/plain; charset=utf-8")
+                return
+            try:
+                if self.headers.get("Content-Type","").split(";",1)[0].strip().lower()!="application/json":
+                    raise MediaError("MEDIA_REQUEST_INVALID")
+                request=json.loads(self._read_body(2048).decode("utf-8"))
+                if not isinstance(request,dict) or set(request)!={"candidate_id","media_index","rights_confirmed"}:
+                    raise MediaError("MEDIA_REQUEST_INVALID")
+                data=self.server.media_save.save(request["candidate_id"],request["media_index"],
+                                                 request["rights_confirmed"])
+                self._json(200,data)
+            except (ValueError,TypeError,UnicodeError,json.JSONDecodeError) as exc:
+                error=str(exc) if isinstance(exc,MediaError) else "MEDIA_REQUEST_INVALID"
+                if error in ("MEDIA_DISK_FULL","MEDIA_QUOTA_EXCEEDED","MEDIA_BUSY",
+                             "MEDIA_JOB_IN_PROGRESS"):
+                    self._json(409,{"error":error})
+                elif error in ("MEDIA_HTTP_UNAVAILABLE","MEDIA_TYPE_UNSUPPORTED","MEDIA_LENGTH_UNKNOWN",
+                               "MEDIA_SIZE_EXCEEDED","MEDIA_SIZE_CHANGED","MEDIA_DESTINATION_UNSAFE",
+                               "MEDIA_CONNECT_UNAVAILABLE","MEDIA_PROBE_FAILED","MEDIA_PROBE_UNAVAILABLE",
+                               "MEDIA_CONVERSION_FAILED","MEDIA_CONVERSION_UNAVAILABLE",
+                               "MEDIA_OUTPUT_NOT_MP4","MEDIA_OUTPUT_SIZE_EXCEEDED","MEDIA_PROCESS_FAILED"):
+                    self._json(422,{"error":error})
+                else:
+                    self._json(400,{"error":error})
+            except (OSError,sqlite3.Error):
+                self._json(503,{"error":"media_store_unavailable"})
             return
         if parts.path in ("/library/update","/library/progress"):
             if not _authorized(self):
@@ -799,6 +870,9 @@ class AppServer:
         self.httpd.discovery_store = DiscoveryStore(
             Path.home() / ".config" / "tgtumbler" / "tumblr-oauth" / "discovery.sqlite3")
         self.httpd.library = Library(self.httpd.discovery_store)
+        media_root=self.release.resolve().parent.parent / "data" / "media"
+        media_root.mkdir(parents=True,exist_ok=True,mode=0o700)
+        self.httpd.media_save = MediaSave(self.httpd.discovery_store,media_root)
         self.httpd.draft_store = DraftStore(self.release.resolve().parent.parent / "data" / "drafts.sqlite3")
         self.httpd.attachment_store = AttachmentStore(self.release.resolve().parent.parent / "data")
         if self.ticket:
