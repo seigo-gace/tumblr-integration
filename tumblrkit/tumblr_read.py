@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
+from tumblrkit.api_safety import TumblrReadBudget
 
 BLOG = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}(?:\.tumblr\.com)?$", re.I)
 API = "https://api.tumblr.com"
@@ -40,6 +41,9 @@ def token_from_file(path_value):
 
 
 class OfficialTransport:
+    def __init__(self, budget):
+        self.budget = budget
+
     def get(self, path, bearer):
         if not path.startswith("/v2/") or "//" in path:
             raise ValueError("api_path_invalid")
@@ -55,7 +59,12 @@ class OfficialTransport:
                 if response.status != 200:
                     raise ValueError("tumblr_http_status")
                 raw = response.read(MAX_REPLY + 1)
-        except (HTTPError, URLError, OSError, TimeoutError):
+        except HTTPError as exc:
+            if exc.code == 429:
+                self.budget.pause_after_limit()
+                raise ValueError("tumblr_rate_limited") from None
+            raise ValueError("tumblr_unavailable") from None
+        except (URLError, OSError, TimeoutError):
             raise ValueError("tumblr_unavailable") from None
         if len(raw) > MAX_REPLY:
             raise ValueError("tumblr_response_too_large")
@@ -98,7 +107,8 @@ class TumblrReadAdapter:
     def __init__(self, owner_blog, token_file, transport=None, token_provider=None):
         self.blog = normalize_blog(owner_blog)
         self.token_file = token_file
-        self.transport = transport or OfficialTransport()
+        self.transport = transport or OfficialTransport(
+            TumblrReadBudget(Path(token_file).expanduser().parent / "tumblr-api-budget.sqlite3"))
         self.token_provider = token_provider
 
     def perform(self, action, target, payload):
@@ -106,6 +116,8 @@ class TumblrReadAdapter:
             raise ValueError("read_action_not_connected")
         if normalize_blog(target) != self.blog:
             raise ValueError("non_owner_blog")
+        if isinstance(self.transport, OfficialTransport):
+            self.transport.budget.reserve(2)
         bearer = self.token_provider() if self.token_provider else token_from_file(self.token_file)
         identity = self.transport.get("/v2/user/info", bearer)
         user = identity.get("response", {}).get("user") if isinstance(identity, dict) else None
