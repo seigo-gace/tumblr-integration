@@ -76,6 +76,44 @@ class OfficialTransport:
             raise ValueError("tumblr_response_invalid") from None
 
 
+
+def discovery_media_refs(post):
+    """Read-only list of public Tumblr-hosted preview/media references, no downloads."""
+    if not isinstance(post,dict):
+        return []
+    found,seen=[],set()
+    def accept(url,kind):
+        if not isinstance(url,str) or len(url)>500 or len(found)>=50:
+            return
+        parsed=urlsplit(url)
+        host=(parsed.hostname or "").lower()
+        if (parsed.scheme!="https" or parsed.username or parsed.password
+                or not (host=="media.tumblr.com" or host.endswith(".media.tumblr.com"))
+                or url in seen):
+            return
+        seen.add(url)
+        found.append({"url":url,"type":kind})
+    for block in post.get("content",[]) if isinstance(post.get("content"),list) else []:
+        if not isinstance(block,dict) or block.get("type") not in ("image","video"):
+            continue
+        kind=block["type"]
+        item=block.get("poster") if kind=="video" else block.get("media")
+        if isinstance(item,dict): item=[item]
+        if isinstance(item,list):
+            for media in item:
+                if isinstance(media,dict): accept(media.get("url"),kind)
+    photos=post.get("photos")
+    if isinstance(photos,list):
+        for photo in photos:
+            if not isinstance(photo,dict): continue
+            variants=photo.get("alt_sizes")
+            if not isinstance(variants,list):
+                variants=[photo.get("original_size")]
+            for variant in variants[:1]:
+                if isinstance(variant,dict): accept(variant.get("url"),"image")
+    accept(post.get("thumbnail_url"),"video")
+    return found
+
 def media_thumbnail(post):
     """Extract a Tumblr-hosted preview from NPF image/video blocks, if present."""
     blocks = post.get("content") if isinstance(post, dict) else None
