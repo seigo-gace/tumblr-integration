@@ -58,6 +58,52 @@
     if(result.verified!==true||result.updated!==ids.length)throw new Error("library_unverified");
     await showLibrary();
   }
+  async function mediaHistory(){
+    try{
+      const data=await libraryRequest("/media/jobs");
+      if(data.verified!==true||!Array.isArray(data.jobs))throw new Error("history_unverified");
+      const section=document.createElement("section");section.className="library-panel result-view";
+      const title=document.createElement("h3");title.textContent="MP4保存履歴（最新100件）";
+      section.appendChild(title);
+      for(const job of data.jobs){
+        const line=document.createElement("div");line.className="library-controls";
+        const text=document.createElement("span");
+        text.textContent=job.candidate_id+" • "+job.state+
+          (job.error_code?" • "+job.error_code:"")+
+          (job.state==="completed"?" • "+job.output_bytes+"バイト":"");
+        line.appendChild(text);
+        if(job.state==="completed"&&/^[0-9a-f]{32}$/.test(job.id)){
+          const link=document.createElement("a");
+          link.href="/media/file/"+job.id;link.textContent="MP4を保存";
+          line.appendChild(link);
+        }
+        section.appendChild(line);
+      }
+      if(!data.jobs.length){
+        const note=document.createElement("p");note.textContent="保存履歴はまだありません。";
+        section.appendChild(note);
+      }
+      messages.appendChild(section);messages.scrollTop=messages.scrollHeight;
+    }catch(error){display("メディア保存履歴を取得できませんでした。","system");}
+  }
+  async function mediaSave(item,index,button){
+    const selected=item.media[index];
+    if(!selected||selected.type!=="video"||!libraryMedia(selected.url))return;
+    if(!window.confirm("この動画の保存について、あなたが権利を持つか、権利者の許諾と利用規約上の保存許可を確認済みですか？ 未確認ならキャンセルしてください。Tumblr本番の投稿操作はしません。"))return;
+    button.disabled=true;
+    const old=button.textContent;
+    button.textContent="確認・変換中";
+    try{
+      const data=await libraryRequest("/media/save",{
+        candidate_id:item.candidate_id,media_index:index,rights_confirmed:true
+      });
+      if(data.verified!==true)throw new Error("save_unverified");
+      display("MP4保存結果："+(data.state||data.job?.state||"completed")+
+        "。メディア保存履歴から確認してください。","system");
+    }catch(error){
+      display("MP4保存できませんでした。権限・動画形式・空き容量・処理上限を確認してください。保存履歴に成否を記録しています。","system");
+    }finally{button.disabled=false;button.textContent=old;}
+  }
   async function libraryView(item,index){
     if(!item||!Array.isArray(item.media)||!item.media.length)return;
     const media=item.media.filter(function(m){return libraryMedia(m.url);});
@@ -83,6 +129,7 @@
         const a=document.createElement("a");a.href=source;a.target="_blank";a.rel="noopener noreferrer";
         a.textContent="動画の参照元を開く";body.appendChild(a);
       }
+      save.hidden=entry.type!=="video";
       position.textContent=(cursor+1)+" / "+media.length;
       try{
         const saved=await libraryRequest("/library/progress",{candidate_id:item.candidate_id,media_index:cursor});
@@ -96,7 +143,9 @@
     prev.addEventListener("click",function(){cursor=(cursor+media.length-1)%media.length;render();});
     next.addEventListener("click",function(){cursor=(cursor+1)%media.length;render();});
     close.addEventListener("click",function(){section.remove();});
-    toolbar.append(prev,position,next,close);section.append(heading,body,toolbar);
+    const save=document.createElement("button");save.type="button";save.textContent="MP4保存";
+    save.addEventListener("click",function(){mediaSave(item,cursor,save);});
+    toolbar.append(prev,position,next,save,close);section.append(heading,body,toolbar);
     messages.appendChild(section);messages.scrollTop=messages.scrollHeight;
     await render();
   }
@@ -154,6 +203,9 @@
       panel.append(grid,close);messages.appendChild(panel);messages.scrollTop=messages.scrollHeight;
     });
     bulk.appendChild(viewSelected);
+    const history=document.createElement("button");history.type="button";
+    history.textContent="MP4保存履歴";history.addEventListener("click",mediaHistory);
+    bulk.appendChild(history);
     for(const [label,field,value] of [["既読にする","seen",true],["未読にする","seen",false],["お気に入り","favorite",true],["お気に入り解除","favorite",false],["あとで見る","watch_later",true],["あとで見る解除","watch_later",false]]){
       const b=document.createElement("button");b.type="button";b.textContent=label;
       b.addEventListener("click",async function(){
