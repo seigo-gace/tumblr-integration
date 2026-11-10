@@ -15,6 +15,17 @@ class ReleaseScriptContract(unittest.TestCase):
         compile(SCRIPT.read_text(encoding="utf-8"), str(SCRIPT), "exec")
         compile(OWNER_SETUP_SCRIPT.read_text(encoding="utf-8"), str(OWNER_SETUP_SCRIPT), "exec")
 
+    def test_login_key_minimum_eight_and_direct_script_import(self):
+        from tumblrkit.appserve import require_token
+        self.assertEqual("abc12345", require_token("abc12345"))
+        from tumblrkit.appserve import ServeError
+        with self.assertRaises(ServeError):
+            require_token("abc1234")
+        code = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("sys.path.insert(0, str(Path(__file__).resolve().parents[1]))", code)
+        html = (SCRIPT.parents[1] / "tumblrkit" / "appserve.py").read_text(encoding="utf-8")
+        self.assertIn('minlength="8"', html)
+
     def test_owner_key_setup_local_and_private(self):
         text = OWNER_SETUP_SCRIPT.read_text(encoding="utf-8")
         self.assertIn("getpass.getpass(", text)
