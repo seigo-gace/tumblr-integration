@@ -24,7 +24,7 @@ from urllib.parse import parse_qs, urlsplit
 from tumblrkit.assistant import Assistant
 from tumblrkit.bridge import Bridge
 from tumblrkit.tumblr_read import adapter_from_env, TumblrReadAdapter
-from tumblrkit.account_runtime import OwnerOAuth
+from tumblrkit.account_runtime import OwnerOAuth, load_owner_blog, register_owner_blog
 from tumblrkit.drafts import DraftStore
 from tumblrkit.attachments import AttachmentStore, AttachmentError, MAX_ATTACHMENT_BYTES, IMAGE_TYPES
 
@@ -399,6 +399,36 @@ class _Handler(BaseHTTPRequestHandler):
         if parts.query:
             self._send(400, "bad request\n", "text/plain; charset=utf-8")
             return
+        if parts.path == "/oauth/configure":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            bearer_ok = self.headers.get("Authorization", "").startswith("Bearer ") and _authorized(self)
+            if (self.headers.get("Origin") and not _same_origin(self)) or (not self.headers.get("Origin") and not bearer_ok):
+                self._send(403, "origin rejected\n", "text/plain; charset=utf-8")
+                return
+            try:
+                payload = json.loads(self._read_body().decode("utf-8"))
+                if not isinstance(payload, dict) or set(payload) != {"blog"}:
+                    raise ValueError("oauth_blog_invalid")
+                with self.server.account_lock:
+                    blog = register_owner_blog(self.server.oauth_folder, payload["blog"])
+                    if self.server.owner_oauth is None:
+                        self.server.owner_oauth = OwnerOAuth(self.server.oauth_folder, blog)
+                        self.server.assistant.bridge.adapters["tumblr"] = TumblrReadAdapter(
+                            blog, self.server.owner_oauth.store.access,
+                            token_provider=self.server.owner_oauth.refresh_if_needed)
+                    elif self.server.owner_oauth.blog != blog:
+                        # Changed unconnected blog; use the same existing account adapter boundary.
+                        self.server.owner_oauth = OwnerOAuth(self.server.oauth_folder, blog)
+                        self.server.assistant.bridge.adapters["tumblr"] = TumblrReadAdapter(
+                            blog, self.server.owner_oauth.store.access,
+                            token_provider=self.server.owner_oauth.refresh_if_needed)
+            except (ValueError, OSError, TypeError, UnicodeError, json.JSONDecodeError):
+                self._json(400, {"error": "oauth_blog_setup_failed"})
+                return
+            self._json(200, {"configured": True, "blog": blog})
+            return
         if parts.path == "/oauth/start":
             if not _authorized(self):
                 self._unauthorized()
@@ -593,12 +623,15 @@ class AppServer:
         if assistant is not None:
             self.assistant = assistant
         else:
+            self.oauth_folder = Path.home() / ".config" / "tgtumbler" / "tumblr-oauth"
             owner_blog = os.environ.get("TUMBLR_OWNER_BLOG", "").strip()
+            if not owner_blog and self.oauth_folder.is_dir():
+                try:
+                    owner_blog = load_owner_blog(self.oauth_folder) or ""
+                except (ValueError, OSError):
+                    owner_blog = ""
             if owner_blog:
-                self.owner_oauth = OwnerOAuth(
-                    Path.home() / ".config" / "tgtumbler" / "tumblr-oauth",
-                    owner_blog,
-                )
+                self.owner_oauth = OwnerOAuth(self.oauth_folder, owner_blog)
                 tumblr_reader = TumblrReadAdapter(
                     owner_blog, self.owner_oauth.store.access,
                     token_provider=self.owner_oauth.refresh_if_needed,
@@ -622,6 +655,8 @@ class AppServer:
         self.httpd.login_csrf_lock = threading.Lock()
         self.httpd.assistant = self.assistant
         self.httpd.owner_oauth = self.owner_oauth
+        self.httpd.oauth_folder = getattr(self, 'oauth_folder', Path.home() / '.config' / 'tgtumbler' / 'tumblr-oauth')
+        self.httpd.account_lock = threading.Lock()
         self.httpd.draft_store = DraftStore(self.release.resolve().parent.parent / "data" / "drafts.sqlite3")
         self.httpd.attachment_store = AttachmentStore(self.release.resolve().parent.parent / "data")
         if self.ticket:
