@@ -123,6 +123,7 @@ class DiscoveryEngineTests(unittest.TestCase):
             db.execute("INSERT INTO discovery_posts VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(
                 "legacy:7","legacy","7","tag:old","https://legacy.tumblr.com/post/7","old","text",
                 "2026-11-10","","body","[]",0,"visible",1,1))
+        os.chmod(dbpath,0o600)
         store=DiscoveryStore(dbpath)
         rows=store.read_candidates()
         self.assertEqual(len(rows),1)
