@@ -95,17 +95,18 @@ def media_thumbnail(post):
 
 
 class TumblrReadAdapter:
-    def __init__(self, owner_blog, token_file, transport=None):
+    def __init__(self, owner_blog, token_file, transport=None, token_provider=None):
         self.blog = normalize_blog(owner_blog)
         self.token_file = token_file
         self.transport = transport or OfficialTransport()
+        self.token_provider = token_provider
 
     def perform(self, action, target, payload):
         if action != "tumblr.list_posts":
             raise ValueError("read_action_not_connected")
         if normalize_blog(target) != self.blog:
             raise ValueError("non_owner_blog")
-        bearer = token_from_file(self.token_file)
+        bearer = self.token_provider() if self.token_provider else token_from_file(self.token_file)
         identity = self.transport.get("/v2/user/info", bearer)
         user = identity.get("response", {}).get("user") if isinstance(identity, dict) else None
         blogs = user.get("blogs") if isinstance(user, dict) else None
