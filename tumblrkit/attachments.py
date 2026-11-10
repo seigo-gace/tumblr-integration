@@ -105,6 +105,15 @@ class AttachmentStore:
         return {"id": ident, "name": name, "media_type": media_type,
                 "size": size, "data": path.read_bytes()}
 
+    def delete(self, ident):
+        if not isinstance(ident, str) or ID_RE.fullmatch(ident) is None:
+            raise AttachmentError("INVALID_ATTACHMENT_ID")
+        with self._connect() as db:
+            deleted = db.execute("DELETE FROM chat_attachments WHERE id=?", (ident,)).rowcount
+        if deleted:
+            (self.root / ident).unlink(missing_ok=True)
+        return bool(deleted)
+
     def describe(self, ids):
         if not isinstance(ids, list) or len(ids) > 5 or len(set(ids)) != len(ids):
             raise AttachmentError("INVALID_ATTACHMENT_IDS")
