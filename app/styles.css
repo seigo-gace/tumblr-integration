@@ -113,3 +113,24 @@ button[type=submit]:disabled{opacity:.55;cursor:wait}
 
 .discovery-next{margin:8px 0 0;padding:6px 12px;border:1px solid var(--border);border-radius:8px;color:var(--text);background:var(--soft);font-size:12px}
 .discovery-next:disabled{opacity:.5}
+
+/* Small, scrollable Library panel within the existing assistant thread. */
+#show-library{margin-left:auto;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--sub);padding:5px 9px;font-size:12px}
+#show-library:hover{background:#292929;color:var(--text)}
+#tumblr-connect{margin-left:0}
+.library-panel{margin:12px 0;max-width:100%;box-sizing:border-box}
+.library-controls{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:7px 0}
+.library-controls button,.library-controls select{font:inherit;font-size:12px;border:1px solid var(--border);border-radius:7px;padding:5px 8px;background:transparent;color:var(--text)}
+.library-controls button:disabled{opacity:.45}
+.library-controls a{font-size:12px;color:var(--text)}
+.library-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:8px;margin-top:8px}
+.library-card{display:flex;flex-direction:column;gap:6px;padding:10px;border:1px solid var(--border);border-radius:9px;min-width:0}
+.library-card strong{font-size:13px;overflow-wrap:anywhere}
+.library-card small{color:var(--sub)}
+.library-thumb{max-width:100%;width:100%;height:130px;object-fit:contain;border-radius:7px}
+.library-viewer{margin:10px 0;padding:10px;border:1px solid var(--border);border-radius:10px}
+.library-viewer h3{font-size:14px}
+.library-viewer-media{display:flex;justify-content:center;min-height:80px;align-items:center}
+.library-viewer-media img{max-width:100%;max-height:65vh;object-fit:contain}
+.library-viewer-tools{display:flex;gap:8px;align-items:center;justify-content:center}
+.library-viewer-tools button{background:transparent;color:var(--text);border:1px solid var(--border);border-radius:7px;padding:6px 10px}
