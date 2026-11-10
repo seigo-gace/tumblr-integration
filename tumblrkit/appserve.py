@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 from tumblrkit.assistant import Assistant
+from tumblrkit.drafts import DraftStore
 
 COMMIT_MARK = "__TUMBLR_COMMIT__"
 COMMIT_RE = re.compile(r"[0-9a-f]{7,40}\Z")
@@ -270,6 +271,15 @@ class _Handler(BaseHTTPRequestHandler):
         if parts.query or parts.fragment:
             self._send(400, "bad request\n", "text/plain; charset=utf-8")
             return
+        if parts.path == "/drafts":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            try:
+                self._json(200, {"drafts": self.server.draft_store.list()})
+            except (OSError, ValueError):
+                self._json(503, {"error": "draft_store_unavailable"})
+            return
         if parts.path in ("/healthz", "/version"):
             self._json(200, release_status(self.server.release))
             return
@@ -294,6 +304,27 @@ class _Handler(BaseHTTPRequestHandler):
         parts = urlsplit(self.path)
         if parts.query:
             self._send(400, "bad request\n", "text/plain; charset=utf-8")
+            return
+        if parts.path == "/drafts":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            bearer_ok = self.headers.get("Authorization", "").startswith("Bearer ") and _authorized(self)
+            if not _same_origin(self) and not bearer_ok:
+                self._send(403, "origin rejected\n", "text/plain; charset=utf-8")
+                return
+            try:
+                data = json.loads(self._read_body().decode("utf-8"))
+                if not isinstance(data, dict) or set(data) != {"text"}:
+                    raise ValueError("payload")
+                record = self.server.draft_store.save(data["text"])
+            except (ValueError, TypeError, UnicodeError, json.JSONDecodeError):
+                self._json(400, {"error": "invalid_draft"})
+                return
+            except OSError:
+                self._json(503, {"error": "draft_store_unavailable"})
+                return
+            self._json(201, record)
             return
         if parts.path == "/assistant":
             if not _authorized(self):
@@ -329,6 +360,31 @@ class _Handler(BaseHTTPRequestHandler):
                        extra=(("Location", "/"), ("Set-Cookie", cookie)))
         else:
             self._send(204, b"", "text/plain; charset=utf-8", extra=(("Set-Cookie", cookie),))
+
+    def do_DELETE(self):
+        if not _client_is_loopback(self):
+            self._send(403, "forbidden\n", "text/plain; charset=utf-8")
+            return
+        if not _authorized(self):
+            self._unauthorized()
+            return
+        bearer_ok = self.headers.get("Authorization", "").startswith("Bearer ") and _authorized(self)
+        if not _same_origin(self) and not bearer_ok:
+            self._send(403, "origin rejected\n", "text/plain; charset=utf-8")
+            return
+        parts = urlsplit(self.path)
+        if parts.query or not parts.path.startswith("/drafts/"):
+            self._send(404, "not found\n", "text/plain; charset=utf-8")
+            return
+        try:
+            deleted = self.server.draft_store.delete(parts.path[len("/drafts/"):])
+        except ValueError:
+            self._json(400, {"error": "invalid_draft"})
+            return
+        except OSError:
+            self._json(503, {"error": "draft_store_unavailable"})
+            return
+        self._json(200, {"deleted": deleted})
 
     def _assistant(self):
         if not _authorized(self):
@@ -374,6 +430,7 @@ class AppServer:
         self.httpd.sessions = {}
         self.httpd.session_lock = threading.Lock()
         self.httpd.assistant = self.assistant
+        self.httpd.draft_store = DraftStore(self.release.resolve().parent.parent / "data" / "drafts.sqlite3")
         if self.ticket:
             ticket = secrets.token_urlsafe(24)
             self.httpd.tickets.add(ticket)
