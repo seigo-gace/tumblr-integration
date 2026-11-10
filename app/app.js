@@ -197,14 +197,10 @@
     prev.addEventListener("click",function(){libraryOffset=Math.max(0,libraryOffset-50);librarySelection.clear();showLibrary();});
     next.addEventListener("click",function(){libraryOffset+=50;librarySelection.clear();showLibrary();});
     pager.append(prev,next);
-    if(data.last_position&&typeof data.last_position.candidate_id==="string"){
+    if(data.resume_item&&typeof data.resume_item.candidate_id==="string"){
       const resume=document.createElement("button");resume.type="button";resume.textContent="前回の続き";
-      resume.addEventListener("click",async function(){
-        try{
-          const result=await libraryRequest("/library?filter=all&offset=0&limit=100");
-          const found=result.items.find(function(item){return item.candidate_id===data.last_position.candidate_id;});
-          if(found){await libraryView(found,data.last_position.media_index);}else display("前回の投稿がこの一覧にありません。","system");
-        }catch(error){display("前回位置を確認できませんでした。","system");}
+      resume.addEventListener("click",function(){
+        libraryView(data.resume_item,data.resume_item.last_media_index);
       });pager.appendChild(resume);
     }
     section.append(heading,controls,bulk,cards,pager);
