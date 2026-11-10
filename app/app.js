@@ -137,6 +137,55 @@
     messages.appendChild(item);
     messages.scrollTop=messages.scrollHeight;
   }
+  // Render only the bounded, server-defined contract. No model HTML is interpreted.
+  function renderView(view){
+    if(!view||view.kind!=="records"||view.status!=="connected"||
+       !Array.isArray(view.columns)||!Array.isArray(view.rows))return;
+    const allowed=new Set(["title","type","date","url","label","value","period","name","status"]);
+    const columns=view.columns.filter(function(key){return typeof key==="string"&&allowed.has(key);}).slice(0,6);
+    if(!columns.length)return;
+    const labels={title:"タイトル",type:"種類",date:"日付",url:"リンク",label:"項目",value:"値",period:"期間",name:"名前",status:"状態"};
+    const section=document.createElement("section");
+    section.className="result-view";
+    const heading=document.createElement("h3");
+    heading.textContent=String(view.title||"取得結果").slice(0,100);
+    section.appendChild(heading);
+    const rows=view.rows.slice(0,100).filter(function(item){return item&&typeof item==="object"&&!Array.isArray(item);});
+    if(!rows.length){
+      const empty=document.createElement("p");
+      empty.textContent="取得できた表示項目はありません。";
+      section.appendChild(empty);
+    }else{
+      const scroll=document.createElement("div");scroll.className="result-scroll";
+      const table=document.createElement("table");table.className="result-table";
+      const head=document.createElement("thead"),header=document.createElement("tr");
+      columns.forEach(function(key){const th=document.createElement("th");th.textContent=labels[key];header.appendChild(th);});
+      head.appendChild(header);table.appendChild(head);
+      const body=document.createElement("tbody");
+      rows.forEach(function(record){
+        const tr=document.createElement("tr");
+        columns.forEach(function(key){
+          const td=document.createElement("td"),value=String(record[key]??"").slice(0,500);
+          if(key==="url"&&/^https:\/\/[^\s/@]+(?:\:[0-9]+)?(?:[/?#]|$)/i.test(value)){
+            try{
+              const url=new URL(value);
+              if(url.protocol!=="https:"||url.username||url.password)throw new Error("bad_url");
+              const link=document.createElement("a");link.href=url.href;link.target="_blank";link.rel="noopener noreferrer";link.textContent="開く";
+              td.appendChild(link);
+            }catch(error){td.textContent="リンク無効";}
+          }else{td.textContent=value||"—";}
+          tr.appendChild(td);
+        });
+        body.appendChild(tr);
+      });
+      table.appendChild(body);scroll.appendChild(table);section.appendChild(scroll);
+    }
+    if(view.truncated){
+      const note=document.createElement("p");note.textContent="先頭100件を表示しています。";section.appendChild(note);
+    }
+    messages.appendChild(section);
+    messages.scrollTop=messages.scrollHeight;
+  }
   function showAssist(turn){
     const open=Boolean(turn&&turn.recovery);
     assist.hidden=!open;
@@ -144,6 +193,7 @@
   }
   function apply(turn){
     display(turn.text||"応答を表示できません。実行していません。","system");
+    renderView(turn.view);
     connection.textContent=turn.executed?"外部操作：結果を確認":"外部接続：未実行";
     pending=turn.request_id||null;
     showAssist(turn);
