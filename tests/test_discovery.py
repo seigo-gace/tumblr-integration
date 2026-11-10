@@ -49,10 +49,12 @@ class DiscoveryTests(unittest.TestCase):
     def test_invalid_tag_does_not_call_network(self):
         stub=TaggedStub()
         adapter=TumblrReadAdapter("myblog",self.token,transport=stub)
-        for tag in ("","../secret","x"*65,"test\nnext","hello?hack=1"):
+        for tag in ("../secret","x"*65,"test\nnext","hello?hack=1"):
             result=Bridge({"tumblr":adapter}).dispatch(ActionRequest(
                 "bad-"+str(len(tag))+"-"+tag[:3],"tumblr.discover",tag))
             self.assertEqual(result.state,"failed")
+        with self.assertRaises(ValueError):
+            Bridge({"tumblr":adapter}).dispatch(ActionRequest("bad-empty","tumblr.discover",""))
         self.assertEqual(stub.calls,[])
 
     def test_non_verified_response_fails_closed(self):
