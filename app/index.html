@@ -8,6 +8,7 @@
 <div class="workspace-heading"><h2 id="selected-title">Assistant</h2><p id="selected-description">分野のボタンを選ばなくても送信できます。投稿・削除・公開設定は確認の前に実行しません。</p></div>
 <div id="messages" class="messages" role="log" aria-live="polite"><div class="message system">何をしたいかを書いてください。未接続の操作は実行したことにしません。</div></div>
 <form id="chat-form"><label for="instruction">やりたいこと</label><div class="composer"><textarea id="instruction" rows="2" placeholder="例：募集用ブログの下書きを確認したい" required maxlength="2000"></textarea><button id="send" type="submit">送信</button></div></form>
+<section class="draft-workspace" aria-label="下書き管理"><div class="draft-header"><h2>下書き</h2><div class="draft-actions"><button id="save-draft" type="button">入力を保存</button><button id="show-drafts" type="button">保存一覧を表示</button></div></div><p class="draft-info">このアプリ内にのみ保存します。外部AI・Tumblrには送信しません。</p><div id="draft-list" class="draft-list" aria-live="polite"></div></section>
 <div id="assist" class="assist" hidden><span>補助・復旧</span><button type="button" id="retry">再試行</button><button type="button" id="draft">下書きを残す</button><button type="button" id="abort">中断</button><button type="button" id="confirm" hidden>この内容で実行する</button></div>
 <div class="footnote">ボタンは障害・迷い・中断のための補助です。AI・Tumblr OAuth・公開APIは接続と確認が済むまで外部へ送りません。</div>
 </section></main><script src="./app.js" defer></script></body></html>
