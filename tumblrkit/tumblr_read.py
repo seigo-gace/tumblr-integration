@@ -12,7 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-BLOG = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}(?:\\.tumblr\\.com)?$", re.I)
+BLOG = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}(?:\.tumblr\.com)?$", re.I)
 API = "https://api.tumblr.com"
 MAX_REPLY = 1024 * 1024
 
@@ -117,6 +117,7 @@ def adapter_from_env(env=None):
     if not owner or not token_file:
         return None
     try:
+        token_from_file(token_file)
         return TumblrReadAdapter(owner, token_file)
-    except ValueError:
+    except (ValueError, OSError):
         return None
