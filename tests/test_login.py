@@ -48,6 +48,46 @@ class LoginTests(unittest.TestCase):
         status, _, _ = request(self.server.port, "GET", "/healthz?unexpected=1")
         self.assertEqual(status, 400)
 
+    def test_login_csrf_allows_proxy_rewritten_origin_without_trusting_fake_forms(self):
+        from html.parser import HTMLParser
+
+        class HiddenField(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.nonce = None
+
+            def handle_starttag(self, tag, attrs):
+                fields = dict(attrs)
+                if tag == "input" and fields.get("name") == "csrf":
+                    self.nonce = fields.get("value")
+
+        status, page, _ = request(self.server.port, "GET", "/login")
+        self.assertEqual(status, 200)
+        parser = HiddenField()
+        parser.feed(page.decode("utf-8"))
+        self.assertTrue(parser.nonce)
+        from urllib.parse import urlencode
+        body = urlencode({"token": TOKEN, "csrf": parser.nonce}).encode()
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "text/html",
+            "Origin": "https://proxy-rewrites.example.invalid",
+            "Sec-Fetch-Site": "cross-site",
+        }
+        status, _, response = request(self.server.port, "POST", "/session", body, headers)
+        self.assertEqual(status, 303)
+        self.assertIn("Set-Cookie", response)
+        status, _, _ = request(self.server.port, "POST", "/session", body, headers)
+        self.assertEqual(status, 403)
+
+    def test_wrong_password_shows_form_not_plain_unauthorized(self):
+        status, content, _ = request(self.server.port, "POST", "/session",
+            b"token=wrong", {"Content-Type":"application/x-www-form-urlencoded",
+                            "Accept":"text/html"})
+        self.assertEqual(status, 401)
+        self.assertIn(b'action="/session"', content)
+        self.assertIn('ログインキーが一致しません'.encode(), content)
+
     def test_login_creates_distinct_opaque_session_not_master_token(self):
         headers = {"Content-Type": "application/x-www-form-urlencoded", "Accept": "text/html"}
         body = b"token=" + TOKEN.encode()
