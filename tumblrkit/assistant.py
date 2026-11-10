@@ -53,6 +53,65 @@ def match_index(text):
     return found
 
 
+
+class DurableFreeQuota:
+    """Fail-closed, cross-restart reservation before any live provider request.
+
+    Counts attempted requests, including failures. One SQLite file must be shared
+    by every running copy of this operation app on the same host.
+    """
+
+    DAILY_PER_PROVIDER = 5
+    DAILY_TOTAL = 10
+    COOLDOWN_SECONDS = 60
+
+    def __init__(self, env):
+        self.enabled = env.get("TUMBLR_AI_LIVE_ENABLED") == "1"
+        self.path = env.get("TUMBLR_AI_QUOTA_DB", "").strip()
+
+    def reserve(self, provider):
+        if not self.enabled or not self.path:
+            raise ProviderError("ai_disabled")
+        import sqlite3
+        import time
+
+        now = int(time.time())
+        day = now // 86400
+        try:
+            with sqlite3.connect(self.path, timeout=3, isolation_level=None) as db:
+                db.execute("PRAGMA busy_timeout=3000")
+                db.execute("BEGIN IMMEDIATE")
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS ai_request_budget "
+                    "(day INTEGER NOT NULL, provider TEXT NOT NULL, count INTEGER NOT NULL, "
+                    "last_attempt INTEGER NOT NULL, PRIMARY KEY(day, provider))"
+                )
+                rows = dict(db.execute(
+                    "SELECT provider, count FROM ai_request_budget WHERE day=?",
+                    (day,)
+                ).fetchall())
+                recent = db.execute(
+                    "SELECT MAX(last_attempt) FROM ai_request_budget WHERE day=?",
+                    (day,)
+                ).fetchone()[0]
+                if sum(rows.values()) >= self.DAILY_TOTAL or rows.get(provider, 0) >= self.DAILY_PER_PROVIDER:
+                    db.execute("ROLLBACK")
+                    raise ProviderError("quota_exhausted")
+                if recent is not None and now - recent < self.COOLDOWN_SECONDS:
+                    db.execute("ROLLBACK")
+                    raise ProviderError("quota_cooldown")
+                db.execute(
+                    "INSERT INTO ai_request_budget(day,provider,count,last_attempt) "
+                    "VALUES(?,?,1,?) ON CONFLICT(day,provider) DO UPDATE SET "
+                    "count=count+1,last_attempt=excluded.last_attempt",
+                    (day, provider, now),
+                )
+                db.execute("COMMIT")
+        except ProviderError:
+            raise
+        except (OSError, sqlite3.Error):
+            raise ProviderError("quota_unavailable") from None
+
 class ScriptedProvider:
     def __init__(self, name, payload=None, error=None, paid=True):
         self.name = name
@@ -69,15 +128,18 @@ class ScriptedProvider:
 
 
 class HttpProvider:
-    def __init__(self, name, url, headers, paid, transport, model=None):
+    def __init__(self, name, url, headers, paid, transport, model=None, quota=None):
         self.name = name
         self.url = url
         self.headers = headers
         self.paid = paid
         self.transport = transport
         self.model = model
+        self.quota = quota
 
     def complete(self, prompt):
+        if self.quota is not None:
+            self.quota.reserve(self.name)
         status, payload = self.transport.post(self.url, self.headers, json.dumps(self._body(prompt)).encode("utf-8"))
         if status == 429:
             raise ProviderError("rate_limited")
@@ -101,6 +163,7 @@ class HttpProvider:
 
 
 def providers_from_env(env, transport=None):
+    quota = DurableFreeQuota(env) if transport is None else None
     transport = transport or UrllibTransport()
     chosen = []
     if env.get("TUMBLR_GEMINI_API_KEY"):
@@ -110,6 +173,7 @@ def providers_from_env(env, transport=None):
             {"x-goog-api-key": env["TUMBLR_GEMINI_API_KEY"]},
             True,
             transport,
+            quota=quota,
         ))
     if env.get("TUMBLR_GROQ_API_KEY"):
         chosen.append(HttpProvider(
@@ -130,6 +194,7 @@ def providers_from_env(env, transport=None):
             False,
             transport,
             model=model,
+            quota=quota,
         ))
     return chosen
 
@@ -240,7 +305,7 @@ class Assistant:
             plan = primary.complete(prompt)
             return plan, primary.name
         except ProviderError as exc:
-            if fallback is None:
+            if fallback is None or exc.code in ("rate_limited", "free_tier_exhausted", "ai_disabled", "quota_exhausted", "quota_cooldown", "quota_unavailable"):
                 raise
             try:
                 plan = fallback.complete(prompt)
@@ -288,6 +353,10 @@ class Assistant:
         return self._pack(result.state, "操作は完了していません。実行していません。", False, action=result.action, provider=provider, recovery=True)
 
     def _failure_text(self, code):
+        if code in ("ai_disabled", "quota_unavailable"):
+            return "AIの本番利用は無効です。無料枠の保護設定を確認してください。外部へ送信していません。"
+        if code in ("quota_exhausted", "quota_cooldown"):
+            return "無料枠保護のため、追加のAI呼出を停止しました。外部へ送信していません。"
         if code == "invalid_response":
             return "AIの応答形式を安全に解釈できませんでした。実行していません。"
         if code == "network_unavailable":
