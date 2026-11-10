@@ -6,7 +6,7 @@ from pathlib import Path
 
 from tumblrkit.assistant import Assistant
 from tumblrkit.bridge import Bridge
-from tumblrkit.tumblr_read import TumblrReadAdapter, adapter_from_env, normalize_blog
+from tumblrkit.tumblr_read import TumblrReadAdapter, adapter_from_env, normalize_blog, media_thumbnail
 
 
 class StubTransport:
@@ -25,7 +25,8 @@ class StubTransport:
             "posts": [
                 {"summary": "動画のタイトル", "type": "video",
                  "date": "2026-11-11 00:00:00 GMT",
-                 "post_url": "https://myblog.tumblr.com/post/123"}
+                 "post_url": "https://myblog.tumblr.com/post/123",
+                 "content": [{"type": "video", "poster": [{"url": "https://64.media.tumblr.com/thumb.jpg"}]}]}
             ],
         }}
 
@@ -47,6 +48,8 @@ class TumblrReadTests(unittest.TestCase):
         self.assertTrue(result["executed"])
         self.assertEqual("動画のタイトル", result["view"]["rows"][0]["title"])
         self.assertEqual("https://myblog.tumblr.com/post/123", result["view"]["rows"][0]["url"])
+        self.assertEqual("video", result["view"]["rows"][0]["type"])
+        self.assertEqual("https://64.media.tumblr.com/thumb.jpg", result["view"]["rows"][0]["thumbnail_url"])
         self.assertEqual(2, len(transport.calls))
         self.assertEqual("/v2/user/info", transport.calls[0])
 
@@ -76,6 +79,11 @@ class TumblrReadTests(unittest.TestCase):
             "TUMBLR_OWNER_BLOG": "myblog",
             "TUMBLR_OAUTH_ACCESS_TOKEN_FILE": str(self.token),
         }))
+
+    def test_external_image_previews_are_rejected(self):
+        self.assertEqual(("", ""), media_thumbnail({"content": [
+            {"type": "image", "media": [{"url": "https://malicious.invalid/a.jpg"}]}
+        ]}))
 
     def test_invalid_blog_identifiers_rejected(self):
         for bad in ("https://example.com", "other.example.com", "../../etc", "abc/def"):
