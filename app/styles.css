@@ -110,3 +110,6 @@ button[type=submit]:disabled{opacity:.55;cursor:wait}
 .discovery-exclude{margin-left:7px;border:1px solid var(--border);background:transparent;color:var(--sub);border-radius:7px;padding:3px 7px;font-size:11px}
 .discovery-exclude:hover{background:#303030;color:var(--text)}
 .discovery-exclude:disabled{opacity:.5}
+
+.discovery-next{margin:8px 0 0;padding:6px 12px;border:1px solid var(--border);border-radius:8px;color:var(--text);background:var(--soft);font-size:12px}
+.discovery-next:disabled{opacity:.5}
