@@ -8,6 +8,101 @@
   const connection=document.getElementById("connection");
   const assist=document.getElementById("assist");
   const confirm=document.getElementById("confirm");
+  const attachmentPicker=document.getElementById("attachments");
+  const attachmentList=document.getElementById("attachment-list");
+  const sendButton=document.getElementById("send");
+  const pendingFiles=[];
+  let sending=false;
+  function refreshAttachmentList(){
+    attachmentList.replaceChildren();
+    pendingFiles.forEach(function(file,index){
+      const chip=document.createElement("div");
+      chip.className="attachment-chip";
+      if(file.type.startsWith("image/")){
+        const image=document.createElement("img");
+        const preview=URL.createObjectURL(file);
+        image.src=preview;
+        image.alt="";
+        image.onload=function(){URL.revokeObjectURL(preview);};
+        image.onerror=function(){URL.revokeObjectURL(preview);};
+        chip.appendChild(image);
+      }
+      const title=document.createElement("span");
+      title.textContent=file.name;
+      const remove=document.createElement("button");
+      remove.type="button";
+      remove.textContent="×";
+      remove.setAttribute("aria-label",file.name+"を添付から外す");
+      remove.addEventListener("click",function(){
+        pendingFiles.splice(index,1);
+        refreshAttachmentList();
+      });
+      chip.append(title,remove);
+      attachmentList.appendChild(chip);
+    });
+    instruction.required=selectedGoals.size===0 && pendingFiles.length===0;
+  }
+  attachmentPicker.addEventListener("change",function(){
+    const chosen=Array.from(attachmentPicker.files||[]);
+    for(const file of chosen){
+      if(pendingFiles.length>=5){display("添付は一度に5件までです。","system");break;}
+      if(file.size===0||file.size>8*1024*1024){
+        display(file.name+"：添付できるサイズは1件8MBまでです。","system");
+        continue;
+      }
+      if(file.name.length>120){
+        display("ファイル名が長すぎるため添付できません。","system");
+        continue;
+      }
+      pendingFiles.push(file);
+    }
+    attachmentPicker.value="";
+    refreshAttachmentList();
+  });
+  function fileBase64(file){
+    return new Promise(function(resolve,reject){
+      const reader=new FileReader();
+      reader.onload=function(){
+        const data=String(reader.result||"");
+        if(!data.includes(","))reject(new Error("invalid_file"));
+        else resolve(data.slice(data.indexOf(",")+1));
+      };
+      reader.onerror=function(){reject(new Error("read_failed"));};
+      reader.readAsDataURL(file);
+    });
+  }
+  async function uploadAttachment(file){
+    const encoded=await fileBase64(file);
+    const response=await fetch("/attachments",{
+      method:"POST",
+      credentials:"same-origin",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name:file.name,data:encoded})
+    });
+    if(!response.ok)throw new Error("upload_failed");
+    return response.json();
+  }
+  function displayAttachments(records){
+    if(!records.length)return;
+    const bubble=document.createElement("div");
+    bubble.className="message user attachment-message";
+    for(const record of records){
+      const row=document.createElement("div");
+      row.className="sent-attachment";
+      if(record.media_type.startsWith("image/")){
+        const img=document.createElement("img");
+        img.src="/attachments/"+encodeURIComponent(record.id);
+        img.alt=record.name;
+        row.appendChild(img);
+      }
+      const text=document.createElement("span");
+      text.textContent=record.name;
+      row.appendChild(text);
+      bubble.appendChild(row);
+    }
+    messages.appendChild(bubble);
+    messages.scrollTop=messages.scrollHeight;
+  }
   const goalButtons=Array.from(document.querySelectorAll("#goal-grid .goal"));
   const goalSelection=document.getElementById("goal-selection");
   const clearGoals=document.getElementById("clear-goals");
@@ -21,7 +116,7 @@
     goalSelection.textContent=selectedGoals.size
       ?"選択中："+Array.from(selectedGoals).join("・")
       :"";
-    instruction.required=selectedGoals.size===0;
+    instruction.required=selectedGoals.size===0 && pendingFiles.length===0;
   }
   goalButtons.forEach(function(button){
     button.addEventListener("click",function(){
@@ -67,18 +162,33 @@
       return response.json();
     }).then(apply,fail);
   }
-  form.addEventListener("submit",function(event){
+  form.addEventListener("submit",async function(event){
     event.preventDefault();
+    if(sending)return;
     const text=instruction.value.trim();
     const goals=Array.from(selectedGoals);
-    if(!text&&!goals.length) return;
+    const files=pendingFiles.slice();
+    if(!text&&!goals.length&&!files.length)return;
     const message=goals.length
       ? "目的："+goals.join("・")+"\n"+(text||"この目的でできる操作と必要な確認を案内してください。")
       : text;
-    lastText=message;
-    display(message,"user");
-    instruction.value="";
-    post({message:message});
+    sending=true;
+    sendButton.disabled=true;
+    try{
+      const uploaded=[];
+      for(const file of files)uploaded.push(await uploadAttachment(file));
+      if(message){lastText=message;display(message,"user");}
+      if(uploaded.length)displayAttachments(uploaded);
+      instruction.value="";
+      pendingFiles.splice(0,pendingFiles.length);
+      refreshAttachmentList();
+      await post({message:message,attachments:uploaded.map(function(item){return item.id;})});
+    }catch(error){
+      display("添付の送信に失敗しました。選択したファイルと入力文は残しています。","system");
+    }finally{
+      sending=false;
+      sendButton.disabled=false;
+    }
   });
   document.getElementById("retry").addEventListener("click",function(){
     if(!lastText) return;
