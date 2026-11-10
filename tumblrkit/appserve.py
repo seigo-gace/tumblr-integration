@@ -23,7 +23,8 @@ from urllib.parse import parse_qs, urlsplit
 
 from tumblrkit.assistant import Assistant
 from tumblrkit.bridge import Bridge
-from tumblrkit.tumblr_read import adapter_from_env
+from tumblrkit.tumblr_read import adapter_from_env, TumblrReadAdapter
+from tumblrkit.account_runtime import OwnerOAuth
 from tumblrkit.drafts import DraftStore
 from tumblrkit.attachments import AttachmentStore, AttachmentError, MAX_ATTACHMENT_BYTES, IMAGE_TYPES
 
@@ -320,8 +321,29 @@ class _Handler(BaseHTTPRequestHandler):
         parts = urlsplit(self.path)
         # Browser entry URLs can include harmless query parameters.
         # They must never obscure the login page with a plain-text 400.
-        if parts.query and parts.path not in ("/", "/index.html", "/login"):
+        if parts.query and parts.path not in ("/", "/index.html", "/login", "/oauth/callback"):
             self._send(400, "bad request\n", "text/plain; charset=utf-8")
+            return
+        if parts.path == "/oauth/callback":
+            if self.server.owner_oauth is None:
+                self._send(503, "Tumblr連携は未設定です。", "text/plain; charset=utf-8")
+                return
+            try:
+                self.server.owner_oauth.callback(parts.query)
+            except (ValueError, PermissionError, OSError, TypeError):
+                self._send(400, "Tumblr認可に失敗しました。再ログイン後に連携をやり直してください。", "text/plain; charset=utf-8")
+                return
+            self._send(200, '<!doctype html><html lang="ja"><meta charset="utf-8"><title>Tumblr連携</title><p>Tumblrの本人確認が完了しました。</p><a href="/">操作画面に戻る</a></html>', "text/html; charset=utf-8")
+            return
+        if parts.path == "/oauth/status":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            try:
+                result = self.server.owner_oauth.status() if self.server.owner_oauth else {"connected": False, "configured": False}
+            except (ValueError, OSError, TypeError):
+                result = {"connected": False}
+            self._json(200, result)
             return
         if parts.path.startswith("/attachments/"):
             if not _authorized(self):
@@ -376,6 +398,24 @@ class _Handler(BaseHTTPRequestHandler):
         parts = urlsplit(self.path)
         if parts.query:
             self._send(400, "bad request\n", "text/plain; charset=utf-8")
+            return
+        if parts.path == "/oauth/start":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            bearer_ok = self.headers.get("Authorization", "").startswith("Bearer ") and _authorized(self)
+            if (self.headers.get("Origin") and not _same_origin(self)) or (not self.headers.get("Origin") and not bearer_ok):
+                self._send(403, "origin rejected\n", "text/plain; charset=utf-8")
+                return
+            if self.server.owner_oauth is None:
+                self._json(503, {"error": "oauth_not_configured"})
+                return
+            try:
+                url = self.server.owner_oauth.start()
+            except (ValueError, OSError):
+                self._json(503, {"error": "oauth_setup_unavailable"})
+                return
+            self._json(200, {"authorize_url": url})
             return
         if parts.path == "/attachments":
             if not _authorized(self):
@@ -549,10 +589,22 @@ class AppServer:
         self.host = loopback_host(host)
         self.port = port
         self.ticket = ticket
+        self.owner_oauth = None
         if assistant is not None:
             self.assistant = assistant
         else:
-            tumblr_reader = adapter_from_env()
+            owner_blog = os.environ.get("TUMBLR_OWNER_BLOG", "").strip()
+            if owner_blog:
+                self.owner_oauth = OwnerOAuth(
+                    Path.home() / ".config" / "tgtumbler" / "tumblr-oauth",
+                    owner_blog,
+                )
+                tumblr_reader = TumblrReadAdapter(
+                    owner_blog, self.owner_oauth.store.access,
+                    token_provider=self.owner_oauth.refresh_if_needed,
+                )
+            else:
+                tumblr_reader = adapter_from_env()
             self.assistant = Assistant(bridge=Bridge({"tumblr": tumblr_reader} if tumblr_reader else {}))
         self.ticket_path = None
         self.httpd = None
@@ -569,6 +621,7 @@ class AppServer:
         self.httpd.login_csrf = {}
         self.httpd.login_csrf_lock = threading.Lock()
         self.httpd.assistant = self.assistant
+        self.httpd.owner_oauth = self.owner_oauth
         self.httpd.draft_store = DraftStore(self.release.resolve().parent.parent / "data" / "drafts.sqlite3")
         self.httpd.attachment_store = AttachmentStore(self.release.resolve().parent.parent / "data")
         if self.ticket:
