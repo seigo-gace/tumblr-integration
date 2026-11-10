@@ -7,11 +7,20 @@ import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "tumblr_release.py"
+OWNER_SETUP_SCRIPT = SCRIPT.with_name("tumblr_owner_setup.py")
 
 
 class ReleaseScriptContract(unittest.TestCase):
     def test_script_compiles_without_running(self):
         compile(SCRIPT.read_text(encoding="utf-8"), str(SCRIPT), "exec")
+        compile(OWNER_SETUP_SCRIPT.read_text(encoding="utf-8"), str(OWNER_SETUP_SCRIPT), "exec")
+
+    def test_owner_key_setup_local_and_private(self):
+        text = OWNER_SETUP_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("getpass.getpass(", text)
+        self.assertIn("0o600", text)
+        self.assertIn("tumblr-app-access-token", text)
+        self.assertNotIn("print(value", text)
 
     def test_only_owned_app_and_local_loopback(self):
         text = SCRIPT.read_text(encoding="utf-8")
