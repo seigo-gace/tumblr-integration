@@ -100,3 +100,5 @@ button[type=submit]:disabled{opacity:.55;cursor:wait}
 .result-bar-row>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .result-bar-track{height:11px;background:#343434;border-radius:4px;overflow:hidden}
 .result-bar-fill{height:100%;background:#9bbeda;border-radius:4px}
+
+.result-thumbnail{display:block;width:58px;height:58px;object-fit:cover;border-radius:7px;background:#303030}
