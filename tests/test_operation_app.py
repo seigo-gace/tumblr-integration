@@ -40,6 +40,13 @@ class OperationAppTests(unittest.TestCase):
         self.assertIn('instruction.required=selectedGoals.size===0',self.js)
         self.assertIn('const message=goals.length',self.js)
         self.assertIn('.goal[aria-pressed="true"]',self.css)
+        self.assertLess(self.html.index('id="messages"'),self.html.index('id="goal-grid"'))
+        self.assertLess(self.html.index('id="chat-form"'),self.html.index('id="goal-grid"'))
+        self.assertLess(self.html.index('id="draft-list"'),self.html.index('id="goal-grid"'))
+        self.assertIn('grid-template-columns:repeat(3,minmax(0,1fr))',self.css)
+        self.assertNotIn('min-height:81px',self.css)
+        self.assertNotIn('フォロー・タグ・公開候補を確認',self.html)
+        self.assertEqual(self.html.count('class="goal"'),6)
 
     def test_mobile_layout(self):
         self.assertIn("@media(max-width:760px)",self.css)
