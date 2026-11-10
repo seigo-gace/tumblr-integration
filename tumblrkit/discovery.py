@@ -182,11 +182,11 @@ class DiscoveryEngine:
     def _result(self,source,mode,checkpoint,from_cache=False):
         if mode in ("following","followers"):
             entries=self.store.read_blogs(source,limit=100)
-            rows=[{"title":entry["name"],"type":"blog","date":"",
+            rows=[{"blog":entry["name"],"title":entry["name"],"type":"blog","date":"",
                    "thumbnail_url":"","url":entry["url"]} for entry in entries]
         else:
             posts=self.store.read_candidates(source,limit=100)
-            rows=[{"title":p["title"],"type":p["type"],"date":p["date"],
+            rows=[{"blog":p["blog"],"candidate_id":p["candidate_id"],"title":p["title"],"type":p["type"],"date":p["date"],
                    "thumbnail_url":p["thumbnail_url"],"url":p["url"]} for p in posts]
         return {"verified":True,"rows":rows,"total":len(rows),
                 "source":source,"cursor":checkpoint["cursor"],
