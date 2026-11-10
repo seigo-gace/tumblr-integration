@@ -166,3 +166,18 @@ class DiscoveryStore:
         with closing(self._open()) as db:
             db.execute("UPDATE discovery_posts SET state='unavailable' WHERE candidate_id=?",
                        (candidate_id,))
+
+    def excluded_blogs(self):
+        with closing(self._open()) as db:
+            rows=db.execute("SELECT name FROM discovery_blogs WHERE blocked=1").fetchall()
+        return {row[0] for row in rows}
+
+    def read_blogs(self,source=None,limit=100):
+        with closing(self._open()) as db:
+            if source:
+                rows=db.execute("SELECT name,url,source FROM discovery_blogs WHERE source=?"
+                                " AND blocked=0 ORDER BY last_seen DESC LIMIT ?",(source,limit)).fetchall()
+            else:
+                rows=db.execute("SELECT name,url,source FROM discovery_blogs WHERE blocked=0"
+                                " ORDER BY last_seen DESC LIMIT ?",(limit,)).fetchall()
+        return [{"name":name,"url":url,"source":src} for name,url,src in rows]
