@@ -13,3 +13,19 @@
 .draft-item{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--soft);padding:12px;border-radius:12px}
 .draft-item p{white-space:pre-wrap;overflow-wrap:anywhere;max-height:90px;overflow:auto}
 @media(max-width:760px){.draft-item{align-items:stretch;flex-direction:column}.draft-actions button{min-height:40px}}
+
+/* Six canonical purpose shortcuts — optional beside the free-form Assistant. */
+.goals{border-bottom:1px solid var(--border);padding-bottom:18px;margin-bottom:18px}
+.goals-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+.goals-heading h2{margin:0 0 4px}
+.goals-heading p,.goal-selection{font-size:.81rem;color:var(--sub)}
+#clear-goals{border:1px solid var(--border);border-radius:10px;background:transparent;color:var(--text);padding:8px 10px;cursor:pointer;font:inherit;font-size:.82rem;white-space:nowrap}
+.goal-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.goal{font:inherit;display:flex;flex-direction:column;align-items:flex-start;gap:5px;min-height:81px;padding:12px;border-radius:12px;border:1px solid var(--border);background:var(--soft);color:var(--text);text-align:left;cursor:pointer}
+.goal strong{font-size:.95rem}
+.goal span{font-size:.75rem;line-height:1.45;color:var(--sub)}
+.goal:hover,.goal:focus-visible,#clear-goals:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.goal[aria-pressed="true"]{background:#334a80;border-color:var(--accent)}
+.goal-selection{margin-top:10px}
+@media(max-width:760px){.goal-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.goals-heading{flex-direction:column}}
+@media(max-width:380px){.goal-grid{grid-template-columns:1fr}.goal{min-height:58px}}
