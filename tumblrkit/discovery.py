@@ -147,7 +147,7 @@ class DiscoveryEngine:
             count_key="total_blogs" if mode=="following" else "total_users"
             records=payload.get(key)
             count=payload.get(count_key)
-            if not isinstance(records,list):
+            if not isinstance(records,list) or len(records)>SOURCE_LIMIT:
                 raise ValueError("discovery_response_unverified")
             if not isinstance(count,int) or isinstance(count,bool) or count<0:
                 raise ValueError("discovery_response_unverified")
@@ -161,7 +161,7 @@ class DiscoveryEngine:
             self.store.save_page(source,list(unique.values()),[],next_cursor,
                                  complete=complete,watermark=str(count))
         else:
-            if not isinstance(payload,list):
+            if not isinstance(payload,list) or len(payload)>SOURCE_LIMIT:
                 raise ValueError("discovery_response_unverified")
             blocked=self.store.excluded_blogs()
             unique={}
