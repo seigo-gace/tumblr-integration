@@ -105,6 +105,7 @@ class LibraryTests(unittest.TestCase):
             "text_excerpt":"","tags":[],"note_count":0,"media_refs":[
                 {"url":"https://attacker.invalid/p.jpg","type":"image"},
                 {"url":"http://64.media.tumblr.com/p.jpg","type":"image"},
+                {"url":"https://64.media.tumblr.com:bad/p.jpg","type":"image"},
                 {"url":"https://64.media.tumblr.com/p.jpg","type":"image"},
                 {"url":"https://64.media.tumblr.com/x","type":"exe"},
             ],
