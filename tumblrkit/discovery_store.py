@@ -198,3 +198,14 @@ class DiscoveryStore:
                 rows=db.execute("SELECT name,url,source FROM discovery_blogs WHERE blocked=0"
                                 " ORDER BY last_seen DESC LIMIT ?",(limit,)).fetchall()
         return [{"name":name,"url":url,"source":src} for name,url,src in rows]
+
+    def candidate(self,candidate_id):
+        if not isinstance(candidate_id,str) or len(candidate_id)>100:
+            raise ValueError("discovery_candidate_id_invalid")
+        with closing(self._open()) as db:
+            row=db.execute("SELECT candidate_id,blog,post_id,url,title,state "
+                           "FROM discovery_posts WHERE candidate_id=?",
+                           (candidate_id,)).fetchone()
+        if row is None:
+            raise ValueError("discovery_candidate_not_found")
+        return dict(zip(("candidate_id","blog","post_id","url","title","state"),row))
