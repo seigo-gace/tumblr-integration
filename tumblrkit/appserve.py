@@ -15,7 +15,6 @@ import secrets
 import shutil
 import threading
 import time
-import html
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -284,7 +283,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         name = "index.html" if parts.path in ("/", "/index.html") else parts.path[1:]
         if name not in STATIC_NAMES or not _authorized(self):
-            self._unauthorized() if name in STATIC_NAMES or parts.path == "/" else self._send(404, "not found\n", "text/plain; charset=utf-8")
+            self._send(401, LOGIN_PAGE, "text/html; charset=utf-8") if name == "index.html" else (self._unauthorized() if name in STATIC_NAMES else self._send(404, "not found\n", "text/plain; charset=utf-8"))
             return
         self._send(200, (self.server.release / name).read_bytes(), CONTENT_TYPES[name])
 
@@ -293,14 +292,25 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(403, "forbidden\n", "text/plain; charset=utf-8")
             return
         parts = urlsplit(self.path)
+        if parts.query:
+            self._send(400, "bad request\n", "text/plain; charset=utf-8")
+            return
         if parts.path == "/assistant":
-            if not _same_origin(self):
-                self._send(403, "origin rejected\\n", "text/plain; charset=utf-8")
+            bearer_ok = self.headers.get("Authorization", "").startswith("Bearer ") and _authorized(self)
+            if not _same_origin(self) and not bearer_ok:
+                self._send(403, "origin rejected\n", "text/plain; charset=utf-8")
                 return
             self._assistant()
             return
-        if parts.path != "/session" or parts.query:
+        if parts.path != "/session":
             self._send(404, "not found\n", "text/plain; charset=utf-8")
+            return
+        # Reject explicitly cross-origin browser submissions.
+        if self.headers.get("Origin") and not _same_origin(self):
+            self._send(403, "origin rejected\n", "text/plain; charset=utf-8")
+            return
+        if self.headers.get("Sec-Fetch-Site", "") == "cross-site":
+            self._send(403, "origin rejected\n", "text/plain; charset=utf-8")
             return
         try:
             presented = self._presented_token()
@@ -310,9 +320,12 @@ class _Handler(BaseHTTPRequestHandler):
         if not ok:
             self._unauthorized()
             return
-        self._send(204, b"", "text/plain; charset=utf-8", extra=(
-            ("Set-Cookie", f"{COOKIE}={self.server.token}; HttpOnly; SameSite=Strict; Path=/"),
-        ))
+        cookie = self._session_cookie()
+        if "text/html" in self.headers.get("Accept", ""):
+            self._send(303, b"", "text/plain; charset=utf-8",
+                       extra=(("Location", "/"), ("Set-Cookie", cookie)))
+        else:
+            self._send(204, b"", "text/plain; charset=utf-8", extra=(("Set-Cookie", cookie),))
 
     def _assistant(self):
         if not _authorized(self):
