@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
 
 from tumblrkit.bridge import Bridge, ActionRequest
+from tumblrkit.assistant import Assistant
 from tumblrkit.tumblr_read import TumblrReadAdapter, OfficialTransport
 from tumblrkit.api_safety import TumblrReadBudget
 
@@ -45,6 +46,17 @@ class DiscoveryTests(unittest.TestCase):
         query=parse_qs(urlsplit(transport.calls[0]).query)
         self.assertEqual(query["tag"],["日本語 タグ"])
         self.assertEqual(query["limit"],["10"])
+
+    def test_assistant_japanese_search_to_structured_view(self):
+        transport=TaggedStub()
+        assistant=Assistant(bridge=Bridge({"tumblr":TumblrReadAdapter("myblog",self.token,transport=transport)}),providers=[])
+        result=assistant.turn("検索して 対象: 日本語 タグ")
+        self.assertEqual(result["state"],"completed")
+        self.assertTrue(result["executed"])
+        self.assertEqual(result["view"]["action"],"tumblr.discover")
+        self.assertEqual(result["view"]["columns"],["title","type","date","thumbnail_url","url"])
+        self.assertEqual(len(result["view"]["rows"]),1)
+        self.assertEqual(parse_qs(urlsplit(transport.calls[0]).query)["tag"],["日本語 タグ"])
 
     def test_invalid_tag_does_not_call_network(self):
         stub=TaggedStub()
