@@ -4,6 +4,7 @@ No credential reads from /proc, no token logging, no Cloudflare/Telegram changes
 no AI provider requests. This is a direct Gserver owner operation, not CI.
 """
 import argparse
+import base64
 import http.client
 import json
 import os
@@ -72,6 +73,7 @@ def verify(port, sha, token):
     if status != 200 or "drafts" not in json.loads(body):
         raise ReleaseError("DRAFT_STORE_UNAVAILABLE")
     verify_browser_session(port, token)
+    verify_attachments(port, token)
 
 
 def verify_browser_session(port, token):
@@ -120,6 +122,45 @@ def verify_browser_session(port, token):
             conn.close()
         if page_status != 200 or marker not in data:
             raise ReleaseError("OWNER_FORM_STATIC_LAYOUT_REJECTED")
+
+
+def verify_attachments(port, token):
+    """Exercise upload, private view, chat reference and cleanup on both ports."""
+    photo = b"\\x89PNG\\r\\n\\x1a\\n" + b"tiny-staging-probe"
+    # Decode literal escapes for binary PNG signature.
+    photo = bytes.fromhex("89504e470d0a1a0a") + b"tiny-staging-probe"
+    payload = json.dumps({
+        "name": "upload-test.png",
+        "data": base64.b64encode(photo).decode("ascii"),
+    }).encode("utf-8")
+    def call(method, path, body=None):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=4)
+        headers = {"Authorization": "Bearer " + token}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        try:
+            conn.request(method, path, body=body, headers=headers)
+            response = conn.getresponse()
+            return response.status, response.read(1024 * 1024)
+        finally:
+            conn.close()
+    status, body = call("POST", "/attachments", payload)
+    if status != 201:
+        raise ReleaseError("ATTACHMENT_UPLOAD_FAILED")
+    record = json.loads(body)
+    ident = record.get("id", "")
+    try:
+        status, data = call("GET", "/attachments/" + ident)
+        if status != 200 or data != photo:
+            raise ReleaseError("ATTACHMENT_READBACK_FAILED")
+        post_body = json.dumps({"message": "添付の確認", "attachments": [ident]}).encode("utf-8")
+        status, response = call("POST", "/assistant", post_body)
+        if status != 200 or json.loads(response).get("state") != "attachments_received":
+            raise ReleaseError("ATTACHMENT_CHAT_REFERENCE_FAILED")
+    finally:
+        status, body = call("DELETE", "/attachments/" + ident)
+        if status != 200 or not json.loads(body).get("deleted"):
+            raise ReleaseError("ATTACHMENT_CLEANUP_FAILED")
 
 
 def wait_port(port, opened, seconds=12):
