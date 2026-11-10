@@ -34,6 +34,35 @@ def post(url, token, payload):
 
 
 class AssistantTests(unittest.TestCase):
+    def test_verified_results_have_stable_columns_and_bounded_rows(self):
+        class ListAdapter:
+            def perform(self, action, target, payload):
+                return {"verified": True, "rows": [
+                    {"title": "投稿A", "type": "video", "date": "2026-11-11",
+                     "url": "https://example.org/post", "unexpected": "not exposed"}
+                ]}
+        assistant = Assistant(bridge=Bridge({"tumblr": ListAdapter()}), providers=[])
+        result = assistant.turn("投稿一覧を見せて 対象 myblog")
+        self.assertTrue(result["executed"])
+        view = result["view"]
+        self.assertEqual(["title", "type", "date", "url"], view["columns"])
+        self.assertEqual("投稿A", view["rows"][0]["title"])
+        self.assertNotIn("unexpected", view["rows"][0])
+
+    def test_unconnected_action_does_not_return_fabricated_view(self):
+        result = Assistant(providers=[]).turn("投稿一覧を見せて 対象 myblog")
+        self.assertEqual("not_connected", result["state"])
+        self.assertNotIn("view", result)
+
+    def test_rendered_rows_are_bounded_and_only_expected_columns(self):
+        view = Assistant._result_view("analytics.get_summary", {
+            "rows": [{"label": "閲覧", "value": i, "unexpected": "x"} for i in range(150)]
+        })
+        self.assertEqual(100, len(view["rows"]))
+        self.assertEqual(150, view["total"])
+        self.assertTrue(view["truncated"])
+        self.assertEqual(["label", "value", "period", "url"], view["columns"])
+
     def test_chat_does_not_require_a_module_and_does_not_execute(self):
         result = Assistant(providers=[]).turn("募集の状況を分析して 対象 campaign-1")
         self.assertFalse(result["executed"])
