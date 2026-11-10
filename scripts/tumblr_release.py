@@ -7,6 +7,7 @@ import argparse
 import http.client
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import socket
@@ -75,7 +76,13 @@ def verify(port, sha, token):
 
 def verify_browser_session(port, token):
     """Exercise the actual owner form flow, without printing the key or cookie."""
-    body = urlencode({"token": token}).encode("utf-8")
+    login_status, login_body = request(port, "/login")
+    if login_status != 200:
+        raise ReleaseError("OWNER_LOGIN_FORM_NOT_LIVE")
+    nonce = re.search(rb'name="csrf" value="([A-Za-z0-9_-]+)"', login_body)
+    if not nonce:
+        raise ReleaseError("OWNER_LOGIN_CSRF_NOT_LIVE")
+    body = urlencode({"token": token, "csrf": nonce.group(1).decode("ascii")}).encode("utf-8")
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=4)
     try:
         connection.request(
@@ -83,9 +90,11 @@ def verify_browser_session(port, token):
             headers={
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Accept": "text/html",
-                "Origin": "https://tumblr.hentaigay.org",
+                # Deliberately test a rewritten proxy Origin.  The one-time
+                # form nonce, not a spoofable forwarded Host, must permit it.
+                "Origin": "https://reverse-proxy-origin.invalid",
                 "Host": "127.0.0.1:" + str(port),
-                "Sec-Fetch-Site": "same-origin",
+                "Sec-Fetch-Site": "cross-site",
             },
         )
         response = connection.getresponse()
