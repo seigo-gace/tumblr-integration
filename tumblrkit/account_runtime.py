@@ -209,3 +209,27 @@ class OwnerOAuth:
                 raise ValueError("oauth_refresh_invalid")
             self.store.write(AccountTokens(token, "bearer", refresh, lifetime), self.blog)
             return token
+
+def load_owner_blog(directory):
+    store = PrivateTokenStore(directory)
+    store._private_dir()
+    path = store.folder / "owner-blog"
+    if not store._safe_file(path):
+        return None
+    if path.stat().st_size > 256:
+        raise ValueError("oauth_blog_file_invalid")
+    return normalize_blog(path.read_text(encoding="utf-8").strip())
+
+
+def register_owner_blog(directory, blog):
+    store = PrivateTokenStore(directory)
+    store._private_dir()
+    target = store.folder / "owner-blog"
+    selected = normalize_blog(blog)
+    if store.read() is not None:
+        raise ValueError("oauth_account_already_linked")
+    current = load_owner_blog(directory)
+    if current == selected:
+        return selected
+    store._atomic(target, selected + "\n")
+    return selected
