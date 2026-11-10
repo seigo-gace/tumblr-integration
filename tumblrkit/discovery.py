@@ -170,12 +170,24 @@ class DiscoveryEngine:
                 if post: unique[post["candidate_id"]]=post
             timestamps=[]
             for item in payload[:SOURCE_LIMIT]:
-                when=item.get("timestamp") if isinstance(item,dict) else None
-                if isinstance(when,int) and when>0:
-                    timestamps.append(when)
+                if not isinstance(item,dict):
+                    raise ValueError("discovery_page_timestamp_invalid")
+                featured=item.get("featured_timestamp")
+                when=featured if isinstance(featured,int) and not isinstance(featured,bool) and featured>0 else item.get("timestamp")
+                if not isinstance(when,int) or isinstance(when,bool) or when<=0:
+                    raise ValueError("discovery_page_timestamp_invalid")
+                timestamps.append(when)
             before=min(timestamps) if timestamps else 0
+            if len(payload)>=SOURCE_LIMIT:
+                # The 'before' cursor is seconds-based and exclusive.
+                # A full page with a tied oldest timestamp may have unseen
+                # posts in that same second; never claim exhaustive coverage.
+                if timestamps.count(before)>1:
+                    raise ValueError("discovery_pagination_boundary_ambiguous")
+                if offset and before>=offset:
+                    raise ValueError("discovery_pagination_not_advancing")
             advance=bool(timestamps and before<offset) if offset else bool(timestamps)
-            complete=len(payload)<SOURCE_LIMIT or not advance
+            complete=len(payload)<SOURCE_LIMIT
             next_cursor=before if advance else offset
             self.store.save_page(source,
                                  [{"name":p["blog"],"url":"https://"+p["blog"]+".tumblr.com"}
