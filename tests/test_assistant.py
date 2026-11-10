@@ -69,16 +69,16 @@ class AssistantTests(unittest.TestCase):
         self.assertNotIn("owner@example.com", provider.prompts[0])
         self.assertNotIn("abcdefghijklmnop", provider.prompts[0])
 
-    def test_rate_limit_falls_back_once_to_free_provider_only(self):
+    def test_rate_limit_stops_without_consuming_fallback(self):
         paid = ScriptedProvider("groq", error="rate_limited")
         other_paid = ScriptedProvider("gemini", {"action": "analytics.get_summary", "target": "week"})
         free = ScriptedProvider("openrouter", {"action": "analytics.get_summary", "target": "week"}, paid=False)
         result = Assistant(providers=[paid, other_paid, free]).turn("短文")
-        self.assertEqual("not_connected", result["state"])
+        self.assertEqual("rate_limited", result["state"])
         self.assertFalse(result["executed"])
         self.assertEqual(1, len(paid.prompts))
         self.assertEqual([], other_paid.prompts)
-        self.assertEqual(1, len(free.prompts))
+        self.assertEqual(0, len(free.prompts))
 
     def test_paid_openrouter_model_is_rejected(self):
         with self.assertRaises(ProviderError):
