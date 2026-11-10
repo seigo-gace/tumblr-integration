@@ -20,9 +20,13 @@ class OwnerResetTests(unittest.TestCase):
     def test_reset_requires_eight_chars(self):
         with patch("getpass.getpass", side_effect=["newkey88", "newkey88"]):
             self.assertEqual(owner.ask_new_token(), "newkey88")
-        with patch("getpass.getpass", side_effect=["short7", "short7"]):
-            with self.assertRaises(appserve.ServeError):
+        with patch("getpass.getpass", side_effect=["short7", "short7", "short7"]):
+            with self.assertRaises(owner.SetupError):
                 owner.ask_new_token()
+        with patch("getpass.getpass", side_effect=["日本語パスワード!", "日本語パスワード!"]):
+            self.assertEqual(owner.ask_new_token(), "日本語パスワード!")
+        with patch("getpass.getpass", side_effect=["special!?8", "special!?8"]):
+            self.assertEqual(owner.ask_new_token(), "special!?8")
 
     def test_failed_release_preserves_existing_key(self):
         with patch("getpass.getpass", side_effect=["newkey88", "newkey88"]):
@@ -47,7 +51,7 @@ class OwnerResetTests(unittest.TestCase):
         self.assertEqual(len(list(self.folder.iterdir())), 1)
 
     def test_wrong_confirmation_does_not_modify_file(self):
-        with patch("getpass.getpass", side_effect=["newkey88", "different8"]):
+        with patch("getpass.getpass", side_effect=["newkey88", "different8", "newkey88", "different8", "newkey88", "different8"]):
             with self.assertRaises(owner.SetupError):
                 owner.reset_token(self.token_file, self.folder, "a" * 40)
         self.assertEqual(self.token_file.read_text(), "original-key-1234\n")
