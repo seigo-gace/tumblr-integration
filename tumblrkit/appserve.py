@@ -188,8 +188,11 @@ def _same_origin(handler):
     parsed = urlsplit(origin)
     if parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password:
         return False
+    # Browsers control Origin; Tunnel intermediaries may rewrite Host.  The
+    # server already permits only loopback peers, so require the *exact*
+    # public HTTPS Origin rather than comparing it to a forwarded Host.
     if parsed.scheme == "https" and parsed.netloc.lower() == "tumblr.hentaigay.org":
-        return host in ("tumblr.hentaigay.org", "127.0.0.1:8081", "localhost:8081")
+        return True
     # Isolated localhost integration tests and owner-only loopback tooling.
     return (parsed.scheme == "http" and
             parsed.netloc.lower() == host and
