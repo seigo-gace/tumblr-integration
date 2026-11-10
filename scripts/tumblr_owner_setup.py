@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tumblrkit.appserve import require_token
@@ -44,22 +45,59 @@ def setup_token(path):
     return "CREATED_BY_OWNER"
 
 
+def ask_new_token():
+    value = getpass.getpass("新しいログインキー (8文字以上): ")
+    require_token(value)
+    repeat = getpass.getpass("確認のためもう一度入力: ")
+    if not hmac.compare_digest(value, repeat):
+        raise SetupError("LOGIN_KEY_CONFIRMATION_MISMATCH")
+    return value
+
+
+def reset_token(path, root, target_sha):
+    # Keep the old on-disk key until the new server has passed its live checks.
+    if not path.is_file() or path.is_symlink() or path.stat().st_mode & 0o077:
+        raise SetupError("EXISTING_TOKEN_FILE_UNSAFE")
+    value = ask_new_token()
+    fd, name = tempfile.mkstemp(prefix=".tumblr-login-next-", dir=path.parent)
+    pending = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(value + "\n")
+        del value
+        process = subprocess.run(
+            [sys.executable, "-B", str(root / "scripts" / "tumblr_release.py"),
+             "--token-file", str(pending), "--target-sha", target_sha],
+            cwd=root, check=False)
+        if process.returncode:
+            raise SetupError("RELEASE_FAILED_OLD_KEY_FILE_PRESERVED")
+        os.replace(pending, path)
+        print("OWNER_TOKEN=UPDATED", flush=True)
+    finally:
+        if pending.exists():
+            pending.unlink()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--target-sha", required=True)
+    parser.add_argument("--reset-token", action="store_true")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     path = private_password_file()
-    state = setup_token(path)
-    print("OWNER_TOKEN=" + state, flush=True)
-    process = subprocess.run(
-        [sys.executable, "-B", str(root / "scripts" / "tumblr_release.py"),
-         "--token-file", str(path), "--target-sha", args.target_sha],
-        cwd=root, check=False)
-    if process.returncode:
-        raise SetupError("RELEASE_FAILED")
+    if args.reset_token:
+        reset_token(path, root, args.target_sha)
+    else:
+        state = setup_token(path)
+        print("OWNER_TOKEN=" + state, flush=True)
+        process = subprocess.run(
+            [sys.executable, "-B", str(root / "scripts" / "tumblr_release.py"),
+             "--token-file", str(path), "--target-sha", args.target_sha],
+            cwd=root, check=False)
+        if process.returncode:
+            raise SetupError("RELEASE_FAILED")
     print("TUMBLR_LOGIN_READY=YES", flush=True)
-    print("URL=https://tumblr.hentaigay.org/", flush=True)
+    print("URL=https://tumblr.hentaigay.org/login", flush=True)
 
 
 if __name__ == "__main__":
