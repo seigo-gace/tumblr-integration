@@ -5,22 +5,23 @@
 <body><main class="layout">
 <header><div><span class="eyebrow">TGtumbler / Tumblr</span><h1>Tumblr 操作センター</h1><p>やりたいことを文章で書いてください。Assistantが手順を提案します。</p><p id="revision" data-commit="__TUMBLR_COMMIT__">revision __TUMBLR_COMMIT__</p></div><div class="connection" id="connection" role="status">外部接続：未設定</div></header>
 <section class="workspace" aria-label="操作チャット">
-<section class="goals" aria-label="6目的ショートカット">
-  <div class="goals-heading"><div><h2>目的から選ぶ</h2><p>必要な目的を複数選べます。選ばずに自由入力もできます。</p></div><button id="clear-goals" type="button">選択を解除</button></div>
-  <div class="goal-grid" id="goal-grid" role="group" aria-label="操作目的">
-    <button class="goal" type="button" data-goal="巡回" aria-pressed="false"><strong>巡回</strong><span>フォロー・タグ・公開候補を確認</span></button>
-    <button class="goal" type="button" data-goal="投稿" aria-pressed="false"><strong>投稿</strong><span>文案・編集・予約・削除</span></button>
-    <button class="goal" type="button" data-goal="キャンペーン" aria-pressed="false"><strong>キャンペーン</strong><span>応募・期限・抽選を管理</span></button>
-    <button class="goal" type="button" data-goal="紹介" aria-pressed="false"><strong>紹介</strong><span>共有文・リンク・成果の確認</span></button>
-    <button class="goal" type="button" data-goal="集計" aria-pressed="false"><strong>集計</strong><span>反応・導線・参加状況を確認</span></button>
-    <button class="goal" type="button" data-goal="メディア" aria-pressed="false"><strong>メディア</strong><span>許可確認後の画像・動画保存</span></button>
-  </div>
-  <p id="goal-selection" class="goal-selection" aria-live="polite">選択なし｜文章だけでも相談できます。</p>
-</section>
+
 <div class="workspace-heading"><h2 id="selected-title">Assistant</h2><p id="selected-description">分野のボタンを選ばなくても送信できます。投稿・削除・公開設定は確認の前に実行しません。</p></div>
 <div id="messages" class="messages" role="log" aria-live="polite"><div class="message system">何をしたいかを書いてください。未接続の操作は実行したことにしません。</div></div>
 <form id="chat-form"><label for="instruction">やりたいこと</label><div class="composer"><textarea id="instruction" rows="2" placeholder="例：募集用ブログの下書きを確認したい" required maxlength="2000"></textarea><button id="send" type="submit">送信</button></div></form>
 <section class="draft-workspace" aria-label="下書き管理"><div class="draft-header"><h2>下書き</h2><div class="draft-actions"><button id="save-draft" type="button">入力を保存</button><button id="show-drafts" type="button">保存一覧を表示</button></div></div><p class="draft-info">このアプリ内にのみ保存します。外部AI・Tumblrには送信しません。</p><div id="draft-list" class="draft-list" aria-live="polite"></div></section>
 <div id="assist" class="assist" hidden><span>補助・復旧</span><button type="button" id="retry">再試行</button><button type="button" id="draft">下書きを残す</button><button type="button" id="abort">中断</button><button type="button" id="confirm" hidden>この内容で実行する</button></div>
+<section class="goals" aria-label="6目的ショートカット">
+  <div class="goals-heading"><h2>操作ショートカット</h2><button id="clear-goals" type="button">選択解除</button></div>
+  <div class="goal-grid" id="goal-grid" role="group" aria-label="操作目的">
+    <button class="goal" type="button" data-goal="巡回" aria-pressed="false">巡回</button>
+    <button class="goal" type="button" data-goal="投稿" aria-pressed="false">投稿</button>
+    <button class="goal" type="button" data-goal="キャンペーン" aria-pressed="false">キャンペーン</button>
+    <button class="goal" type="button" data-goal="紹介" aria-pressed="false">紹介</button>
+    <button class="goal" type="button" data-goal="集計" aria-pressed="false">集計</button>
+    <button class="goal" type="button" data-goal="メディア" aria-pressed="false">メディア</button>
+  </div>
+  <p id="goal-selection" class="goal-selection" aria-live="polite">選択なし｜文章だけでも相談できます。</p>
+</section>
 <div class="footnote">ボタンは障害・迷い・中断のための補助です。AI・Tumblr OAuth・公開APIは接続と確認が済むまで外部へ送りません。</div>
 </section></main><script src="./app.js" defer></script></body></html>
