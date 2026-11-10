@@ -9,7 +9,13 @@ import uuid
 MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
 MAX_NAME_CHARS = 120
 IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
-OFFICE_TYPES = {\n    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",\n    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",\n    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",\n    ".zip": "application/zip",\n}\nALLOWED_TYPES = IMAGE_TYPES | {"application/pdf", "text/plain"} | set(OFFICE_TYPES.values())
+OFFICE_TYPES = {
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".zip": "application/zip",
+}
+ALLOWED_TYPES = IMAGE_TYPES | {"application/pdf", "text/plain"} | set(OFFICE_TYPES.values())
 ID_RE = re.compile(r"[0-9a-f]{32}\Z")
 
 
@@ -28,6 +34,11 @@ def sniff_type(data, name=""):
         return "image/webp"
     if data.startswith(b"%PDF-"):
         return "application/pdf"
+    if data.startswith((bytes.fromhex("504b0304"), bytes.fromhex("504b0506"))):
+        extension = Path(name).suffix.lower()
+        if extension in OFFICE_TYPES:
+            return OFFICE_TYPES[extension]
+        raise AttachmentError("UNSUPPORTED_FILE_TYPE")
     try:
         decoded = data.decode("utf-8")
         if "\x00" not in decoded:
