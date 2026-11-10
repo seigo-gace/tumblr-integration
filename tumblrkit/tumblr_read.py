@@ -9,7 +9,7 @@ import re
 import stat
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, urlsplit, urlencode
 from urllib.request import Request, urlopen
 from tumblrkit.api_safety import TumblrReadBudget
 
@@ -112,6 +112,8 @@ class TumblrReadAdapter:
         self.token_provider = token_provider
 
     def perform(self, action, target, payload):
+        if action == "tumblr.discover":
+            return self._discover(target, payload)
         if action != "tumblr.list_posts":
             raise ValueError("read_action_not_connected")
         if normalize_blog(target) != self.blog:
@@ -152,6 +154,59 @@ class TumblrReadAdapter:
                 "url": url[:500],
             })
         return {"verified": True, "rows": rows, "total": len(posts)}
+
+
+    def _discover(self, tag, payload):
+        """One explicit Tumblr public-tag search; never crawl, like, follow or publish."""
+        if payload not in ({}, None):
+            raise ValueError("discovery_payload_unsupported")
+        if not isinstance(tag, str):
+            raise ValueError("discovery_tag_invalid")
+        tag = tag.strip()
+        if not tag or len(tag) > 64 or any(
+            ord(ch) < 32 or ch in "/\\?#&=<>\x7f" for ch in tag
+        ):
+            raise ValueError("discovery_tag_invalid")
+        if isinstance(self.transport, OfficialTransport):
+            self.transport.budget.reserve(1)
+        bearer = self.token_provider() if self.token_provider else token_from_file(self.token_file)
+        data = self.transport.get("/v2/tagged?" + urlencode({
+            "tag": tag, "limit": 10, "filter": "text"}), bearer)
+        if not isinstance(data, dict) or data.get("meta", {}).get("status") != 200:
+            raise ValueError("discovery_response_unverified")
+        posts = data.get("response")
+        if not isinstance(posts, list):
+            raise ValueError("discovery_response_unverified")
+        rows, seen = [], set()
+        for item in posts[:10]:
+            if not isinstance(item, dict):
+                continue
+            blog_name = item.get("blog_name")
+            post_id = str(item.get("id_string") or item.get("id") or "")
+            raw_url = item.get("post_url")
+            if not isinstance(blog_name, str) or not post_id.isdecimal() or not isinstance(raw_url, str):
+                continue
+            try:
+                blog = normalize_blog(blog_name)
+                parsed = urlsplit(raw_url)
+                if (parsed.scheme != "https" or parsed.username or parsed.password
+                        or parsed.hostname not in (blog + ".tumblr.com", "www.tumblr.com", "tumblr.com")):
+                    continue
+            except (ValueError, TypeError):
+                continue
+            ident = (blog, post_id)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            thumbnail, media_type = media_thumbnail(item)
+            rows.append({
+                "title": str(item.get("summary") or item.get("title") or "(タイトルなし)")[:200],
+                "type": str(media_type or item.get("type") or "")[:40],
+                "date": str(item.get("date") or "")[:60],
+                "thumbnail_url": thumbnail,
+                "url": raw_url[:500],
+            })
+        return {"verified": True, "rows": rows, "total": len(rows)}
 
 
 def adapter_from_env(env=None):
