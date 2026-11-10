@@ -225,6 +225,37 @@
                   }
                 });
                 td.appendChild(exclude);
+                if(typeof record.candidate_id==="string"&&
+                   /^[a-z0-9][a-z0-9-]{0,62}:[0-9]{1,25}$/.test(record.candidate_id)){
+                  const check=document.createElement("button");
+                  check.type="button";
+                  check.className="discovery-exclude";
+                  check.textContent="状態確認";
+                  check.setAttribute("aria-label","この投稿が閲覧できるか1件だけ確認");
+                  check.addEventListener("click",async function(){
+                    if(!window.confirm("Tumblr公式APIへこの投稿1件の状態確認を行います。続行しますか？"))return;
+                    check.disabled=true;
+                    try{
+                      const response=await fetch("/discovery/recheck",{
+                        method:"POST",credentials:"same-origin",
+                        headers:{"Content-Type":"application/json"},
+                        body:JSON.stringify({candidate_id:record.candidate_id})
+                      });
+                      if(!response.ok)throw new Error("recheck_unavailable");
+                      const result=await response.json();
+                      if(result.verified!==true)throw new Error("unverified");
+                      if(result.state==="unavailable"){
+                        tr.remove();
+                        display("この投稿は現在、公式APIから取得できません。保存状態を更新しました。","system");
+                      }else if(result.state==="visible"){
+                        display("投稿1件の閲覧可能状態を確認しました。","system");
+                      }else throw new Error("unknown_state");
+                    }catch(error){
+                      display("投稿状態を確認できません。通信制限・認証・公開状態を確認してください。勝手に削除扱いにはしていません。","system");
+                    }finally{check.disabled=false;}
+                  });
+                  td.appendChild(check);
+                }
               }
             }catch(error){td.textContent="リンク無効";}
           }else{td.textContent=value||"—";}
