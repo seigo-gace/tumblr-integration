@@ -306,11 +306,15 @@ class MediaSave:
                 previous=db.execute("SELECT id,state FROM media_save_jobs WHERE candidate_id=?"
                     " AND media_index=? AND source_url=?",(candidate_id,media_index,url)).fetchone()
                 if previous and previous[1]=="completed":
-                    result=self.list(candidate_id)
-                    match=next(x for x in result["jobs"] if x["id"]==previous[0])
-                    if (self.root / match["output_name"]).is_file():
+                    match=db.execute("SELECT id,candidate_id,source_post_id,media_index,state,"
+                        "error_code,source_bytes,output_bytes,output_name,created_at,updated_at"
+                        " FROM media_save_jobs WHERE id=?",(previous[0],)).fetchone()
+                    fields=("id","candidate_id","source_post_id","media_index","state","error_code",
+                            "source_bytes","output_bytes","output_name","created_at","updated_at")
+                    job=dict(zip(fields,match))
+                    if job["output_name"] and (self.root / job["output_name"]).is_file():
                         db.execute("COMMIT")
-                        return {"verified":True,"job":match,"from_cache":True}
+                        return {"verified":True,"job":job,"from_cache":True}
                 if previous and previous[1]=="running":
                     db.execute("ROLLBACK")
                     raise MediaError("MEDIA_JOB_IN_PROGRESS")
@@ -348,7 +352,8 @@ class MediaSave:
                 raise MediaError("MEDIA_SIZE_CHANGED")
             output_bytes=self.transcoder.convert(source,partial)
             self._space(output_bytes)
-            digest=hashlib.file_digest(open(partial,"rb"),"sha256").hexdigest()
+            with open(partial,"rb") as digest_stream:
+                digest=hashlib.file_digest(digest_stream,"sha256").hexdigest()
             os.replace(partial,output)
             with closing(self._open()) as db:
                 db.execute("UPDATE media_save_jobs SET state='completed',source_bytes=?,"
