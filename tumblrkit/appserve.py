@@ -31,6 +31,7 @@ CONTENT_TYPES = {
 }
 COOKIE = "tg_tumblr_session"
 SESSION_TTL = 12 * 60 * 60
+LOGIN_CSRF_TTL = 10 * 60
 LOGIN_PAGE = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><title>Tumblr操作｜ログイン</title><style>body{font-family:system-ui,sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;background:#10121a;color:#f5f6fa;padding:20px}main{width:min(100%,420px);border:1px solid #3a4052;border-radius:18px;background:#1b1e29;padding:28px}h1{font-size:1.45rem}p{color:#b3bbcf;line-height:1.6}label{display:block;margin:20px 0 8px}input{width:100%;box-sizing:border-box;padding:13px;background:#10121a;color:white;border:1px solid #576eac;border-radius:10px;font:inherit}button{width:100%;margin-top:18px;padding:13px;background:#8caaff;color:#10121a;border:0;border-radius:10px;font:inherit;font-weight:700}small{display:block;margin-top:16px;color:#b3bbcf}</style></head><body><main><h1>Tumblr 操作センター</h1><p>Master専用の操作画面です。アクセス用の秘密キーを入力してください。</p><form method="post" action="/session"><label for="token">アクセスキー</label><input id="token" name="token" type="password" autocomplete="off" required minlength="8" maxlength="256"><button type="submit">ログイン</button></form><small>ログイン情報をブラウザの保存領域には記録しません。12時間でセッションが失効します。</small></main></body></html>"""
 
 
@@ -246,12 +247,14 @@ class _Handler(BaseHTTPRequestHandler):
             payload = json.loads(raw.decode("utf-8"))
             if not isinstance(payload, dict) or set(payload) != {"token"}:
                 raise ValueError("token")
-            return payload["token"]
+            return payload["token"], ""
         if kind == "application/x-www-form-urlencoded":
             fields = parse_qs(raw.decode("utf-8"), keep_blank_values=False, strict_parsing=True)
-            if set(fields) != {"token"} or len(fields["token"]) != 1:
+            if not {"token"} <= set(fields) <= {"token", "csrf"} or len(fields["token"]) != 1:
                 raise ValueError("token")
-            return fields["token"][0]
+            if "csrf" in fields and len(fields["csrf"]) != 1:
+                raise ValueError("csrf")
+            return fields["token"][0], fields.get("csrf", [""])[0]
         raise ValueError("type")
 
     def _session_cookie(self):
@@ -260,8 +263,34 @@ class _Handler(BaseHTTPRequestHandler):
             self.server.sessions[value] = time.time() + SESSION_TTL
         return f"{COOKIE}={value}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age={SESSION_TTL}"
 
-    def _login_page(self):
-        self._send(200, LOGIN_PAGE, "text/html; charset=utf-8")
+    def _login_page(self, status=200, error=None):
+        nonce = secrets.token_urlsafe(32)
+        with self.server.login_csrf_lock:
+            now = time.time()
+            expired = [key for key, deadline in self.server.login_csrf.items()
+                       if deadline <= now]
+            for key in expired:
+                self.server.login_csrf.pop(key, None)
+            if len(self.server.login_csrf) >= 512:
+                self.server.login_csrf.clear()
+            self.server.login_csrf[nonce] = now + LOGIN_CSRF_TTL
+        page = LOGIN_PAGE.replace(
+            "</form>",
+            '<input type="hidden" name="csrf" value="' + nonce + '"></form>',
+        )
+        if error:
+            page = page.replace(
+                '<form method="post"',
+                '<p role="alert" style="color:#ffb2b2">' + error + '</p><form method="post"',
+            )
+        self._send(status, page, "text/html; charset=utf-8")
+
+    def _valid_form_nonce(self, nonce):
+        if not isinstance(nonce, str) or not nonce:
+            return False
+        with self.server.login_csrf_lock:
+            deadline = self.server.login_csrf.pop(nonce, 0)
+        return deadline > time.time()
 
     def _consume_ticket(self):
         path = urlsplit(self.path).path
@@ -310,7 +339,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         name = "index.html" if parts.path in ("/", "/index.html") else parts.path[1:]
         if name not in STATIC_NAMES or not _authorized(self):
-            self._send(401, LOGIN_PAGE, "text/html; charset=utf-8") if name == "index.html" else (self._unauthorized() if name in STATIC_NAMES else self._send(404, "not found\n", "text/plain; charset=utf-8"))
+            self._login_page(401) if name == "index.html" else (self._unauthorized() if name in STATIC_NAMES else self._send(404, "not found\n", "text/plain; charset=utf-8"))
             return
         self._send(200, (self.server.release / name).read_bytes(), CONTENT_TYPES[name])
 
@@ -356,20 +385,25 @@ class _Handler(BaseHTTPRequestHandler):
         if parts.path != "/session":
             self._send(404, "not found\n", "text/plain; charset=utf-8")
             return
-        # Reject explicitly cross-origin browser submissions.
-        if self.headers.get("Origin") and not _same_origin(self):
-            self._send(403, "origin rejected\n", "text/plain; charset=utf-8")
+        try:
+            presented, nonce = self._presented_token()
+        except (ValueError, json.JSONDecodeError, UnicodeError, TypeError):
+            self._login_page(400, "入力形式を確認してください。")
             return
-        if self.headers.get("Sec-Fetch-Site", "") == "cross-site":
-            self._send(403, "origin rejected\n", "text/plain; charset=utf-8")
+        csrf_ok = self._valid_form_nonce(nonce)
+        origin_rejected = bool(self.headers.get("Origin")) and not _same_origin(self)
+        fetch_rejected = self.headers.get("Sec-Fetch-Site", "") == "cross-site"
+        if (origin_rejected or fetch_rejected) and not csrf_ok:
+            self._login_page(403, "ページを開き直してログインしてください。")
             return
         try:
-            presented = self._presented_token()
-            ok = isinstance(presented, str) and hmac.compare_digest(presented.encode('utf-8'), self.server.token.encode('utf-8'))
-        except (ValueError, json.JSONDecodeError, UnicodeError, TypeError):
-            ok = False
-        if not ok:
-            self._unauthorized()
+            valid_token = isinstance(presented, str) and hmac.compare_digest(
+                presented.encode("utf-8"), self.server.token.encode("utf-8")
+            )
+        except (UnicodeError, TypeError):
+            valid_token = False
+        if not valid_token:
+            self._login_page(401, "ログインキーが一致しません。")
             return
         cookie = self._session_cookie()
         if "text/html" in self.headers.get("Accept", ""):
@@ -446,6 +480,8 @@ class AppServer:
         self.httpd.tickets = set()
         self.httpd.sessions = {}
         self.httpd.session_lock = threading.Lock()
+        self.httpd.login_csrf = {}
+        self.httpd.login_csrf_lock = threading.Lock()
         self.httpd.assistant = self.assistant
         self.httpd.draft_store = DraftStore(self.release.resolve().parent.parent / "data" / "drafts.sqlite3")
         if self.ticket:
