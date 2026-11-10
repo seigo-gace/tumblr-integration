@@ -81,6 +81,45 @@ class AppServeTests(unittest.TestCase):
             self.assertNotIn(b"https://", body)
             self.assertNotIn(b"localStorage", body)
 
+    def test_oauth_routes_require_owner_and_state_and_never_return_tokens(self):
+        import os
+        import http.client
+        from urllib.parse import parse_qs, urlsplit
+        from tumblrkit.account_runtime import OwnerOAuth
+        from test_account_runtime import FakeTransport
+        build_release(APP, self.tmp, SHA_A)
+        secret_dir = self.tmp / "private-oauth"
+        secret_dir.mkdir(mode=0o700)
+        os.chmod(secret_dir, 0o700)
+        for name, value in (("consumer-key", "test-consumer-key-123"), ("client-secret", "test-consumer-secret-123")):
+            path = secret_dir / name
+            path.write_text(value)
+            os.chmod(path, 0o600)
+        account = OwnerOAuth(secret_dir, "recruitment", FakeTransport())
+        with AppServer(self.tmp / "current", TOKEN) as server:
+            server.httpd.owner_oauth = account
+            base = "http://127.0.0.1:" + str(server.port)
+            status, _, _ = fetch(base + "/oauth/status")
+            self.assertEqual(status, 401)
+            status, _, _ = fetch(base + "/oauth/start", method="POST", data=b"")
+            self.assertEqual(status, 401)
+            status, body, _ = fetch(base + "/oauth/start", TOKEN, method="POST",
+                                    data=b"", headers={"Origin": base})
+            self.assertEqual(status, 200)
+            url = json.loads(body)["authorize_url"]
+            query = parse_qs(urlsplit(url).query)
+            state = query["state"][0]
+            status, body, _ = fetch(base + "/oauth/callback?state=wrong&code=valid")
+            self.assertEqual(status, 400)
+            status, body, _ = fetch(base + "/oauth/callback?state=" + state + "&code=valid")
+            self.assertEqual(status, 200)
+            self.assertNotIn(b"initial-access-token", body)
+            status, body, _ = fetch(base + "/oauth/status", TOKEN)
+            self.assertEqual(status, 200)
+            self.assertTrue(json.loads(body)["connected"])
+            status, _, _ = fetch(base + "/oauth/callback?state=" + state + "&code=valid")
+            self.assertEqual(status, 400)
+
     def test_rollback_restores_previous_commit(self):
         build_release(APP, self.tmp, SHA_A)
         build_release(APP, self.tmp, SHA_B)
