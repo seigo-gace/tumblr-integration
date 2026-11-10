@@ -188,8 +188,10 @@ class DiscoveryEngine:
             posts=self.store.read_candidates(source,limit=100)
             rows=[{"blog":p["blog"],"candidate_id":p["candidate_id"],"title":p["title"],"type":p["type"],"date":p["date"],
                    "thumbnail_url":p["thumbnail_url"],"url":p["url"]} for p in posts]
+        next_target = mode if mode in ("following","followers") else source
         return {"verified":True,"rows":rows,"total":len(rows),
                 "source":source,"cursor":checkpoint["cursor"],
+                "next_target":next_target,
                 "complete":checkpoint["complete"],"from_cache":from_cache}
 
     def recheck_candidate(self,candidate_id):
