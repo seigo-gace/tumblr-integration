@@ -4,6 +4,8 @@ The screen is not returned without an injected access token. DNS, Tunnel,
 Access and Secret files are outside this module.
 """
 import argparse
+import base64
+import binascii
 import hashlib
 import hmac
 import ipaddress
@@ -12,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import sqlite3
 import shutil
 import threading
 import time
@@ -20,6 +23,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from tumblrkit.assistant import Assistant
 from tumblrkit.drafts import DraftStore
+from tumblrkit.attachments import AttachmentStore, AttachmentError, MAX_ATTACHMENT_BYTES, IMAGE_TYPES
 
 COMMIT_MARK = "__TUMBLR_COMMIT__"
 COMMIT_RE = re.compile(r"[0-9a-f]{7,40}\Z")
@@ -221,7 +225,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
         if extra:
             for key, value in extra:
                 self.send_header(key, value)
@@ -234,9 +238,9 @@ class _Handler(BaseHTTPRequestHandler):
     def _unauthorized(self):
         self._send(401, "unauthorized\n", "text/plain; charset=utf-8")
 
-    def _read_body(self):
+    def _read_body(self, max_bytes=4096):
         length = int(self.headers.get("Content-Length", "0") or "0")
-        if length < 0 or length > 4096:
+        if length < 0 or length > max_bytes:
             raise ValueError("body")
         return self.rfile.read(length)
 
@@ -317,6 +321,26 @@ class _Handler(BaseHTTPRequestHandler):
         if parts.query and parts.path not in ("/", "/index.html", "/login"):
             self._send(400, "bad request\n", "text/plain; charset=utf-8")
             return
+        if parts.path.startswith("/attachments/"):
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            try:
+                item = self.server.attachment_store.get(parts.path[len("/attachments/"):])
+            except (AttachmentError, OSError):
+                self._send(404, "not found\n", "text/plain; charset=utf-8")
+                return
+            if item is None:
+                self._send(404, "not found\n", "text/plain; charset=utf-8")
+                return
+            is_image = item["media_type"] in IMAGE_TYPES
+            # Display images on the same authenticated origin, force download
+            # for all other file types. Never inline HTML/SVG or unknown bytes.
+            safe_filename = "attachment-" + item["id"]
+            disposition = ("inline" if is_image else "attachment") + '; filename="' + safe_filename + '"'
+            self._send(200, item["data"], item["media_type"],
+                       extra=[("Content-Disposition", disposition)])
+            return
         if parts.path == "/drafts":
             if not _authorized(self):
                 self._unauthorized()
@@ -350,6 +374,33 @@ class _Handler(BaseHTTPRequestHandler):
         parts = urlsplit(self.path)
         if parts.query:
             self._send(400, "bad request\n", "text/plain; charset=utf-8")
+            return
+        if parts.path == "/attachments":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            bearer_ok = self.headers.get("Authorization", "").startswith("Bearer ") and _authorized(self)
+            if (self.headers.get("Origin") and not _same_origin(self)) or (not self.headers.get("Origin") and not bearer_ok):
+                self._send(403, "origin rejected\n", "text/plain; charset=utf-8")
+                return
+            try:
+                if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
+                    raise AttachmentError("INVALID_CONTENT_TYPE")
+                payload = json.loads(self._read_body(11 * 1024 * 1024).decode("utf-8"))
+                if not isinstance(payload, dict) or set(payload) != {"name", "data"}:
+                    raise AttachmentError("INVALID_ATTACHMENT_PAYLOAD")
+                encoded = payload["data"]
+                if not isinstance(encoded, str) or len(encoded) > (MAX_ATTACHMENT_BYTES * 4 // 3) + 8:
+                    raise AttachmentError("INVALID_FILE_SIZE")
+                binary = base64.b64decode(encoded, validate=True)
+                record = self.server.attachment_store.save(payload["name"], binary)
+            except (AttachmentError, ValueError, UnicodeError, TypeError, binascii.Error, json.JSONDecodeError):
+                self._json(400, {"error": "invalid_attachment"})
+                return
+            except (OSError, sqlite3.Error):
+                self._json(503, {"error": "attachment_store_unavailable"})
+                return
+            self._json(201, record)
             return
         if parts.path == "/drafts":
             if not _authorized(self):
@@ -451,6 +502,24 @@ class _Handler(BaseHTTPRequestHandler):
             return
         message = payload.get("message") if isinstance(payload.get("message"), str) else ""
         request_id = payload.get("request_id") if isinstance(payload.get("request_id"), str) else None
+        attachments = payload.get("attachments", [])
+        try:
+            records = self.server.attachment_store.describe(attachments)
+        except (AttachmentError, OSError, sqlite3.Error, TypeError):
+            self._json(400, {"error": "invalid_attachment_reference"})
+            return
+        # The current Assistant has no multimodal adapter. File bytes remain
+        # private on Gserver; acknowledge receipt without pretending analysis.
+        if records:
+            result = self.server.assistant._pack(
+                "attachments_received",
+                str(len(records)) + "件の写真・ファイルを受け取りました。"
+                "現在はAIの画像・文書解析が未接続のため、内容を解析・公開していません。",
+                False,
+            )
+            result["attachments"] = records
+            self._json(200, result)
+            return
         self._json(200, self.server.assistant.turn(
             message=message,
             confirm=payload.get("confirm") is True,
@@ -484,6 +553,7 @@ class AppServer:
         self.httpd.login_csrf_lock = threading.Lock()
         self.httpd.assistant = self.assistant
         self.httpd.draft_store = DraftStore(self.release.resolve().parent.parent / "data" / "drafts.sqlite3")
+        self.httpd.attachment_store = AttachmentStore(self.release.resolve().parent.parent / "data")
         if self.ticket:
             ticket = secrets.token_urlsafe(24)
             self.httpd.tickets.add(ticket)
