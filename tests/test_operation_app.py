@@ -67,6 +67,19 @@ class OperationAppTests(unittest.TestCase):
         self.assertNotIn('radial-gradient', self.css)
         self.assertNotIn('min-height:570px', self.css)
 
+    def test_verified_structured_result_renderer(self):
+        self.assertIn("function renderView(view)", self.js)
+        self.assertIn("renderView(turn.view)", self.js)
+        self.assertIn('view.status!=="connected"', self.js)
+        self.assertIn('document.createElement("table")', self.js)
+        self.assertIn('document.createElement("a")', self.js)
+        self.assertIn('link.rel="noopener noreferrer"', self.js)
+        self.assertIn('url.protocol!=="https:"', self.js)
+        self.assertIn('view.action==="analytics.get_summary"', self.js)
+        self.assertIn("Number.isFinite(item.value)", self.js)
+        self.assertIn(".result-table", self.css)
+        self.assertIn(".result-bar-track", self.css)
+
     def test_mobile_layout(self):
         self.assertIn("@media(max-width:760px)",self.css)
         self.assertIn('name="viewport"',self.html)
