@@ -112,6 +112,43 @@
     filter.addEventListener("change",function(){libraryFilter=filter.value;libraryOffset=0;librarySelection.clear();showLibrary();});
     const total=document.createElement("span");total.textContent=String(data.total)+"件";
     const bulk=document.createElement("div");bulk.className="library-controls";
+    const viewSelected=document.createElement("button");
+    viewSelected.type="button";viewSelected.textContent="選択した画像・動画を閲覧";
+    viewSelected.addEventListener("click",function(){
+      const selected=data.items.filter(function(item){return librarySelection.has(item.candidate_id)&&item.state==="visible";});
+      if(!selected.length){display("閲覧する候補を選択してください。","system");return;}
+      const panel=document.createElement("section");panel.className="library-viewer";
+      const title=document.createElement("h3");title.textContent="選択したメディア";
+      panel.appendChild(title);
+      const grid=document.createElement("div");grid.className="library-grid";
+      let found=0;
+      selected.forEach(function(item){
+        (item.media||[]).forEach(function(media,index){
+          const uri=libraryMedia(media.url);
+          if(!uri||found>=200)return;
+          found++;
+          const card=document.createElement("div");card.className="library-card";
+          const button=document.createElement("button");button.type="button";
+          button.textContent=item.title+" ("+(index+1)+")";
+          button.addEventListener("click",function(){libraryView(item,index);});
+          card.appendChild(button);
+          if(media.type==="image"){
+            const image=document.createElement("img");image.src=uri;image.alt=item.title;
+            image.className="library-thumb";image.loading="lazy";image.referrerPolicy="no-referrer";
+            card.appendChild(image);
+          }else{
+            const note=document.createElement("span");note.textContent="動画参照（直接再生は未取得）";
+            card.appendChild(note);
+          }
+          grid.appendChild(card);
+        });
+      });
+      if(!found){display("選択された候補に閲覧可能なメディア参照がありません。","system");return;}
+      const close=document.createElement("button");close.type="button";close.textContent="閉じる";
+      close.addEventListener("click",function(){panel.remove();});
+      panel.append(grid,close);messages.appendChild(panel);messages.scrollTop=messages.scrollHeight;
+    });
+    bulk.appendChild(viewSelected);
     for(const [label,field,value] of [["既読にする","seen",true],["未読にする","seen",false],["お気に入り","favorite",true],["お気に入り解除","favorite",false],["あとで見る","watch_later",true],["あとで見る解除","watch_later",false]]){
       const b=document.createElement("button");b.type="button";b.textContent=label;
       b.addEventListener("click",async function(){
