@@ -113,6 +113,25 @@ class DiscoveryEngineTests(unittest.TestCase):
         self.assertEqual(checkpoint["cursor"],1)
         self.assertFalse(checkpoint["complete"])
 
+    def test_preserves_all_safe_image_video_media_refs_for_later_library(self):
+        post={"blog_name":"one","id_string":"501","post_url":"https://one.tumblr.com/post/501",
+              "summary":"media","timestamp":300,"content":[
+                  {"type":"image","media":[{"url":"https://64.media.tumblr.com/a.jpg"},
+                                           {"url":"https://64.media.tumblr.com/b.jpg"}]},
+                  {"type":"video","poster":[{"url":"https://64.media.tumblr.com/c.jpg"}]},
+                  {"type":"image","media":[{"url":"https://evil.invalid/out.jpg"}]}]}
+        adapter,_=self.scanner([envelope([post])])
+        adapter.perform("tumblr.discover","tag:media",{})
+        record=DiscoveryStore(self.root/"discovery.sqlite3").read_candidates()[0]
+        import json
+        refs=json.loads(record["media_json"])
+        self.assertEqual([item["url"] for item in refs],[
+            "https://64.media.tumblr.com/a.jpg",
+            "https://64.media.tumblr.com/b.jpg",
+            "https://64.media.tumblr.com/c.jpg",
+        ])
+        self.assertEqual(record["thumbnail_url"],"https://64.media.tumblr.com/a.jpg")
+
     def test_one_blog_can_be_present_in_multiple_sources_without_losing_links(self):
         store=DiscoveryStore(self.root/"discovery.sqlite3")
         blog={"name":"one","url":"https://one.tumblr.com"}
