@@ -16,6 +16,7 @@ import subprocess
 import tempfile
 import urllib.request
 import zipfile
+from urllib.parse import urlsplit
 
 SOURCE_COMMIT="df95abcb0ce6efff710dda5ef28a2f6f1dc21493"
 SOURCES={
@@ -72,7 +73,11 @@ def install(folder):
         req=urllib.request.Request(url,headers={"User-Agent":"TGtumbler-MediaTools/1.0"})
         try:
             with urllib.request.urlopen(req,timeout=45) as response,open(archive,"xb") as dest:
-                if response.url!=url or response.status!=200:
+                final=urlsplit(response.url)
+                if (response.status!=200 or final.scheme!="https"
+                        or final.hostname not in ("media.githubusercontent.com",
+                                               "objects.githubusercontent.com",
+                                               "github.com")):
                     raise InstallError("TOOLS_DOWNLOAD_REDIRECT")
                 while True:
                     chunk=response.read(65536)
