@@ -159,7 +159,7 @@ def _authorized(handler):
     header = handler.headers.get("Authorization", "")
     if header.startswith("Bearer "):
         try:
-            if hmac.compare_digest(header[7:], handler.server.token):
+            if hmac.compare_digest(header[7:].encode('utf-8'), handler.server.token.encode('utf-8')):
                 return True
         except (TypeError, ValueError):
             return False
@@ -176,12 +176,24 @@ def _authorized(handler):
 
 
 def _same_origin(handler):
-    origin = handler.headers.get("Origin")
+    """Accept the exact public HTTPS origin through the dedicated loopback Tunnel.
+
+    Cloudflare Tunnel may forward Host as 127.0.0.1:8081 while preserving the
+    browser's original Origin. Never trust arbitrary X-Forwarded-* headers.
+    """
+    origin = handler.headers.get("Origin", "")
     host = handler.headers.get("Host", "").lower()
     if not origin or not host:
         return False
     parsed = urlsplit(origin)
-    return (parsed.scheme == "https" or (parsed.scheme == "http" and host.startswith("127.0.0.1:"))) and parsed.netloc.lower() == host and parsed.path == "" and not parsed.query and not parsed.fragment
+    if parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password:
+        return False
+    if parsed.scheme == "https" and parsed.netloc.lower() == "tumblr.hentaigay.org":
+        return host in ("tumblr.hentaigay.org", "127.0.0.1:8081", "localhost:8081")
+    # Isolated localhost integration tests and owner-only loopback tooling.
+    return (parsed.scheme == "http" and
+            parsed.netloc.lower() == host and
+            (host.startswith("127.0.0.1:") or host.startswith("localhost:")))
 
 
 def _client_is_loopback(handler):
@@ -350,7 +362,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         try:
             presented = self._presented_token()
-            ok = isinstance(presented, str) and hmac.compare_digest(presented, self.server.token)
+            ok = isinstance(presented, str) and hmac.compare_digest(presented.encode('utf-8'), self.server.token.encode('utf-8'))
         except (ValueError, json.JSONDecodeError, UnicodeError, TypeError):
             ok = False
         if not ok:
