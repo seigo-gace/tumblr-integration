@@ -329,7 +329,11 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(503, "Tumblr連携は未設定です。", "text/plain; charset=utf-8")
                 return
             try:
-                self.server.owner_oauth.callback(parts.query)
+                linked = self.server.owner_oauth.callback(parts.query)
+                with self.server.account_lock:
+                    self.server.assistant.bridge.adapters["tumblr"] = TumblrReadAdapter(
+                        linked["blog"], self.server.owner_oauth.store.access,
+                        token_provider=self.server.owner_oauth.refresh_if_needed)
             except (ValueError, PermissionError, OSError, TypeError):
                 self._send(400, "Tumblr認可に失敗しました。再ログイン後に連携をやり直してください。", "text/plain; charset=utf-8")
                 return
@@ -630,10 +634,19 @@ class AppServer:
                     owner_blog = load_owner_blog(self.oauth_folder) or ""
                 except (ValueError, OSError):
                     owner_blog = ""
-            if owner_blog:
-                self.owner_oauth = OwnerOAuth(self.oauth_folder, owner_blog)
+            self.owner_oauth = OwnerOAuth(self.oauth_folder, owner_blog or None)
+            selected_blog = owner_blog
+            if not selected_blog:
+                try:
+                    saved = self.owner_oauth.store.read()
+                    selected_blog = saved.get("blog", "") if saved else ""
+                    if selected_blog:
+                        self.owner_oauth.blog = selected_blog
+                except (ValueError, OSError, TypeError):
+                    selected_blog = ""
+            if selected_blog:
                 tumblr_reader = TumblrReadAdapter(
-                    owner_blog, self.owner_oauth.store.access,
+                    selected_blog, self.owner_oauth.store.access,
                     token_provider=self.owner_oauth.refresh_if_needed,
                 )
             else:
