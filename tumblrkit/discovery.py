@@ -7,7 +7,7 @@ bulk crawl, scraping, speculative pagination, or automatic retry.
 import re
 from urllib.parse import urlencode, urlsplit
 
-from tumblrkit.tumblr_read import normalize_blog, media_thumbnail, OfficialTransport
+from tumblrkit.tumblr_read import normalize_blog, media_thumbnail, discovery_media_refs, OfficialTransport
 from tumblrkit.discovery_store import DiscoveryStore
 
 SOURCE_LIMIT=10
@@ -64,6 +64,9 @@ class DiscoveryEngine:
         if blog in blocked:
             return None
         thumbnail,media_type=media_thumbnail(item)
+        media_refs=discovery_media_refs(item)
+        if not thumbnail and media_refs:
+            thumbnail=media_refs[0]["url"]
         tags=item.get("tags")
         if not isinstance(tags,list):
             tags=[]
@@ -85,7 +88,7 @@ class DiscoveryEngine:
             "date":str(item.get("date") or "")[:60],
             "thumbnail_url":thumbnail,
             "text_excerpt":body[:8000] or text[:8000],
-            "tags":tags,"note_count":notes,
+            "tags":tags,"note_count":notes,"media_refs":media_refs,
         }
 
     @staticmethod
