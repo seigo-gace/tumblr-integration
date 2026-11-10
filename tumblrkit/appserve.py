@@ -446,6 +446,43 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._json(200, {"configured": True, "blog": blog})
             return
+        if parts.path == "/discovery/recheck":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            bearer_ok = self.headers.get("Authorization", "").startswith("Bearer ") and _authorized(self)
+            if (self.headers.get("Origin") and not _same_origin(self)) or (not self.headers.get("Origin") and not bearer_ok):
+                self._send(403, "origin rejected\n", "text/plain; charset=utf-8")
+                return
+            try:
+                if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
+                    raise ValueError("invalid_content_type")
+                data = json.loads(self._read_body(512).decode("utf-8"))
+                candidate = data.get("candidate_id") if isinstance(data, dict) and set(data) == {"candidate_id"} else None
+                if not isinstance(candidate, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}:[0-9]{1,25}",candidate):
+                    raise ValueError("invalid_candidate")
+                adapter = self.server.assistant.bridge.adapters.get("tumblr")
+                if not isinstance(adapter, TumblrReadAdapter):
+                    self._json(503, {"error": "tumblr_not_connected"})
+                    return
+                from tumblrkit.discovery import DiscoveryEngine
+                result = DiscoveryEngine(adapter.blog,adapter.token_file,adapter.transport,
+                                         token_provider=adapter.token_provider).recheck_candidate(candidate)
+            except (TypeError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
+                code = str(exc)
+                if code in ("tumblr_budget_cooldown", "tumblr_budget_exhausted", "tumblr_rate_limited"):
+                    self._json(429, {"error": "tumblr_read_cooldown"})
+                elif code in ("tumblr_unavailable", "tumblr_post_unavailable", "discovery_candidate_check_unverified",
+                              "tumblr_response_invalid", "tumblr_budget_unavailable"):
+                    self._json(503, {"error": "discovery_recheck_unavailable"})
+                else:
+                    self._json(400, {"error": "discovery_candidate_invalid"})
+                return
+            except (OSError, sqlite3.Error):
+                self._json(503, {"error": "discovery_recheck_unavailable"})
+                return
+            self._json(200, result)
+            return
         if parts.path == "/discovery/exclude":
             if not _authorized(self):
                 self._unauthorized()
