@@ -93,6 +93,40 @@ class DiscoveryEngineTests(unittest.TestCase):
         self.assertEqual(parse_qs(urlsplit(stub.calls[1]).query)["before"],["100"])
         self.assertEqual(len(stub.calls),2)
 
+    def test_featured_timestamp_used_for_tag_cursor(self):
+        posts=[{"blog_name":"one","id_string":str(100+i),
+                "post_url":"https://one.tumblr.com/post/"+str(100+i),
+                "timestamp":999999,"featured_timestamp":300-i,
+                "summary":"featured"} for i in range(10)]
+        adapter,stub=self.scanner([envelope(posts),envelope([])])
+        result=adapter.perform("tumblr.discover","tag:featured",{})
+        self.assertEqual(result["cursor"],291)
+        self.assertFalse(result["complete"])
+        adapter.perform("tumblr.discover","tag:featured",{})
+        self.assertEqual(parse_qs(urlsplit(stub.calls[1]).query)["before"],["291"])
+
+    def test_tied_oldest_seconds_fail_closed_to_avoid_skipped_posts(self):
+        posts=[{"blog_name":"one","id_string":str(200+i),
+                "post_url":"https://one.tumblr.com/post/"+str(200+i),
+                "timestamp":1000-i//2} for i in range(10)]
+        adapter,stub=self.scanner([envelope(posts)])
+        with self.assertRaisesRegex(ValueError,"discovery_pagination_boundary_ambiguous"):
+            adapter.perform("tumblr.discover","tag:same-second",{})
+        checkpoint=DiscoveryStore(self.root/"discovery.sqlite3").checkpoint("tag:same-second")
+        self.assertEqual(checkpoint["cursor"],0)
+        self.assertFalse(checkpoint["complete"])
+        self.assertEqual(len(stub.calls),1)
+
+    def test_missing_timestamp_full_page_stops_without_claiming_completion(self):
+        posts=[{"blog_name":"one","id_string":str(300+i),
+                "post_url":"https://one.tumblr.com/post/"+str(300+i)}
+               for i in range(10)]
+        adapter,stub=self.scanner([envelope(posts)])
+        with self.assertRaisesRegex(ValueError,"discovery_page_timestamp_invalid"):
+            adapter.perform("tumblr.discover","tag:missing-dates",{})
+        self.assertEqual(DiscoveryStore(self.root/"discovery.sqlite3").read_candidates(),[])
+        self.assertEqual(len(stub.calls),1)
+
     def test_invalid_response_does_not_advance_checkpoint(self):
         adapter,stub=self.scanner([envelope({"total_users":1,"users":"bad"})])
         with self.assertRaisesRegex(ValueError,"unverified"):
