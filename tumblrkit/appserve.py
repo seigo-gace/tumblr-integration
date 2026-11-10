@@ -27,6 +27,7 @@ from tumblrkit.tumblr_read import adapter_from_env, TumblrReadAdapter
 from tumblrkit.account_runtime import OwnerOAuth, load_owner_blog, register_owner_blog
 from tumblrkit.drafts import DraftStore
 from tumblrkit.discovery_store import DiscoveryStore
+from tumblrkit.library import Library
 from tumblrkit.attachments import AttachmentStore, AttachmentError, MAX_ATTACHMENT_BYTES, IMAGE_TYPES
 
 COMMIT_MARK = "__TUMBLR_COMMIT__"
@@ -340,6 +341,28 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, '<!doctype html><html lang="ja"><meta charset="utf-8"><title>Tumblr連携</title><p>Tumblrの本人確認が完了しました。</p><a href="/">操作画面に戻る</a></html>', "text/html; charset=utf-8")
             return
+        if parts.path == "/library":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            from urllib.parse import parse_qs
+            params=parse_qs(parts.query,keep_blank_values=True)
+            if set(params)-{"filter","offset","limit"} or any(len(v)!=1 for v in params.values()):
+                self._json(400, {"error":"library_query_invalid"})
+                return
+            try:
+                result=self.server.library.list(
+                    params.get("filter",["all"])[0],
+                    int(params.get("offset",["0"])[0]),
+                    int(params.get("limit",["50"])[0]))
+            except (ValueError,TypeError):
+                self._json(400, {"error":"library_query_invalid"})
+                return
+            except (OSError,sqlite3.Error):
+                self._json(503, {"error":"library_unavailable"})
+                return
+            self._json(200,result)
+            return
         if parts.path == "/discovery/candidates":
             if not _authorized(self):
                 self._unauthorized()
@@ -445,6 +468,36 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": "oauth_blog_setup_failed"})
                 return
             self._json(200, {"configured": True, "blog": blog})
+            return
+        if parts.path in ("/library/update","/library/progress"):
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            bearer_ok=self.headers.get("Authorization","").startswith("Bearer ") and _authorized(self)
+            if (self.headers.get("Origin") and not _same_origin(self)) or (not self.headers.get("Origin") and not bearer_ok):
+                self._send(403,"origin rejected\n","text/plain; charset=utf-8")
+                return
+            try:
+                if self.headers.get("Content-Type","").split(";",1)[0].strip().lower()!="application/json":
+                    raise ValueError("invalid_content_type")
+                data=json.loads(self._read_body(8192).decode("utf-8"))
+                if not isinstance(data,dict):
+                    raise ValueError("library_payload_invalid")
+                if parts.path=="/library/update":
+                    if set(data)!={"candidate_ids","field","value"}:
+                        raise ValueError("library_payload_invalid")
+                    result=self.server.library.update(data["candidate_ids"],data["field"],data["value"])
+                else:
+                    if set(data)!={"candidate_id","media_index"}:
+                        raise ValueError("library_payload_invalid")
+                    result=self.server.library.progress(data["candidate_id"],data["media_index"])
+            except (ValueError,TypeError,UnicodeError,json.JSONDecodeError):
+                self._json(400,{"error":"library_request_invalid"})
+                return
+            except (OSError,sqlite3.Error):
+                self._json(503,{"error":"library_unavailable"})
+                return
+            self._json(200,result)
             return
         if parts.path == "/discovery/recheck":
             if not _authorized(self):
@@ -745,6 +798,7 @@ class AppServer:
         self.httpd.account_lock = threading.Lock()
         self.httpd.discovery_store = DiscoveryStore(
             Path.home() / ".config" / "tgtumbler" / "tumblr-oauth" / "discovery.sqlite3")
+        self.httpd.library = Library(self.httpd.discovery_store)
         self.httpd.draft_store = DraftStore(self.release.resolve().parent.parent / "data" / "drafts.sqlite3")
         self.httpd.attachment_store = AttachmentStore(self.release.resolve().parent.parent / "data")
         if self.ticket:
