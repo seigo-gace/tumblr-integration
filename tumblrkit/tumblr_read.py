@@ -63,6 +63,8 @@ class OfficialTransport:
             if exc.code == 429:
                 self.budget.pause_after_limit()
                 raise ValueError("tumblr_rate_limited") from None
+            if exc.code == 404:
+                raise ValueError("tumblr_post_unavailable") from None
             raise ValueError("tumblr_unavailable") from None
         except (URLError, OSError, TimeoutError):
             raise ValueError("tumblr_unavailable") from None
