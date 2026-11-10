@@ -14,6 +14,9 @@ import subprocess
 import sys
 import time
 
+# Invoked as python scripts/tumblr_release.py: include repository root for imports.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 TARGET_BRANCH = "feat/initial-modular-core"
 PRODUCTION_PORT = 8081
 STAGING_PORT = 8082
