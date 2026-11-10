@@ -1,0 +1,375 @@
+"""Owner-confirmed Tumblr Media Save worker; no scraping, no provider API calls.
+
+State lives alongside Discovery/Library in its existing private SQLite database.
+Only one explicitly authorized Tumblr-hosted video URL can be fetched per action.
+No yt-dlp extraction of inaccessible sources, DRM bypass, retry loop, or auto job.
+"""
+from __future__ import annotations
+
+import hashlib
+import http.client
+import ipaddress
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import socket
+import sqlite3
+import ssl
+import subprocess
+import threading
+import time
+import uuid
+from contextlib import closing
+from urllib.parse import urlsplit
+
+from tumblrkit.discovery_store import DiscoveryStore
+from tumblrkit.library import _safe_media, IDENT
+
+MAX_SOURCE_BYTES=128*1024*1024
+MAX_OUTPUT_BYTES=256*1024*1024
+MIN_DISK_FREE_BYTES=512*1024*1024
+MAX_TOTAL_SAVED_BYTES=1024*1024*1024
+MAX_JOBS=1
+CONVERT_TIMEOUT=180
+HTTP_TIMEOUT=12
+MEDIA_HOST=re.compile(r"(?:[a-z0-9-]+\.)?media\.tumblr\.com\Z")
+KEY=re.compile(r"[0-9a-f]{32}\Z")
+SCHEMA="""
+CREATE TABLE IF NOT EXISTS media_save_jobs(
+ id TEXT PRIMARY KEY,
+ candidate_id TEXT NOT NULL,
+ source_url TEXT NOT NULL,
+ source_post_id TEXT NOT NULL,
+ media_index INTEGER NOT NULL,
+ state TEXT NOT NULL,
+ error_code TEXT NOT NULL DEFAULT '',
+ source_bytes INTEGER NOT NULL DEFAULT 0,
+ output_bytes INTEGER NOT NULL DEFAULT 0,
+ output_name TEXT NOT NULL DEFAULT '',
+ sha256 TEXT NOT NULL DEFAULT '',
+ created_at INTEGER NOT NULL,
+ updated_at INTEGER NOT NULL,
+ UNIQUE(candidate_id,media_index,source_url),
+ FOREIGN KEY(candidate_id) REFERENCES discovery_posts(candidate_id)
+);
+"""
+
+class MediaError(ValueError):
+    pass
+
+def _media_url(value):
+    if not isinstance(value,str) or len(value)>500:
+        raise MediaError("MEDIA_URL_INVALID")
+    try:
+        u=urlsplit(value)
+        if (u.scheme!="https" or u.username or u.password or u.port is not None
+                or not MEDIA_HOST.fullmatch(u.hostname or "")
+                or not u.path.startswith("/") or any(ord(x)<32 for x in value)
+                or u.fragment):
+            raise MediaError("MEDIA_URL_INVALID")
+    except ValueError:
+        raise MediaError("MEDIA_URL_INVALID") from None
+    return u
+
+class PinnedHTTPS(http.client.HTTPSConnection):
+    """Direct TLS connection to a checked public address; no re-resolution or redirect."""
+    def connect(self):
+        infos=socket.getaddrinfo(self.host,443,type=socket.SOCK_STREAM)
+        candidates=[]
+        for family,_,_,_,addr in infos:
+            try:
+                ip=ipaddress.ip_address(addr[0])
+            except ValueError:
+                continue
+            if ip.is_global:
+                candidates.append((family,str(ip)))
+        if not candidates:
+            raise MediaError("MEDIA_DESTINATION_UNSAFE")
+        last=None
+        for family,address in candidates:
+            sock=socket.socket(family,socket.SOCK_STREAM)
+            sock.settimeout(HTTP_TIMEOUT)
+            try:
+                if family==socket.AF_INET6:
+                    sock.connect((address,443,0,0))
+                else:
+                    sock.connect((address,443))
+                self.sock=self._context.wrap_socket(sock,server_hostname=self.host)
+                return
+            except (OSError,ssl.SSLError) as exc:
+                last=exc
+                sock.close()
+        raise MediaError("MEDIA_CONNECT_UNAVAILABLE") from last
+
+class SafeDownloader:
+    def _call(self,url,method):
+        parsed=_media_url(url)
+        conn=PinnedHTTPS(parsed.hostname,timeout=HTTP_TIMEOUT,context=ssl.create_default_context())
+        path=parsed.path+("?" + parsed.query if parsed.query else "")
+        conn.request(method,path,headers={
+            "Accept":"video/mp4,video/webm,video/quicktime,application/octet-stream",
+            "User-Agent":"TGtumbler-MediaSave/1.0",
+            "Connection":"close",
+        })
+        response=conn.getresponse()
+        if response.status!=200:
+            conn.close()
+            raise MediaError("MEDIA_HTTP_UNAVAILABLE")
+        kind=response.getheader("Content-Type","").split(";",1)[0].strip().lower()
+        if kind not in ("video/mp4","video/webm","video/quicktime","application/octet-stream"):
+            conn.close()
+            raise MediaError("MEDIA_TYPE_UNSUPPORTED")
+        length=response.getheader("Content-Length")
+        if not length or not length.isascii() or not length.isdecimal():
+            conn.close()
+            raise MediaError("MEDIA_LENGTH_UNKNOWN")
+        size=int(length)
+        if size<=0 or size>MAX_SOURCE_BYTES:
+            conn.close()
+            raise MediaError("MEDIA_SIZE_EXCEEDED")
+        return conn,response,size
+
+    def probe(self,url):
+        conn,response,size=self._call(url,"HEAD")
+        try:
+            response.read()
+        finally:
+            conn.close()
+        return size
+
+    def fetch(self,url,destination,expected_size):
+        conn,response,size=self._call(url,"GET")
+        if size!=expected_size:
+            conn.close()
+            raise MediaError("MEDIA_SIZE_CHANGED")
+        downloaded=0
+        try:
+            with open(destination,"xb") as file:
+                while True:
+                    chunk=response.read(min(65536,MAX_SOURCE_BYTES+1-downloaded))
+                    if not chunk:
+                        break
+                    downloaded+=len(chunk)
+                    if downloaded>expected_size or downloaded>MAX_SOURCE_BYTES:
+                        raise MediaError("MEDIA_SIZE_EXCEEDED")
+                    file.write(chunk)
+                file.flush()
+                os.fsync(file.fileno())
+        finally:
+            conn.close()
+        if downloaded!=expected_size:
+            raise MediaError("MEDIA_SIZE_CHANGED")
+        return downloaded
+
+class Transcoder:
+    def __init__(self,ffprobe="ffprobe",ffmpeg="ffmpeg"):
+        self.ffprobe=ffprobe
+        self.ffmpeg=ffmpeg
+
+    def _probe(self,source):
+        try:
+            result=subprocess.run([self.ffprobe,"-v","error","-show_entries",
+                 "format=format_name,duration:stream=codec_type,codec_name,width,height",
+                 "-of","json",str(source)],capture_output=True,text=True,timeout=20,check=False)
+        except (OSError,subprocess.TimeoutExpired):
+            raise MediaError("MEDIA_PROBE_UNAVAILABLE") from None
+        if result.returncode or len(result.stdout)>16000:
+            raise MediaError("MEDIA_PROBE_FAILED")
+        try:
+            data=json.loads(result.stdout)
+            streams=data["streams"]
+            video=[s for s in streams if s.get("codec_type")=="video"]
+            duration=float(data.get("format",{}).get("duration","0"))
+            if (not video or not 0<duration<=3600
+                or not 0<int(video[0].get("width",0))<=3840
+                or not 0<int(video[0].get("height",0))<=2160):
+                raise MediaError("MEDIA_PROBE_FAILED")
+        except (ValueError,KeyError,TypeError,OverflowError):
+            raise MediaError("MEDIA_PROBE_FAILED") from None
+        return {"video":video[0]["codec_name"],
+                "audio":[s["codec_name"] for s in streams if s.get("codec_type")=="audio"],
+                "format":data.get("format",{}).get("format_name","")}
+
+    def convert(self,source,destination):
+        before=self._probe(source)
+        # All outputs are MP4. Only verified compatible tracks may be stream-copied.
+        compatible=before["video"]=="h264" and all(x=="aac" for x in before["audio"])
+        args=[self.ffmpeg,"-hide_banner","-nostdin","-loglevel","error","-y",
+              "-i",str(source),"-map","0:v:0","-map","0:a:0?",
+              "-c:v","copy" if compatible else "libx264"]
+        if not compatible:
+            args+=["-preset","veryfast","-crf","24","-pix_fmt","yuv420p"]
+        args+=["-c:a","copy" if compatible else "aac","-b:a","128k",
+               "-movflags","+faststart","-f","mp4",str(destination)]
+        try:
+            result=subprocess.run(args,capture_output=True,timeout=CONVERT_TIMEOUT,check=False)
+        except (OSError,subprocess.TimeoutExpired):
+            raise MediaError("MEDIA_CONVERSION_UNAVAILABLE") from None
+        if result.returncode or not destination.is_file():
+            raise MediaError("MEDIA_CONVERSION_FAILED")
+        after=self._probe(destination)
+        if after["video"]!="h264" or any(x!="aac" for x in after["audio"]):
+            raise MediaError("MEDIA_OUTPUT_NOT_MP4")
+        with open(destination,"rb") as src:
+            if src.read(32).find(b"ftyp")<0:
+                raise MediaError("MEDIA_OUTPUT_NOT_MP4")
+        size=destination.stat().st_size
+        if size<=0 or size>MAX_OUTPUT_BYTES:
+            raise MediaError("MEDIA_OUTPUT_SIZE_EXCEEDED")
+        return size
+
+class MediaSave:
+    def __init__(self,discovery_store,root,downloader=None,transcoder=None):
+        self.store=discovery_store
+        self.root=Path(root)
+        self.downloader=downloader or SafeDownloader()
+        self.transcoder=transcoder or Transcoder()
+        self.lock=threading.Lock()
+
+    def _open(self):
+        db=self.store._open()
+        db.execute("PRAGMA foreign_keys=ON")
+        db.executescript(SCHEMA)
+        return db
+
+    def _directory(self):
+        if (not self.root.is_dir() or self.root.is_symlink() or
+            self.root.stat().st_uid!=os.getuid() or self.root.stat().st_mode & 0o077):
+            raise MediaError("MEDIA_DIRECTORY_UNSAFE")
+        return self.root
+
+    def _space(self,bytes_needed=0):
+        free=shutil.disk_usage(self._directory()).free
+        if free<MIN_DISK_FREE_BYTES+bytes_needed:
+            raise MediaError("MEDIA_DISK_FULL")
+
+    def _candidate(self,db,candidate_id,index):
+        if not isinstance(candidate_id,str) or not IDENT.fullmatch(candidate_id):
+            raise MediaError("MEDIA_CANDIDATE_INVALID")
+        if type(index) is not int or not 0<=index<50:
+            raise MediaError("MEDIA_INDEX_INVALID")
+        row=db.execute("SELECT p.post_id,p.media_json,p.state,COALESCE(b.blocked,0)"
+             " FROM discovery_posts p LEFT JOIN discovery_blogs b ON b.name=p.blog"
+             " WHERE p.candidate_id=?",(candidate_id,)).fetchone()
+        if not row or row[2]!="visible" or row[3]:
+            raise MediaError("MEDIA_CANDIDATE_UNAVAILABLE")
+        try:
+            media=json.loads(row[1])
+            chosen=media[index]
+            if not isinstance(media,list) or len(media)>50 or chosen.get("type")!="video":
+                raise MediaError("MEDIA_SELECTION_INVALID")
+            accepted=_safe_media(chosen)
+            if not accepted or accepted["type"]!="video":
+                raise MediaError("MEDIA_SELECTION_INVALID")
+            _media_url(accepted["url"])
+        except (ValueError,TypeError,KeyError,IndexError,AttributeError):
+            raise MediaError("MEDIA_SELECTION_INVALID") from None
+        return row[0],accepted["url"]
+
+    def list(self,candidate_id=None):
+        with closing(self._open()) as db:
+            if candidate_id is None:
+                rows=db.execute("SELECT id,candidate_id,source_post_id,media_index,state,"
+                    "error_code,source_bytes,output_bytes,output_name,created_at,updated_at"
+                    " FROM media_save_jobs ORDER BY created_at DESC LIMIT 100").fetchall()
+            else:
+                if not isinstance(candidate_id,str) or not IDENT.fullmatch(candidate_id):
+                    raise MediaError("MEDIA_CANDIDATE_INVALID")
+                rows=db.execute("SELECT id,candidate_id,source_post_id,media_index,state,"
+                    "error_code,source_bytes,output_bytes,output_name,created_at,updated_at"
+                    " FROM media_save_jobs WHERE candidate_id=? ORDER BY created_at DESC LIMIT 100",
+                    (candidate_id,)).fetchall()
+        keys=("id","candidate_id","source_post_id","media_index","state","error_code",
+              "source_bytes","output_bytes","output_name","created_at","updated_at")
+        return {"verified":True,"jobs":[dict(zip(keys,row)) for row in rows]}
+
+    def save(self,candidate_id,media_index,rights_confirmed=False):
+        if rights_confirmed is not True:
+            raise MediaError("MEDIA_RIGHTS_CONFIRMATION_REQUIRED")
+        if not self.lock.acquire(blocking=False):
+            raise MediaError("MEDIA_BUSY")
+        try:
+            return self._save(candidate_id,media_index)
+        finally:
+            self.lock.release()
+
+    def _save(self,candidate_id,media_index):
+        self._directory()
+        self._space()
+        now=int(time.time())
+        with closing(self._open()) as db:
+            try:
+                db.execute("BEGIN IMMEDIATE")
+                post_id,url=self._candidate(db,candidate_id,media_index)
+                previous=db.execute("SELECT id,state FROM media_save_jobs WHERE candidate_id=?"
+                    " AND media_index=? AND source_url=?",(candidate_id,media_index,url)).fetchone()
+                if previous and previous[1]=="completed":
+                    result=self.list(candidate_id)
+                    match=next(x for x in result["jobs"] if x["id"]==previous[0])
+                    if (self.root / match["output_name"]).is_file():
+                        db.execute("COMMIT")
+                        return {"verified":True,"job":match,"from_cache":True}
+                if previous and previous[1]=="running":
+                    db.execute("ROLLBACK")
+                    raise MediaError("MEDIA_JOB_IN_PROGRESS")
+                existing=db.execute("SELECT COALESCE(SUM(output_bytes),0) FROM media_save_jobs"
+                                  " WHERE state='completed'").fetchone()[0]
+                if existing+MAX_OUTPUT_BYTES>MAX_TOTAL_SAVED_BYTES:
+                    db.execute("ROLLBACK")
+                    raise MediaError("MEDIA_QUOTA_EXCEEDED")
+                job_id=previous[0] if previous else uuid.uuid4().hex
+                if previous:
+                    db.execute("UPDATE media_save_jobs SET state='running',error_code='',updated_at=? "
+                               "WHERE id=?",(now,job_id))
+                else:
+                    db.execute("INSERT INTO media_save_jobs(id,candidate_id,source_url,source_post_id,"
+                               "media_index,state,created_at,updated_at) VALUES(?,?,?,?,?,'running',?,?)",
+                               (job_id,candidate_id,url,post_id,media_index,now,now))
+                db.execute("COMMIT")
+            except Exception:
+                if db.in_transaction:
+                    db.execute("ROLLBACK")
+                raise
+        source=self.root/(job_id+".source.part")
+        partial=self.root/(job_id+".mp4.part")
+        output=self.root/(job_id+".mp4")
+        for path in (source,partial):
+            if path.exists():
+                path.unlink()
+        try:
+            size=self.downloader.probe(url)
+            if not isinstance(size,int) or size<1 or size>MAX_SOURCE_BYTES:
+                raise MediaError("MEDIA_SIZE_EXCEEDED")
+            self._space(size+MAX_OUTPUT_BYTES)
+            got=self.downloader.fetch(url,source,size)
+            if got!=size:
+                raise MediaError("MEDIA_SIZE_CHANGED")
+            output_bytes=self.transcoder.convert(source,partial)
+            self._space(output_bytes)
+            digest=hashlib.file_digest(open(partial,"rb"),"sha256").hexdigest()
+            os.replace(partial,output)
+            with closing(self._open()) as db:
+                db.execute("UPDATE media_save_jobs SET state='completed',source_bytes=?,"
+                           "output_bytes=?,output_name=?,sha256=?,updated_at=? WHERE id=?",
+                           (size,output_bytes,output.name,digest,int(time.time()),job_id))
+            return {"verified":True,"job_id":job_id,"state":"completed",
+                    "source_bytes":size,"output_bytes":output_bytes,"output_name":output.name}
+        except Exception as exc:
+            error=str(exc) if isinstance(exc,MediaError) else "MEDIA_PROCESS_FAILED"
+            try:
+                with closing(self._open()) as db:
+                    db.execute("UPDATE media_save_jobs SET state='failed',error_code=?,updated_at=? WHERE id=?",
+                               (error,int(time.time()),job_id))
+            except sqlite3.Error:
+                pass
+            if isinstance(exc,MediaError):
+                raise
+            raise MediaError("MEDIA_PROCESS_FAILED") from None
+        finally:
+            for path in (source,partial):
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
