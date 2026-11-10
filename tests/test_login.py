@@ -39,6 +39,15 @@ class LoginTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b'type="password"', body)
 
+    def test_query_parameters_do_not_hide_login_layout(self):
+        for path in ("/?source=link", "/index.html?utm_source=browser", "/login?ref=link"):
+            status, body, _ = request(self.server.port, "GET", path)
+            self.assertIn(status, (200, 401))
+            self.assertIn(b'action="/session"', body)
+            self.assertNotIn(b"bad request", body)
+        status, _, _ = request(self.server.port, "GET", "/healthz?unexpected=1")
+        self.assertEqual(status, 400)
+
     def test_login_creates_distinct_opaque_session_not_master_token(self):
         headers = {"Content-Type": "application/x-www-form-urlencoded", "Accept": "text/html"}
         body = b"token=" + TOKEN.encode()
