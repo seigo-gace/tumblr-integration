@@ -9,7 +9,7 @@ import re
 import stat
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
 BLOG = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}(?:\.tumblr\.com)?$", re.I)
@@ -65,6 +65,35 @@ class OfficialTransport:
             raise ValueError("tumblr_response_invalid") from None
 
 
+def media_thumbnail(post):
+    """Extract a Tumblr-hosted preview from NPF image/video blocks, if present."""
+    blocks = post.get("content") if isinstance(post, dict) else None
+    if not isinstance(blocks, list):
+        return "", ""
+    for block in blocks:
+        if not isinstance(block, dict) or block.get("type") not in ("image", "video"):
+            continue
+        kind = block["type"]
+        media = block.get("poster") if kind == "video" else block.get("media")
+        if isinstance(media, dict):
+            media = [media]
+        if not isinstance(media, list):
+            continue
+        for item in media:
+            if not isinstance(item, dict):
+                continue
+            url = item.get("url")
+            if not isinstance(url, str) or len(url) > 500:
+                continue
+            parsed = urlsplit(url)
+            hostname = (parsed.hostname or "").lower()
+            if parsed.scheme == "https" and not parsed.username and not parsed.password and (
+                hostname == "media.tumblr.com" or hostname.endswith(".media.tumblr.com")
+            ):
+                return url, kind
+    return "", ""
+
+
 class TumblrReadAdapter:
     def __init__(self, owner_blog, token_file, transport=None):
         self.blog = normalize_blog(owner_blog)
@@ -101,10 +130,12 @@ class TumblrReadAdapter:
             raw_url = item.get("post_url")
             url = raw_url if isinstance(raw_url, str) and raw_url.startswith("https://") else ""
             name = item.get("summary") or item.get("title") or "(タイトルなし)"
+            thumbnail, npf_type = media_thumbnail(item)
             rows.append({
                 "title": str(name)[:200],
-                "type": str(item.get("type") or "")[:40],
+                "type": str(npf_type or item.get("type") or "")[:40],
                 "date": str(item.get("date") or "")[:60],
+                "thumbnail_url": thumbnail,
                 "url": url[:500],
             })
         return {"verified": True, "rows": rows, "total": len(posts)}
