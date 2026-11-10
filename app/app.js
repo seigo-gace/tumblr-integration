@@ -23,6 +23,153 @@
     }
   });
 
+  // Library/Viewer is local-only. It never invokes a Tumblr endpoint.
+  const libraryButton=document.getElementById("show-library");
+  let libraryFilter="all";
+  let libraryOffset=0;
+  const librarySelection=new Set();
+  function libraryLink(url){
+    try{
+      const u=new URL(url);
+      if(u.protocol!=="https:"||u.username||u.password)return null;
+      const host=u.hostname.toLowerCase();
+      if(host!=="tumblr.com"&&host!=="www.tumblr.com"&&!host.endsWith(".tumblr.com"))return null;
+      return u.href;
+    }catch(error){return null;}
+  }
+  function libraryMedia(url){
+    try{
+      const u=new URL(url);
+      const host=u.hostname.toLowerCase();
+      return u.protocol==="https:"&&!u.username&&!u.password&&
+        (host==="media.tumblr.com"||host.endsWith(".media.tumblr.com"))?u.href:null;
+    }catch(error){return null;}
+  }
+  async function libraryRequest(path,payload){
+    const options={credentials:"same-origin"};
+    if(payload){options.method="POST";options.headers={"Content-Type":"application/json"};options.body=JSON.stringify(payload);}
+    const response=await fetch(path,options);
+    if(!response.ok)throw new Error("library_http_"+response.status);
+    return response.json();
+  }
+  async function libraryUpdate(ids,field,value){
+    if(!ids.length)return;
+    const result=await libraryRequest("/library/update",{candidate_ids:ids,field:field,value:value});
+    if(result.verified!==true||result.updated!==ids.length)throw new Error("library_unverified");
+    await showLibrary();
+  }
+  async function libraryView(item,index){
+    if(!item||!Array.isArray(item.media)||!item.media.length)return;
+    const media=item.media.filter(function(m){return libraryMedia(m.url);});
+    if(!media.length)return;
+    const section=document.createElement("section");section.className="library-viewer";
+    const heading=document.createElement("h3");heading.textContent=item.title||"投稿のメディア";
+    const body=document.createElement("div");body.className="library-viewer-media";
+    const toolbar=document.createElement("div");toolbar.className="library-viewer-tools";
+    let cursor=Math.max(0,Math.min(index||0,media.length-1));
+    async function render(){
+      body.replaceChildren();
+      const entry=media[cursor];
+      const source=libraryMedia(entry.url);
+      if(entry.type==="image"){
+        const img=document.createElement("img");img.src=source;img.alt="投稿内の画像";img.loading="lazy";
+        img.referrerPolicy="no-referrer";body.appendChild(img);
+      }else{
+        const a=document.createElement("a");a.href=source;a.target="_blank";a.rel="noopener noreferrer";
+        a.textContent="動画の参照元を開く";body.appendChild(a);
+      }
+      position.textContent=(cursor+1)+" / "+media.length;
+      try{
+        const saved=await libraryRequest("/library/progress",{candidate_id:item.candidate_id,media_index:cursor});
+        if(saved.verified!==true)throw new Error("not_saved");
+      }catch(error){display("閲覧位置を保存できませんでした。","system");}
+    }
+    const prev=document.createElement("button");prev.type="button";prev.textContent="前へ";
+    const next=document.createElement("button");next.type="button";next.textContent="次へ";
+    const position=document.createElement("span");
+    const close=document.createElement("button");close.type="button";close.textContent="閉じる";
+    prev.addEventListener("click",function(){cursor=(cursor+media.length-1)%media.length;render();});
+    next.addEventListener("click",function(){cursor=(cursor+1)%media.length;render();});
+    close.addEventListener("click",function(){section.remove();});
+    toolbar.append(prev,position,next,close);section.append(heading,body,toolbar);
+    messages.appendChild(section);messages.scrollTop=messages.scrollHeight;
+    await render();
+  }
+  async function showLibrary(){
+    let data;
+    try{
+      data=await libraryRequest("/library?filter="+encodeURIComponent(libraryFilter)+"&offset="+libraryOffset+"&limit=50");
+      if(data.verified!==true||!Array.isArray(data.items))throw new Error("not_verified");
+    }catch(error){display("ライブラリを読み込めませんでした。保存状態を変更していません。","system");return;}
+    const section=document.createElement("section");section.className="library-panel result-view";
+    const heading=document.createElement("h3");heading.textContent="ライブラリ（保存候補）";
+    const controls=document.createElement("div");controls.className="library-controls";
+    const filter=document.createElement("select");filter.setAttribute("aria-label","ライブラリ絞り込み");
+    for(const [value,label] of [["all","すべて"],["unread","未読"],["seen","既読"],["favorite","お気に入り"],["watch_later","あとで見る"],["unavailable","取得不能"]]){
+      const option=document.createElement("option");option.value=value;option.textContent=label;filter.appendChild(option);
+    }
+    filter.value=libraryFilter;
+    filter.addEventListener("change",function(){libraryFilter=filter.value;libraryOffset=0;librarySelection.clear();showLibrary();});
+    const total=document.createElement("span");total.textContent=String(data.total)+"件";
+    const bulk=document.createElement("div");bulk.className="library-controls";
+    for(const [label,field,value] of [["既読にする","seen",true],["未読にする","seen",false],["お気に入り","favorite",true],["お気に入り解除","favorite",false],["あとで見る","watch_later",true],["あとで見る解除","watch_later",false]]){
+      const b=document.createElement("button");b.type="button";b.textContent=label;
+      b.addEventListener("click",async function(){
+        try{await libraryUpdate(Array.from(librarySelection),field,value);librarySelection.clear();}
+        catch(error){display("選択項目を更新できませんでした。","system");}
+      });bulk.appendChild(b);
+    }
+    controls.append(filter,total);
+    const cards=document.createElement("div");cards.className="library-grid";
+    for(const item of data.items){
+      const card=document.createElement("article");card.className="library-card";
+      const check=document.createElement("input");check.type="checkbox";check.checked=librarySelection.has(item.candidate_id);
+      check.setAttribute("aria-label",(item.title||item.candidate_id)+"を選択");
+      check.addEventListener("change",function(){if(check.checked)librarySelection.add(item.candidate_id);else librarySelection.delete(item.candidate_id);});
+      const name=document.createElement("strong");name.textContent=item.title||"(タイトルなし)";
+      const meta=document.createElement("small");meta.textContent=item.blog+" • "+item.date+" • "+(item.seen?"既読":"未読")+
+        (item.favorite?" • ★お気に入り":"")+(item.watch_later?" • あとで見る":"");
+      card.append(check,name,meta);
+      const safePreview=libraryMedia(item.thumbnail_url)||(item.media||[]).map(function(m){return libraryMedia(m.url);}).find(Boolean);
+      if(safePreview){
+        const img=document.createElement("img");img.className="library-thumb";img.src=safePreview;img.alt="投稿のサムネイル";
+        img.loading="lazy";img.referrerPolicy="no-referrer";card.appendChild(img);
+      }
+      const actions=document.createElement("div");actions.className="library-controls";
+      const open=document.createElement("button");open.type="button";open.textContent="閲覧";
+      open.disabled=!(item.media||[]).length||item.state!=="visible";
+      open.addEventListener("click",function(){libraryView(item,item.last_media_index);});
+      actions.appendChild(open);
+      const source=libraryLink(item.url);
+      if(source){const a=document.createElement("a");a.href=source;a.target="_blank";a.rel="noopener noreferrer";a.textContent="出典";actions.appendChild(a);}
+      card.appendChild(actions);
+      cards.appendChild(card);
+    }
+    if(!data.items.length){
+      const empty=document.createElement("p");empty.textContent="該当する保存候補はありません。";cards.appendChild(empty);
+    }
+    const pager=document.createElement("div");pager.className="library-controls";
+    const prev=document.createElement("button");prev.type="button";prev.textContent="前の50件";
+    const next=document.createElement("button");next.type="button";next.textContent="次の50件";
+    prev.disabled=libraryOffset===0;next.disabled=libraryOffset+data.items.length>=data.total;
+    prev.addEventListener("click",function(){libraryOffset=Math.max(0,libraryOffset-50);librarySelection.clear();showLibrary();});
+    next.addEventListener("click",function(){libraryOffset+=50;librarySelection.clear();showLibrary();});
+    pager.append(prev,next);
+    if(data.last_position&&typeof data.last_position.candidate_id==="string"){
+      const resume=document.createElement("button");resume.type="button";resume.textContent="前回の続き";
+      resume.addEventListener("click",async function(){
+        try{
+          const result=await libraryRequest("/library?filter=all&offset=0&limit=100");
+          const found=result.items.find(function(item){return item.candidate_id===data.last_position.candidate_id;});
+          if(found){await libraryView(found,data.last_position.media_index);}else display("前回の投稿がこの一覧にありません。","system");
+        }catch(error){display("前回位置を確認できませんでした。","system");}
+      });pager.appendChild(resume);
+    }
+    section.append(heading,controls,bulk,cards,pager);
+    messages.appendChild(section);messages.scrollTop=messages.scrollHeight;
+  }
+  libraryButton.addEventListener("click",showLibrary);
+
   const assist=document.getElementById("assist");
   const confirm=document.getElementById("confirm");
   const attachmentPicker=document.getElementById("attachments");
