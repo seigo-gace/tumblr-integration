@@ -268,10 +268,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(403, "forbidden\n", "text/plain; charset=utf-8")
             return
         parts = urlsplit(self.path)
-        if parts.query or parts.fragment:
-            self._send(400, "bad request\n", "text/plain; charset=utf-8")
-            return
-        if parts.path == "/drafts":
+        # Browser entry URLs can include harmless campaign/query parameters.\n        # Do not let them replace the owner login screen with plain-text 400.\n        if parts.query and parts.path not in ("/", "/index.html", "/login"):\n            self._send(400, "bad request\n", "text/plain; charset=utf-8")\n            return\n        if parts.path == "/drafts":
             if not _authorized(self):
                 self._unauthorized()
                 return
