@@ -141,10 +141,10 @@
   function renderView(view){
     if(!view||view.kind!=="records"||view.status!=="connected"||
        !Array.isArray(view.columns)||!Array.isArray(view.rows))return;
-    const allowed=new Set(["title","type","date","url","label","value","period","name","status"]);
+    const allowed=new Set(["title","type","date","url","label","value","period","name","status","thumbnail_url"]);
     const columns=view.columns.filter(function(key){return typeof key==="string"&&allowed.has(key);}).slice(0,6);
     if(!columns.length)return;
-    const labels={title:"タイトル",type:"種類",date:"日付",url:"リンク",label:"項目",value:"値",period:"期間",name:"名前",status:"状態"};
+    const labels={title:"タイトル",type:"種類",date:"日付",url:"リンク",label:"項目",value:"値",period:"期間",name:"名前",status:"状態",thumbnail_url:"画像"};
     const section=document.createElement("section");
     section.className="result-view";
     const heading=document.createElement("h3");
@@ -166,7 +166,18 @@
         const tr=document.createElement("tr");
         columns.forEach(function(key){
           const td=document.createElement("td"),value=String(record[key]??"").slice(0,500);
-          if(key==="url"&&/^https:\/\/[^\s/@]+(?:\:[0-9]+)?(?:[/?#]|$)/i.test(value)){
+          if(key==="thumbnail_url"&&value){
+            try{
+              const thumb=new URL(value);
+              const host=thumb.hostname.toLowerCase();
+              if(thumb.protocol!=="https:"||thumb.username||thumb.password||
+                 !(host==="media.tumblr.com"||host.endsWith(".media.tumblr.com")))throw new Error("bad_thumbnail");
+              const img=document.createElement("img");
+              img.src=thumb.href;img.alt="投稿サムネイル";img.loading="lazy";img.referrerPolicy="no-referrer";
+              img.className="result-thumbnail";
+              td.appendChild(img);
+            }catch(error){td.textContent="—";}
+          }else if(key==="url"&&/^https:\/\/[^\s/@]+(?:\:[0-9]+)?(?:[/?#]|$)/i.test(value)){
             try{
               const url=new URL(value);
               if(url.protocol!=="https:"||url.username||url.password)throw new Error("bad_url");
