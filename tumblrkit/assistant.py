@@ -382,6 +382,13 @@ class Assistant:
                     clean[key] = str(value)[:500]
                 else:
                     clean[key] = ""
+            if action == "tumblr.discover":
+                blog = row.get("blog")
+                candidate = row.get("candidate_id")
+                if isinstance(blog, str) and re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", blog):
+                    clean["blog"] = blog
+                if isinstance(candidate, str) and len(candidate) <= 100:
+                    clean["candidate_id"] = candidate
             safe_rows.append(clean)
         return {"kind": "records", "title": title, "action": action,
                 "status": "connected", "columns": list(columns), "rows": safe_rows,
