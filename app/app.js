@@ -180,6 +180,29 @@
       });
       table.appendChild(body);scroll.appendChild(table);section.appendChild(scroll);
     }
+    // Data-derived chart, not AI-generated media. Only verified numeric analytics rows.
+    if(view.action==="analytics.get_summary"&&rows.length){
+      const numeric=rows.slice(0,20).map(function(record){
+        const raw=String(record.value??"").replace(/,/g,"");
+        return {label:String(record.label??"").slice(0,60),value:/^-?\\d+(?:\\.\\d+)?$/.test(raw)?Number(raw):NaN};
+      }).filter(function(item){return item.label&&Number.isFinite(item.value)&&item.value>=0;});
+      const peak=Math.max(0,...numeric.map(function(item){return item.value;}));
+      if(peak>0){
+        const chart=document.createElement("div");chart.className="result-chart";
+        chart.setAttribute("role","img");chart.setAttribute("aria-label","集計結果の棒グラフ");
+        numeric.forEach(function(item){
+          const line=document.createElement("div");line.className="result-bar-row";
+          const label=document.createElement("span");label.textContent=item.label;
+          const track=document.createElement("div");track.className="result-bar-track";
+          const fill=document.createElement("div");fill.className="result-bar-fill";
+          fill.style.width=(item.value/peak*100).toFixed(2)+"%";
+          track.appendChild(fill);
+          const number=document.createElement("span");number.textContent=String(item.value);
+          line.append(label,track,number);chart.appendChild(line);
+        });
+        section.appendChild(chart);
+      }
+    }
     if(view.truncated){
       const note=document.createElement("p");note.textContent="先頭100件を表示しています。";section.appendChild(note);
     }
