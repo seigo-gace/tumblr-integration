@@ -475,6 +475,17 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(403, "origin rejected\n", "text/plain; charset=utf-8")
             return
         parts = urlsplit(self.path)
+        if parts.path.startswith("/attachments/") and not parts.query:
+            try:
+                deleted = self.server.attachment_store.delete(parts.path[len("/attachments/"):])
+            except AttachmentError:
+                self._json(400, {"error": "invalid_attachment"})
+                return
+            except (OSError, sqlite3.Error):
+                self._json(503, {"error": "attachment_store_unavailable"})
+                return
+            self._json(200, {"deleted": deleted})
+            return
         if parts.query or not parts.path.startswith("/drafts/"):
             self._send(404, "not found\n", "text/plain; charset=utf-8")
             return
