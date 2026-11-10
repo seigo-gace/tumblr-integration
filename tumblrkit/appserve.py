@@ -296,6 +296,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(400, "bad request\n", "text/plain; charset=utf-8")
             return
         if parts.path == "/assistant":
+            if not _authorized(self):
+                self._unauthorized()
+                return
             bearer_ok = self.headers.get("Authorization", "").startswith("Bearer ") and _authorized(self)
             if not _same_origin(self) and not bearer_ok:
                 self._send(403, "origin rejected\n", "text/plain; charset=utf-8")
