@@ -175,7 +175,9 @@ class DiscoveryEngine:
                 featured=item.get("featured_timestamp")
                 when=featured if isinstance(featured,int) and not isinstance(featured,bool) and featured>0 else item.get("timestamp")
                 if not isinstance(when,int) or isinstance(when,bool) or when<=0:
-                    raise ValueError("discovery_page_timestamp_invalid")
+                    if len(payload)>=SOURCE_LIMIT:
+                        raise ValueError("discovery_page_timestamp_invalid")
+                    continue
                 timestamps.append(when)
             before=min(timestamps) if timestamps else 0
             if len(payload)>=SOURCE_LIMIT:
