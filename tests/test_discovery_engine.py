@@ -189,7 +189,7 @@ class DiscoveryEngineTests(unittest.TestCase):
               "summary":"media","timestamp":300,"content":[
                   {"type":"image","media":[{"url":"https://64.media.tumblr.com/a.jpg"},
                                            {"url":"https://64.media.tumblr.com/b.jpg"}]},
-                  {"type":"video","poster":[{"url":"https://64.media.tumblr.com/c.jpg"}]},
+                  {"type":"video","media":{"url":"https://64.media.tumblr.com/c.mp4"},"poster":[{"url":"https://64.media.tumblr.com/c.jpg"}]},
                   {"type":"image","media":[{"url":"https://evil.invalid/out.jpg"}]}]}
         adapter,_=self.scanner([envelope([post])])
         adapter.perform("tumblr.discover","tag:media",{})
@@ -199,6 +199,7 @@ class DiscoveryEngineTests(unittest.TestCase):
         self.assertEqual([item["url"] for item in refs],[
             "https://64.media.tumblr.com/a.jpg",
             "https://64.media.tumblr.com/b.jpg",
+            "https://64.media.tumblr.com/c.mp4",
             "https://64.media.tumblr.com/c.jpg",
         ])
         self.assertEqual(record["thumbnail_url"],"https://64.media.tumblr.com/a.jpg")
