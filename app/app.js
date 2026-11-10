@@ -260,6 +260,31 @@
     if(view.truncated){
       const note=document.createElement("p");note.textContent="先頭100件を表示しています。";section.appendChild(note);
     }
+    if(view.action==="tumblr.discover"&&typeof view.next_target==="string"){
+      if(view.from_cache){
+        const note=document.createElement("p");
+        note.textContent="保存済み候補を表示しています。新しいAPI検索は実行していません。";
+        section.appendChild(note);
+      }else if(view.complete){
+        const note=document.createElement("p");
+        note.textContent="この条件で取得できる範囲の確認は完了しました。";
+        section.appendChild(note);
+      }else{
+        const next=document.createElement("button");
+        next.type="button";
+        next.className="discovery-next";
+        next.textContent="続きを取得";
+        next.setAttribute("aria-label","保存された巡回位置から次の候補を取得");
+        next.addEventListener("click",function(){
+          next.disabled=true;
+          const text="検索して 対象: "+view.next_target;
+          lastText=text;
+          display(text,"user");
+          post({message:text}).finally(function(){next.disabled=false;});
+        });
+        section.appendChild(next);
+      }
+    }
     messages.appendChild(section);
     messages.scrollTop=messages.scrollHeight;
   }
