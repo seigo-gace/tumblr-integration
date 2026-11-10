@@ -285,6 +285,21 @@ class MediaSave:
               "source_bytes","output_bytes","output_name","created_at","updated_at")
         return {"verified":True,"jobs":[dict(zip(keys,row)) for row in rows]}
 
+    def file(self,job_id):
+        if not isinstance(job_id,str) or not KEY.fullmatch(job_id):
+            raise MediaError("MEDIA_JOB_INVALID")
+        with closing(self._open()) as db:
+            row=db.execute("SELECT state,output_name,output_bytes FROM media_save_jobs WHERE id=?",
+                           (job_id,)).fetchone()
+        if not row or row[0]!="completed" or row[1]!=job_id+".mp4":
+            raise MediaError("MEDIA_JOB_NOT_READY")
+        root=self._directory()
+        path=root/row[1]
+        if (path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077
+                or path.stat().st_uid!=os.getuid() or path.stat().st_size!=row[2]):
+            raise MediaError("MEDIA_FILE_UNSAFE")
+        return path
+
     def save(self,candidate_id,media_index,rights_confirmed=False):
         if rights_confirmed is not True:
             raise MediaError("MEDIA_RIGHTS_CONFIRMATION_REQUIRED")
@@ -303,7 +318,7 @@ class MediaSave:
             try:
                 db.execute("BEGIN IMMEDIATE")
                 post_id,url=self._candidate(db,candidate_id,media_index)
-                previous=db.execute("SELECT id,state FROM media_save_jobs WHERE candidate_id=?"
+                previous=db.execute("SELECT id,state,updated_at FROM media_save_jobs WHERE candidate_id=?"
                     " AND media_index=? AND source_url=?",(candidate_id,media_index,url)).fetchone()
                 if previous and previous[1]=="completed":
                     match=db.execute("SELECT id,candidate_id,source_post_id,media_index,state,"
@@ -316,8 +331,13 @@ class MediaSave:
                         db.execute("COMMIT")
                         return {"verified":True,"job":job,"from_cache":True}
                 if previous and previous[1]=="running":
-                    db.execute("ROLLBACK")
-                    raise MediaError("MEDIA_JOB_IN_PROGRESS")
+                    if now-previous[2]<600:
+                        db.execute("ROLLBACK")
+                        raise MediaError("MEDIA_JOB_IN_PROGRESS")
+                    # Process died during a bounded job; only explicit owner retry
+                    # may clear the interrupted state after the safety window.
+                    db.execute("UPDATE media_save_jobs SET state='failed',"
+                               "error_code='MEDIA_INTERRUPTED' WHERE id=?",(previous[0],))
                 existing=db.execute("SELECT COALESCE(SUM(output_bytes),0) FROM media_save_jobs"
                                   " WHERE state='completed'").fetchone()[0]
                 if existing+MAX_OUTPUT_BYTES>MAX_TOTAL_SAVED_BYTES:
