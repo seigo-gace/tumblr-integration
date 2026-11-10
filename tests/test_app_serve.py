@@ -120,6 +120,34 @@ class AppServeTests(unittest.TestCase):
             status, _, _ = fetch(base + "/oauth/callback?state=" + state + "&code=valid")
             self.assertEqual(status, 400)
 
+    def test_discovery_cache_and_exclusions_are_owner_only_and_offline(self):
+        import os
+        from tumblrkit.discovery_store import DiscoveryStore
+        build_release(APP, self.tmp, SHA_A)
+        private = self.tmp / "discovery-private"
+        private.mkdir(mode=0o700)
+        os.chmod(private,0o700)
+        with AppServer(self.tmp / "current", TOKEN) as server:
+            server.httpd.discovery_store = DiscoveryStore(private / "state.sqlite3")
+            base = f"http://127.0.0.1:{server.port}"
+            status,_,_ = fetch(base + "/discovery/candidates")
+            self.assertEqual(status,401)
+            status,body,_ = fetch(base + "/discovery/candidates",TOKEN)
+            self.assertEqual(status,200)
+            self.assertEqual(json.loads(body)["posts"],[])
+            exclusion=json.dumps({"blog":"example"}).encode()
+            status,_,_ = fetch(base + "/discovery/exclude",method="POST",data=exclusion,
+                               headers={"Content-Type":"application/json","Origin":base})
+            self.assertEqual(status,401)
+            status,_,_ = fetch(base + "/discovery/exclude",TOKEN,method="POST",data=exclusion,
+                               headers={"Content-Type":"application/json","Origin":"https://evil.invalid"})
+            self.assertEqual(status,403)
+            status,body,_ = fetch(base + "/discovery/exclude",TOKEN,method="POST",data=exclusion,
+                                  headers={"Content-Type":"application/json","Origin":base})
+            self.assertEqual(status,200)
+            self.assertTrue(json.loads(body)["excluded"])
+            self.assertEqual(server.httpd.discovery_store.excluded_blogs(),{"example"})
+
     def test_rollback_restores_previous_commit(self):
         build_release(APP, self.tmp, SHA_A)
         build_release(APP, self.tmp, SHA_B)
