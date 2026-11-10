@@ -191,3 +191,37 @@ class DiscoveryEngine:
         return {"verified":True,"rows":rows,"total":len(rows),
                 "source":source,"cursor":checkpoint["cursor"],
                 "complete":checkpoint["complete"],"from_cache":from_cache}
+
+    def recheck_candidate(self,candidate_id):
+        """Explicit one-post inspection only; never periodic availability probing.
+
+        404 from the official exact-id endpoint may mean deleted or non-public.
+        Network failures and 403 are not deletion evidence.
+        """
+        record=self.store.candidate(candidate_id)
+        blog=normalize_blog(record["blog"])
+        post_id=record["post_id"]
+        if not post_id.isascii() or not post_id.isdecimal():
+            raise ValueError("discovery_candidate_id_invalid")
+        if isinstance(self.transport,OfficialTransport):
+            self.transport.budget.reserve(1)
+        from tumblrkit.tumblr_read import token_from_file
+        bearer=self.token_provider() if self.token_provider else token_from_file(self.token_file)
+        path="/v2/blog/"+blog+".tumblr.com/posts?"+urlencode({
+            "id":post_id,"npf":"true","limit":1})
+        try:
+            result=self.transport.get(path,bearer)
+        except ValueError as exc:
+            if str(exc)=="tumblr_post_unavailable":
+                self.store.mark_unavailable(candidate_id)
+                return {"verified":True,"candidate_id":candidate_id,"state":"unavailable"}
+            raise
+        if (not isinstance(result,dict) or result.get("meta",{}).get("status")!=200):
+            raise ValueError("discovery_candidate_check_unverified")
+        posts=result.get("response",{}).get("posts") if isinstance(result.get("response"),dict) else None
+        if not isinstance(posts,list):
+            raise ValueError("discovery_candidate_check_unverified")
+        if not any(str(p.get("id_string") or p.get("id"))==post_id for p in posts if isinstance(p,dict)):
+            self.store.mark_unavailable(candidate_id)
+            return {"verified":True,"candidate_id":candidate_id,"state":"unavailable"}
+        return {"verified":True,"candidate_id":candidate_id,"state":"visible"}
