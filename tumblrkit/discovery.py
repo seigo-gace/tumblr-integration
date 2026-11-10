@@ -107,12 +107,14 @@ class DiscoveryEngine:
     def scan(self,target,payload=None):
         if payload not in ({},None):
             raise ValueError("discovery_payload_unsupported")
-        mode,term=self.source_spec(target)
+        refresh=isinstance(target,str) and target.startswith("refresh:")
+        mode,term=self.source_spec(target[8:] if refresh else target)
         source=mode+":"+term
         checkpoint=self.store.checkpoint(source)
-        if checkpoint["complete"]:
+        if checkpoint["complete"] and not refresh:
             return self._result(source,mode,checkpoint,from_cache=True)
-        offset=checkpoint["cursor"]
+        # The old cursor remains committed on network/permission/rate failure.
+        offset=0 if refresh else checkpoint["cursor"]
         if mode=="following":
             if offset>100000: raise ValueError("discovery_cursor_invalid")
             path="/v2/user/following?"+urlencode({"limit":SOURCE_LIMIT,"offset":offset})
