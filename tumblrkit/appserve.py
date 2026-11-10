@@ -14,6 +14,8 @@ import re
 import secrets
 import shutil
 import threading
+import time
+import html
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -27,7 +29,9 @@ CONTENT_TYPES = {
     "styles.css": "text/css; charset=utf-8",
     "app.js": "text/javascript; charset=utf-8",
 }
-COOKIE = "tg_tumblr_access"
+COOKIE = "tg_tumblr_session"
+SESSION_TTL = 12 * 60 * 60
+LOGIN_PAGE = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><title>Tumblr操作｜ログイン</title><style>body{font-family:system-ui,sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;background:#10121a;color:#f5f6fa;padding:20px}main{width:min(100%,420px);border:1px solid #3a4052;border-radius:18px;background:#1b1e29;padding:28px}h1{font-size:1.45rem}p{color:#b3bbcf;line-height:1.6}label{display:block;margin:20px 0 8px}input{width:100%;box-sizing:border-box;padding:13px;background:#10121a;color:white;border:1px solid #576eac;border-radius:10px;font:inherit}button{width:100%;margin-top:18px;padding:13px;background:#8caaff;color:#10121a;border:0;border-radius:10px;font:inherit;font-weight:700}small{display:block;margin-top:16px;color:#b3bbcf}</style></head><body><main><h1>Tumblr 操作センター</h1><p>Master専用の操作画面です。アクセス用の秘密キーを入力してください。</p><form method="post" action="/session"><label for="token">アクセスキー</label><input id="token" name="token" type="password" autocomplete="off" required minlength="16" maxlength="256"><button type="submit">ログイン</button></form><small>ログイン情報をブラウザの保存領域には記録しません。12時間でセッションが失効します。</small></main></body></html>"""
 
 
 class ServeError(SystemExit):
@@ -151,12 +155,11 @@ def release_status(release):
 
 
 def _authorized(handler):
+    now = time.time()
     header = handler.headers.get("Authorization", "")
-    token = handler.server.token
     if header.startswith("Bearer "):
-        presented = header[7:]
         try:
-            if hmac.compare_digest(presented, token):
+            if hmac.compare_digest(header[7:], handler.server.token):
                 return True
         except (TypeError, ValueError):
             return False
@@ -164,12 +167,21 @@ def _authorized(handler):
     for part in cookie.split(";"):
         name, separator, value = part.strip().partition("=")
         if separator and name == COOKIE:
-            try:
-                if hmac.compare_digest(value, token):
+            with handler.server.session_lock:
+                expiry = handler.server.sessions.get(value, 0)
+                if expiry > now:
                     return True
-            except (TypeError, ValueError):
-                return False
+                handler.server.sessions.pop(value, None)
     return False
+
+
+def _same_origin(handler):
+    origin = handler.headers.get("Origin")
+    host = handler.headers.get("Host", "").lower()
+    if not origin or not host:
+        return False
+    parsed = urlsplit(origin)
+    return (parsed.scheme == "https" or (parsed.scheme == "http" and host.startswith("127.0.0.1:"))) and parsed.netloc.lower() == host and parsed.path == "" and not parsed.query and not parsed.fragment
 
 
 def _client_is_loopback(handler):
@@ -227,6 +239,15 @@ class _Handler(BaseHTTPRequestHandler):
             return fields["token"][0]
         raise ValueError("type")
 
+    def _session_cookie(self):
+        value = secrets.token_urlsafe(32)
+        with self.server.session_lock:
+            self.server.sessions[value] = time.time() + SESSION_TTL
+        return f"{COOKIE}={value}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age={SESSION_TTL}"
+
+    def _login_page(self):
+        self._send(200, LOGIN_PAGE, "text/html; charset=utf-8")
+
     def _consume_ticket(self):
         path = urlsplit(self.path).path
         prefix = "/session/ticket/"
@@ -238,7 +259,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.server.tickets.remove(ticket)
         self._send(302, "", "text/plain; charset=utf-8", extra=(
             ("Location", "/"),
-            ("Set-Cookie", f"{COOKIE}={self.server.token}; HttpOnly; SameSite=Strict; Path=/"),
+            ("Set-Cookie", self._session_cookie()),
         ))
         return True
 
@@ -252,6 +273,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if parts.path in ("/healthz", "/version"):
             self._json(200, release_status(self.server.release))
+            return
+        if parts.path == "/login":
+            self._login_page()
             return
         if self._consume_ticket():
             return
@@ -270,6 +294,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         parts = urlsplit(self.path)
         if parts.path == "/assistant":
+            if not _same_origin(self):
+                self._send(403, "origin rejected\\n", "text/plain; charset=utf-8")
+                return
             self._assistant()
             return
         if parts.path != "/session" or parts.query:
@@ -328,6 +355,8 @@ class AppServer:
         self.httpd.release = self.release
         self.httpd.token = self.token
         self.httpd.tickets = set()
+        self.httpd.sessions = {}
+        self.httpd.session_lock = threading.Lock()
         self.httpd.assistant = self.assistant
         if self.ticket:
             ticket = secrets.token_urlsafe(24)
