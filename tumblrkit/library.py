@@ -105,7 +105,40 @@ class Library:
                 "favorite":bool(fav),"watch_later":bool(later),
                 "last_media_index":min(index,max(0,len(media)-1))})
         return {"verified":True,"items":records,"total":count,"offset":offset,"limit":limit,
-                "filter":filter_name,"last_position":{"candidate_id":session[0],"media_index":session[1]} if session else None}
+                "filter":filter_name,"last_position":{"candidate_id":session[0],"media_index":session[1]} if session else None,
+                "resume_item":self.resume_item() if session else None}
+
+    def resume_item(self):
+        """Resolve the previously viewed candidate by stable ID, independent of pagination."""
+        with closing(self._open()) as db:
+            session=db.execute("SELECT candidate_id,media_index FROM library_session "
+                               "WHERE key='last'").fetchone()
+            if not session:
+                return None
+            row=db.execute(
+                "SELECT p.candidate_id,p.blog,p.post_id,p.title,p.url,p.post_type,p.posted_at,"
+                "p.media_json,p.thumbnail_url,p.state,COALESCE(s.seen,0),"
+                "COALESCE(s.favorite,0),COALESCE(s.watch_later,0) "
+                "FROM discovery_posts p LEFT JOIN discovery_blogs b ON b.name=p.blog "
+                "LEFT JOIN library_state s ON s.candidate_id=p.candidate_id "
+                "WHERE p.candidate_id=? AND p.state='visible' AND COALESCE(b.blocked,0)=0",
+                (session[0],)).fetchone()
+        if row is None:
+            return None
+        ident,blog,post_id,title,url,kind,date,raw,thumbnail,state,seen,favorite,later=row
+        try:
+            source=json.loads(raw)
+        except (TypeError,ValueError):
+            source=[]
+        media=[item for item in (_safe_media(x) for x in source[:50]) if item] if isinstance(source,list) else []
+        if not media:
+            return None
+        index=min(session[1],len(media)-1)
+        return {"candidate_id":ident,"blog":blog,"post_id":post_id,
+                "title":title,"url":url,"type":kind,"date":date,
+                "media":media,"thumbnail_url":thumbnail,"state":state,
+                "seen":bool(seen),"favorite":bool(favorite),"watch_later":bool(later),
+                "last_media_index":index}
 
     def update(self,candidate_ids,field,value):
         if field not in ("seen","favorite","watch_later"):
