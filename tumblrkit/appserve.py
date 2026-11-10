@@ -28,7 +28,7 @@ from tumblrkit.account_runtime import OwnerOAuth, load_owner_blog, register_owne
 from tumblrkit.drafts import DraftStore
 from tumblrkit.discovery_store import DiscoveryStore
 from tumblrkit.library import Library
-from tumblrkit.media_save import MediaSave, MediaError
+from tumblrkit.media_save import MediaSave, MediaError, Transcoder
 from tumblrkit.attachments import AttachmentStore, AttachmentError, MAX_ATTACHMENT_BYTES, IMAGE_TYPES
 
 COMMIT_MARK = "__TUMBLR_COMMIT__"
@@ -872,7 +872,16 @@ class AppServer:
         self.httpd.library = Library(self.httpd.discovery_store)
         media_root=self.release.resolve().parent.parent / "data" / "media"
         media_root.mkdir(parents=True,exist_ok=True,mode=0o700)
-        self.httpd.media_save = MediaSave(self.httpd.discovery_store,media_root)
+        tools_dir=media_root.parent / "media-tools"
+        ffmpeg=tools_dir / "ffmpeg"
+        ffprobe=tools_dir / "ffprobe"
+        if (ffmpeg.is_file() and ffprobe.is_file() and not ffmpeg.is_symlink()
+                and not ffprobe.is_symlink() and not tools_dir.is_symlink()
+                and tools_dir.stat().st_mode & 0o077 == 0):
+            converter=Transcoder(str(ffprobe),str(ffmpeg))
+        else:
+            converter=Transcoder()
+        self.httpd.media_save = MediaSave(self.httpd.discovery_store,media_root,transcoder=converter)
         self.httpd.draft_store = DraftStore(self.release.resolve().parent.parent / "data" / "drafts.sqlite3")
         self.httpd.attachment_store = AttachmentStore(self.release.resolve().parent.parent / "data")
         if self.ticket:
