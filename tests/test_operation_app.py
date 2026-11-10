@@ -48,6 +48,21 @@ class OperationAppTests(unittest.TestCase):
         self.assertNotIn('フォロー・タグ・公開候補を確認',self.html)
         self.assertEqual(self.html.count('class="goal"'),6)
 
+    def test_chat_first_without_oversized_metadata_or_repeated_explanations(self):
+        self.assertNotIn('class="eyebrow"', self.html)
+        self.assertNotIn('TGtumbler / Tumblr</span>', self.html)
+        self.assertNotIn('Tumblr 操作センター</h1>', self.html)
+        self.assertNotIn('分野のボタンを選ばなくても送信できます。', self.html)
+        self.assertNotIn('何をしたいかを書いてください。未接続', self.html)
+        self.assertNotIn('class="footnote"', self.html)
+        self.assertNotIn('class="draft-info"', self.html)
+        self.assertIn('id="revision" data-commit="__TUMBLR_COMMIT__" hidden', self.html)
+        self.assertIn('id="connection" class="visually-hidden"', self.html)
+        self.assertIn('id="messages" class="messages" role="log" aria-live="polite"></div>', self.html)
+        self.assertLess(self.html.index('id="selected-title"'), self.html.index('id="messages"'))
+        self.assertLess(self.html.index('id="messages"'), self.html.index('id="chat-form"'))
+        self.assertIn('min-height:calc(100vh - 24px)', self.css)
+
     def test_mobile_layout(self):
         self.assertIn("@media(max-width:760px)",self.css)
         self.assertIn('name="viewport"',self.html)
