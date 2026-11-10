@@ -46,6 +46,14 @@ CREATE TABLE IF NOT EXISTS discovery_posts(
   first_seen INTEGER NOT NULL,
   last_seen INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS discovery_blog_sources(
+  name TEXT NOT NULL, source TEXT NOT NULL, last_seen INTEGER NOT NULL,
+  PRIMARY KEY(name,source)
+);
+CREATE TABLE IF NOT EXISTS discovery_post_sources(
+  candidate_id TEXT NOT NULL, source TEXT NOT NULL, last_seen INTEGER NOT NULL,
+  PRIMARY KEY(candidate_id,source)
+);
 CREATE INDEX IF NOT EXISTS discovery_posts_by_source
 ON discovery_posts(source,last_seen);
 """
@@ -98,6 +106,9 @@ class DiscoveryStore:
                                " VALUES(?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET"
                                " last_seen=excluded.last_seen,url=excluded.url,source=excluded.source",
                                (blog["name"],blog["url"],source,now,now))
+                    db.execute("INSERT INTO discovery_blog_sources(name,source,last_seen) VALUES(?,?,?) "
+                               "ON CONFLICT(name,source) DO UPDATE SET last_seen=excluded.last_seen",
+                               (blog["name"],source,now))
                 for post in posts:
                     # Once the owner excludes a blog, never create more candidates for it.
                     blocked=db.execute("SELECT blocked FROM discovery_blogs WHERE name=?",
@@ -115,6 +126,9 @@ class DiscoveryStore:
                                 post["title"],post["type"],post["date"],post["thumbnail_url"],
                                 post["text_excerpt"],json.dumps(post["tags"],ensure_ascii=False),
                                 post["note_count"],now,now))
+                    db.execute("INSERT INTO discovery_post_sources(candidate_id,source,last_seen) VALUES(?,?,?) "
+                               "ON CONFLICT(candidate_id,source) DO UPDATE SET last_seen=excluded.last_seen",
+                               (post["candidate_id"],source,now))
                 db.execute("INSERT INTO discovery_sources(source_key,cursor,watermark,complete,updated_at)"
                            " VALUES(?,?,?,?,?) ON CONFLICT(source_key) DO UPDATE SET"
                            " cursor=excluded.cursor,watermark=excluded.watermark,"
@@ -147,7 +161,8 @@ class DiscoveryStore:
             if source:
                 posts=db.execute("SELECT candidate_id,blog,post_id,url,title,post_type,posted_at,"
                                  "thumbnail_url,text_excerpt,tags_json,note_count,state FROM discovery_posts"
-                                 " WHERE source=? AND state='visible' AND blog NOT IN"
+                                 " WHERE candidate_id IN (SELECT candidate_id FROM discovery_post_sources WHERE source=?)"
+                                 " AND state='visible' AND blog NOT IN"
                                  " (SELECT name FROM discovery_blogs WHERE blocked=1)"
                                  " ORDER BY last_seen DESC LIMIT ?",(source,limit)).fetchall()
             else:
@@ -175,8 +190,10 @@ class DiscoveryStore:
     def read_blogs(self,source=None,limit=100):
         with closing(self._open()) as db:
             if source:
-                rows=db.execute("SELECT name,url,source FROM discovery_blogs WHERE source=?"
-                                " AND blocked=0 ORDER BY last_seen DESC LIMIT ?",(source,limit)).fetchall()
+                rows=db.execute("SELECT b.name,b.url,? FROM discovery_blogs b"
+                                " WHERE b.name IN (SELECT name FROM discovery_blog_sources WHERE source=?)"
+                                " AND b.blocked=0 ORDER BY b.last_seen DESC LIMIT ?",
+                                (source,source,limit)).fetchall()
             else:
                 rows=db.execute("SELECT name,url,source FROM discovery_blogs WHERE blocked=0"
                                 " ORDER BY last_seen DESC LIMIT ?",(limit,)).fetchall()
