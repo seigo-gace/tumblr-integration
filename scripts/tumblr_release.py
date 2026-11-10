@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 import time
+from urllib.parse import urlencode
 
 # Invoked as python scripts/tumblr_release.py: include repository root for imports.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -69,6 +70,47 @@ def verify(port, sha, token):
     status, body = request(port, "/drafts", token)
     if status != 200 or "drafts" not in json.loads(body):
         raise ReleaseError("DRAFT_STORE_UNAVAILABLE")
+    verify_browser_session(port, token)
+
+
+def verify_browser_session(port, token):
+    """Exercise the actual owner form flow, without printing the key or cookie."""
+    body = urlencode({"token": token}).encode("utf-8")
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=4)
+    try:
+        connection.request(
+            "POST", "/session", body=body,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "text/html",
+                "Origin": "https://tumblr.hentaigay.org",
+                "Host": "127.0.0.1:" + str(port),
+                "Sec-Fetch-Site": "same-origin",
+            },
+        )
+        response = connection.getresponse()
+        status = response.status
+        cookie = response.getheader("Set-Cookie", "")
+        location = response.getheader("Location", "")
+        response.read(65536)
+    finally:
+        connection.close()
+    if status != 303 or location != "/" or not cookie.startswith("tg_tumblr_session="):
+        raise ReleaseError("OWNER_FORM_SESSION_REJECTED")
+    cookie_header = cookie.split(";", 1)[0]
+    for path, marker in (("/", b'id="chat-form"'),
+                         ("/app.js", b"/assistant"),
+                         ("/styles.css", b".draft-")):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=4)
+        try:
+            conn.request("GET", path, headers={"Cookie": cookie_header})
+            response = conn.getresponse()
+            page_status = response.status
+            data = response.read(65536)
+        finally:
+            conn.close()
+        if page_status != 200 or marker not in data:
+            raise ReleaseError("OWNER_FORM_STATIC_LAYOUT_REJECTED")
 
 
 def wait_port(port, opened, seconds=12):
