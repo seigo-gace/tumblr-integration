@@ -9,7 +9,7 @@ import uuid
 MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
 MAX_NAME_CHARS = 120
 IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
-ALLOWED_TYPES = IMAGE_TYPES | {"application/pdf", "text/plain"}
+OFFICE_TYPES = {\n    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",\n    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",\n    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",\n    ".zip": "application/zip",\n}\nALLOWED_TYPES = IMAGE_TYPES | {"application/pdf", "text/plain"} | set(OFFICE_TYPES.values())
 ID_RE = re.compile(r"[0-9a-f]{32}\Z")
 
 
@@ -17,7 +17,7 @@ class AttachmentError(ValueError):
     pass
 
 
-def sniff_type(data):
+def sniff_type(data, name=""):
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"
     if data.startswith(b"\xff\xd8\xff"):
@@ -65,7 +65,7 @@ class AttachmentStore:
         name = name.replace("\\", "/").split("/")[-1].strip()
         if not name or len(name) > MAX_NAME_CHARS or any(ord(c) < 32 for c in name):
             raise AttachmentError("INVALID_FILENAME")
-        media_type = sniff_type(data)
+        media_type = sniff_type(data, name)
         if media_type not in ALLOWED_TYPES:
             raise AttachmentError("UNSUPPORTED_FILE_TYPE")
         ident = uuid.uuid4().hex
