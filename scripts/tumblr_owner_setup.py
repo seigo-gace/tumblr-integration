@@ -5,6 +5,7 @@ deliberately not run by Actions, GPT CHAT, a remote public endpoint or CI.
 """
 import argparse
 import getpass
+import hmac
 import os
 from pathlib import Path
 import subprocess
@@ -32,8 +33,11 @@ def setup_token(path):
             raise SetupError("EXISTING_TOKEN_FILE_UNSAFE")
         require_token(path.read_text(encoding="utf-8").strip())
         return "EXISTING"
-    value = getpass.getpass("Tumblr操作アプリのログインキー (16文字以上): ")
+    value = getpass.getpass("Tumblr操作アプリのログインキー (英数字16文字以上): ")
     require_token(value)
+    repeat = getpass.getpass("確認のためもう一度入力: ")
+    if not hmac.compare_digest(value, repeat):
+        raise SetupError("LOGIN_KEY_CONFIRMATION_MISMATCH")
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as file:
         file.write(value + "\n")
