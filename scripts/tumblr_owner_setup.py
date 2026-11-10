@@ -20,7 +20,7 @@ class SetupError(Exception):
 
 
 def private_password_file():
-    folder = Path.home() / ".config" / "tgtumbler"
+    folder = Path.home() / ".config" / "tgtumbler" / "tumblr-operation-app"
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     if folder.stat().st_mode & 0o077:
         raise SetupError("PRIVATE_FOLDER_PERMISSIONS")
