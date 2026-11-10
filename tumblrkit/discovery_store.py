@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS discovery_posts(
   thumbnail_url TEXT NOT NULL,
   text_excerpt TEXT NOT NULL,
   tags_json TEXT NOT NULL,
+  media_json TEXT NOT NULL DEFAULT '[]',
   note_count INTEGER NOT NULL DEFAULT 0,
   state TEXT NOT NULL DEFAULT 'visible',
   first_seen INTEGER NOT NULL,
@@ -85,6 +86,9 @@ class DiscoveryStore:
         db.execute("PRAGMA busy_timeout=4000")
         db.execute("PRAGMA journal_mode=DELETE")
         db.executescript(SCHEMA)
+        columns={row[1] for row in db.execute("PRAGMA table_info(discovery_posts)")}
+        if "media_json" not in columns:
+            db.execute("ALTER TABLE discovery_posts ADD COLUMN media_json TEXT NOT NULL DEFAULT '[]'")
         return db
 
     def checkpoint(self,source):
@@ -116,15 +120,17 @@ class DiscoveryStore:
                     if blocked and blocked[0]:
                         continue
                     db.execute("INSERT INTO discovery_posts(candidate_id,blog,post_id,source,url,title,"
-                               "post_type,posted_at,thumbnail_url,text_excerpt,tags_json,note_count,first_seen,last_seen)"
-                               " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(candidate_id) DO UPDATE SET"
+                               "post_type,posted_at,thumbnail_url,text_excerpt,tags_json,media_json,note_count,first_seen,last_seen)"
+                               " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(candidate_id) DO UPDATE SET"
                                " last_seen=excluded.last_seen,url=excluded.url,title=excluded.title,"
                                " post_type=excluded.post_type,posted_at=excluded.posted_at,"
                                " thumbnail_url=excluded.thumbnail_url,text_excerpt=excluded.text_excerpt,"
-                               " tags_json=excluded.tags_json,note_count=excluded.note_count,state='visible'",
+                               " tags_json=excluded.tags_json,media_json=excluded.media_json,"
+                               " note_count=excluded.note_count,state='visible'",
                                (post["candidate_id"],post["blog"],post["post_id"],source,post["url"],
                                 post["title"],post["type"],post["date"],post["thumbnail_url"],
                                 post["text_excerpt"],json.dumps(post["tags"],ensure_ascii=False),
+                                json.dumps(post.get("media_refs",[]),ensure_ascii=False),
                                 post["note_count"],now,now))
                     db.execute("INSERT INTO discovery_post_sources(candidate_id,source,last_seen) VALUES(?,?,?) "
                                "ON CONFLICT(candidate_id,source) DO UPDATE SET last_seen=excluded.last_seen",
@@ -160,19 +166,19 @@ class DiscoveryStore:
         with closing(self._open()) as db:
             if source:
                 posts=db.execute("SELECT candidate_id,blog,post_id,url,title,post_type,posted_at,"
-                                 "thumbnail_url,text_excerpt,tags_json,note_count,state FROM discovery_posts"
+                                 "thumbnail_url,text_excerpt,tags_json,media_json,note_count,state FROM discovery_posts"
                                  " WHERE candidate_id IN (SELECT candidate_id FROM discovery_post_sources WHERE source=?)"
                                  " AND state='visible' AND blog NOT IN"
                                  " (SELECT name FROM discovery_blogs WHERE blocked=1)"
                                  " ORDER BY last_seen DESC LIMIT ?",(source,limit)).fetchall()
             else:
                 posts=db.execute("SELECT candidate_id,blog,post_id,url,title,post_type,posted_at,"
-                                 "thumbnail_url,text_excerpt,tags_json,note_count,state FROM discovery_posts"
+                                 "thumbnail_url,text_excerpt,tags_json,media_json,note_count,state FROM discovery_posts"
                                  " WHERE state='visible' AND blog NOT IN"
                                  " (SELECT name FROM discovery_blogs WHERE blocked=1)"
                                  " ORDER BY last_seen DESC LIMIT ?",(limit,)).fetchall()
         columns=("candidate_id","blog","post_id","url","title","type","date",
-                 "thumbnail_url","text_excerpt","tags_json","note_count","state")
+                 "thumbnail_url","text_excerpt","tags_json","media_json","note_count","state")
         return [dict(zip(columns,item)) for item in posts]
 
     def mark_unavailable(self,candidate_id):
