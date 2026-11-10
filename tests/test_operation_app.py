@@ -61,7 +61,11 @@ class OperationAppTests(unittest.TestCase):
         self.assertIn('id="messages" class="messages" role="log" aria-live="polite"></div>', self.html)
         self.assertLess(self.html.index('id="selected-title"'), self.html.index('id="messages"'))
         self.assertLess(self.html.index('id="messages"'), self.html.index('id="chat-form"'))
-        self.assertIn('min-height:calc(100vh - 24px)', self.css)
+        self.assertIn('min-height:100dvh', self.css)
+        self.assertIn('.composer{display:flex', self.css)
+        self.assertIn('.messages{flex:1', self.css)
+        self.assertNotIn('radial-gradient', self.css)
+        self.assertNotIn('min-height:570px', self.css)
 
     def test_mobile_layout(self):
         self.assertIn("@media(max-width:760px)",self.css)
