@@ -30,7 +30,7 @@ INDEX = (
 SECRET = re.compile(r"(?i)(bearer\s+[A-Za-z0-9._~+/=-]{8,}|api[_-]?key\s*[:=]\s*\S+|sk-[A-Za-z0-9]+|ghp_[A-Za-z0-9]+)")
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 TELEGRAM = re.compile(r"(?i)\b(tg://\S+|@[A-Za-z0-9_]{5,})")
-TARGET = re.compile(r"対象[:：\s]+([A-Za-z0-9_-]{1,64})")
+TARGET = re.compile(r"対象[:：]\s*([^\r\n]{1,64})")
 
 
 class ProviderError(Exception):
