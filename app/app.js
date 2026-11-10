@@ -8,6 +8,31 @@
   const connection=document.getElementById("connection");
   const assist=document.getElementById("assist");
   const confirm=document.getElementById("confirm");
+  const goalButtons=Array.from(document.querySelectorAll("#goal-grid .goal"));
+  const goalSelection=document.getElementById("goal-selection");
+  const clearGoals=document.getElementById("clear-goals");
+  const selectedGoals=new Set();
+  function renderGoals(){
+    goalButtons.forEach(function(button){
+      const selected=selectedGoals.has(button.dataset.goal);
+      button.setAttribute("aria-pressed",selected?"true":"false");
+      button.classList.toggle("active",selected);
+    });
+    goalSelection.textContent=selectedGoals.size
+      ?"選択中："+Array.from(selectedGoals).join("・")+"｜文章を追加しても、そのまま送信しても構いません。"
+      :"選択なし｜文章だけでも相談できます。";
+    instruction.required=selectedGoals.size===0;
+  }
+  goalButtons.forEach(function(button){
+    button.addEventListener("click",function(){
+      const goal=button.dataset.goal;
+      if(selectedGoals.has(goal))selectedGoals.delete(goal);
+      else selectedGoals.add(goal);
+      renderGoals();
+    });
+  });
+  clearGoals.addEventListener("click",function(){selectedGoals.clear();renderGoals();});
+  renderGoals();
   let lastText="";
   let pending=null;
   function display(text,role){
@@ -44,8 +69,12 @@
   }
   form.addEventListener("submit",function(event){
     event.preventDefault();
-    const message=instruction.value.trim();
-    if(!message) return;
+    const text=instruction.value.trim();
+    const goals=Array.from(selectedGoals);
+    if(!text&&!goals.length) return;
+    const message=goals.length
+      ? "目的："+goals.join("・")+"\n"+(text||"この目的でできる操作と必要な確認を案内してください。")
+      : text;
     lastText=message;
     display(message,"user");
     instruction.value="";
