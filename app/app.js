@@ -200,6 +200,32 @@
               if(url.protocol!=="https:"||url.username||url.password)throw new Error("bad_url");
               const link=document.createElement("a");link.href=url.href;link.target="_blank";link.rel="noopener noreferrer";link.textContent="開く";
               td.appendChild(link);
+              if(view.action==="tumblr.discover"&&typeof record.blog==="string"&&
+                 /^[a-z0-9][a-z0-9-]{0,62}$/.test(record.blog)){
+                const exclude=document.createElement("button");
+                exclude.type="button";
+                exclude.textContent="除外";
+                exclude.className="discovery-exclude";
+                exclude.setAttribute("aria-label",record.blog+"を候補から除外");
+                exclude.addEventListener("click",async function(){
+                  if(!window.confirm(record.blog+"をこのアプリの発見候補から除外しますか？ Tumblr側ではブロックしません。"))return;
+                  exclude.disabled=true;
+                  try{
+                    const response=await fetch("/discovery/exclude",{
+                      method:"POST",credentials:"same-origin",
+                      headers:{"Content-Type":"application/json"},
+                      body:JSON.stringify({blog:record.blog})
+                    });
+                    if(!response.ok)throw new Error("exclude_failed");
+                    tr.remove();
+                    display("候補を除外しました。Tumblr側のアカウント操作はしていません。","system");
+                  }catch(error){
+                    display("候補の除外に失敗しました。変更していません。","system");
+                    exclude.disabled=false;
+                  }
+                });
+                td.appendChild(exclude);
+              }
             }catch(error){td.textContent="リンク無効";}
           }else{td.textContent=value||"—";}
           tr.appendChild(td);
