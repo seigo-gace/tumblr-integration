@@ -42,7 +42,7 @@ class TumblrReadBudget:
         return sqlite3.connect(self.path, timeout=3, isolation_level=None)
 
     def reserve(self, calls=2):
-        if calls != 2:
+        if calls not in (1, 2):
             raise ValueError("tumblr_read_cost_mismatch")
         now = int(self.clock())
         hour, day = now // 3600, now // 86400
