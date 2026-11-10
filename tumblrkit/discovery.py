@@ -56,7 +56,8 @@ class DiscoveryEngine:
             blog=normalize_blog(blog_value)
             parsed=urlsplit(raw_url)
             if (parsed.scheme!="https" or parsed.username or parsed.password
-                    or not parsed.netloc or len(raw_url)>500):
+                    or not parsed.netloc or len(raw_url)>500
+                    or parsed.hostname not in (blog+".tumblr.com","www.tumblr.com","tumblr.com")):
                 return None
         except (TypeError,ValueError):
             return None
