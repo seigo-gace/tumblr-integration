@@ -33,7 +33,7 @@ def setup_token(path):
             raise SetupError("EXISTING_TOKEN_FILE_UNSAFE")
         require_token(path.read_text(encoding="utf-8").strip())
         return "EXISTING"
-    value = getpass.getpass("Tumblr操作アプリのログインキー (英数字16文字以上): ")
+    value = getpass.getpass("Tumblr操作アプリのログインキー (8文字以上): ")
     require_token(value)
     repeat = getpass.getpass("確認のためもう一度入力: ")
     if not hmac.compare_digest(value, repeat):
