@@ -368,9 +368,11 @@ class MediaSave:
                 raise MediaError("MEDIA_SIZE_EXCEEDED")
             self._space(size+MAX_OUTPUT_BYTES)
             got=self.downloader.fetch(url,source,size)
+            os.chmod(source,0o600)
             if got!=size:
                 raise MediaError("MEDIA_SIZE_CHANGED")
             output_bytes=self.transcoder.convert(source,partial)
+            os.chmod(partial,0o600)
             self._space(output_bytes)
             with open(partial,"rb") as digest_stream:
                 digest=hashlib.file_digest(digest_stream,"sha256").hexdigest()
