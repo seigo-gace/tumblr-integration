@@ -55,6 +55,22 @@ class BudgetTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.budget().reserve()
 
+    def test_http_429_disables_followup_requests_without_retry(self):
+        from urllib.error import HTTPError
+        from tumblrkit.tumblr_read import OfficialTransport
+        budget = self.budget()
+        budget.reserve()
+        transport = OfficialTransport(budget)
+        with patch("tumblrkit.tumblr_read.urlopen",
+                   side_effect=HTTPError("https://api.tumblr.com/v2/user/info",429,
+                                         "limit",{},None)) as opened:
+            with self.assertRaisesRegex(ValueError, "tumblr_rate_limited"):
+                transport.get("/v2/user/info", "sample-nonreal-bearer")
+            opened.assert_called_once()
+        self.clock[0] += 120
+        with self.assertRaisesRegex(ValueError, "tumblr_budget_cooldown"):
+            self.budget().reserve()
+
     def test_real_adapter_blocks_before_any_network_call(self):
         token = self.folder / "access-token"
         token.write_text("testing-access-token-not-real")
