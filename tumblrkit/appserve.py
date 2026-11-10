@@ -45,7 +45,7 @@ def require_commit(commit):
 
 
 def require_token(token):
-    if not isinstance(token, str) or re.fullmatch(r"[A-Za-z0-9._~+/-]{8,256}", token) is None:
+    if not isinstance(token, str) or not 8 <= len(token) <= 256 or not all(char.isprintable() and not char.isspace() for char in token):
         raise ServeError("ACCESS_TOKEN_REQUIRED")
     return token
 
