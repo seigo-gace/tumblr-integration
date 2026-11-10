@@ -129,7 +129,7 @@ class PrivateTokenStore:
 class OwnerOAuth:
     def __init__(self, directory, owner_blog, transport=None, redirect_uri=CALLBACK, clock=None):
         self.store = PrivateTokenStore(directory)
-        self.blog = normalize_blog(owner_blog)
+        self.blog = normalize_blog(owner_blog) if owner_blog else None
         self.transport = transport or OAuthNetwork()
         self.clock = clock or time.time
         self.oauth = None
@@ -170,26 +170,38 @@ class OwnerOAuth:
         identity = self.transport.get_json(USER_INFO, tokens.access_token)
         user = identity.get("response", {}).get("user") if isinstance(identity, dict) else None
         blogs = user.get("blogs") if isinstance(user, dict) else None
-        if not isinstance(blogs, list) or not any(
-            isinstance(blog, dict) and isinstance(blog.get("name"), str)
-            and normalize_blog(blog["name"]) == self.blog for blog in blogs
-        ):
-            raise ValueError("oauth_expected_blog_not_owned")
-        self.store.write(tokens, self.blog)
-        return {"connected": True, "blog": self.blog}
+        if not isinstance(blogs, list):
+            raise ValueError("oauth_blogs_missing")
+        if self.blog:
+            matches = [entry for entry in blogs
+                       if isinstance(entry, dict) and isinstance(entry.get("name"), str)
+                       and normalize_blog(entry["name"]) == self.blog]
+            if len(matches) != 1:
+                raise ValueError("oauth_expected_blog_not_owned")
+            selected = self.blog
+        else:
+            primary = [entry for entry in blogs if isinstance(entry, dict)
+                       and entry.get("primary") is True and isinstance(entry.get("name"), str)]
+            if len(primary) != 1:
+                raise ValueError("oauth_primary_blog_not_unique")
+            selected = normalize_blog(primary[0]["name"])
+        self.store.write(tokens, selected)
+        self.blog = selected
+        return {"connected": True, "blog": selected}
 
     def status(self):
         record = self.store.read()
         if record is None:
             return {"connected": False}
-        return {"connected": record.get("blog") == self.blog,
-                "blog": self.blog if record.get("blog") == self.blog else None,
+        selected = record.get("blog")
+        owned = bool(selected and (self.blog is None or selected == self.blog))
+        return {"connected": owned, "blog": selected if owned else None,
                 "expires_at": record.get("expires_at", 0)}
 
     def refresh_if_needed(self):
         with self._lock:
             record = self.store.read()
-            if record is None or record["blog"] != self.blog:
+            if record is None or (self.blog is not None and record["blog"] != self.blog):
                 raise ValueError("oauth_not_connected")
             expires = record.get("expires_at", 0)
             if not expires or expires > self.clock() + 120:
@@ -207,7 +219,7 @@ class OwnerOAuth:
                 raise ValueError("oauth_refresh_invalid")
             if not isinstance(refresh, str) or not 12 <= len(refresh) <= 4096:
                 raise ValueError("oauth_refresh_invalid")
-            self.store.write(AccountTokens(token, "bearer", refresh, lifetime), self.blog)
+            self.store.write(AccountTokens(token, "bearer", refresh, lifetime), record["blog"])
             return token
 
 def load_owner_blog(directory):
