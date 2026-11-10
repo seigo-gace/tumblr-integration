@@ -27,6 +27,20 @@ class OperationAppTests(unittest.TestCase):
     def test_safe_text_rendering(self):
         self.assertIn("item.textContent=text",self.js)
         self.assertIn('event.preventDefault()',self.js)
+    def test_six_canonical_goal_buttons_are_visible_and_multiselect(self):
+        import re
+        labels=re.findall(r'data-goal="([^"]+)"',self.html)
+        self.assertEqual(labels,["巡回","投稿","キャンペーン","紹介","集計","メディア"])
+        self.assertEqual(self.html.count('aria-pressed="false"'),6)
+        self.assertIn('id="goal-selection"',self.html)
+        self.assertIn('id="clear-goals"',self.html)
+        self.assertIn('new Set()',self.js)
+        self.assertIn('selectedGoals.add(goal)',self.js)
+        self.assertIn('selectedGoals.delete(goal)',self.js)
+        self.assertIn('instruction.required=selectedGoals.size===0',self.js)
+        self.assertIn('const message=goals.length',self.js)
+        self.assertIn('.goal[aria-pressed="true"]',self.css)
+
     def test_mobile_layout(self):
         self.assertIn("@media(max-width:760px)",self.css)
         self.assertIn('name="viewport"',self.html)
