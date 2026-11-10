@@ -390,9 +390,16 @@ class Assistant:
                 if isinstance(candidate, str) and len(candidate) <= 100:
                     clean["candidate_id"] = candidate
             safe_rows.append(clean)
-        return {"kind": "records", "title": title, "action": action,
-                "status": "connected", "columns": list(columns), "rows": safe_rows,
-                "total": len(rows), "truncated": len(rows) > 100}
+        result = {"kind": "records", "title": title, "action": action,
+                  "status": "connected", "columns": list(columns), "rows": safe_rows,
+                  "total": len(rows), "truncated": len(rows) > 100}
+        if action == "tumblr.discover":
+            target = detail.get("next_target")
+            if isinstance(target,str) and 0 < len(target) <= 100:
+                result["next_target"] = target
+                result["complete"] = detail.get("complete") is True
+                result["from_cache"] = detail.get("from_cache") is True
+        return result
 
     def _failure_text(self, code):
         if code in ("ai_disabled", "quota_unavailable"):
