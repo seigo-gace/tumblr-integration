@@ -21,3 +21,13 @@ Tests: `PYTHONPATH=. python -m unittest discover -s tests -v`, `node --check app
 OAuth Source: `tumblrkit/oauth.py` is an isolated adapter requiring injected transport and deployment Secret. Secure state lifecycle/refresh and live account readback are incomplete. Master reports the required Secret is already obtained; do not ask for reissue or write it to Git.
 
 Development rules: [G-ACE GPT CHAT Rule Plane](https://github.com/G-ACE-inc/server-core/issues/17). Work only on owned branches; no secrets or personal data in this public repository.
+
+## Free AI quota guard (offline-source implementation)
+
+GitHub Actions Secrets (`TUMBLR_GROQ_API_KEY`, `TUMBLR_GEMINI_API_KEY`, `TUMBLR_OPENROUTER_API_KEY`) are **not** automatically available to the Gserver process. Never echo, copy or inject them from CI without the existing Gserver private-Secret owner path and separate runtime authorization.
+
+Live provider calls are **OFF by default**, even if keys are present. Before any real request, operations must explicitly set **both** `TUMBLR_AI_LIVE_ENABLED=1` and `TUMBLR_AI_QUOTA_DB` to an existing writable persistent SQLite-file location owned by the app (not in Git, not in a temporary/ephemeral release directory). Do not enable these during CI or quota tests. Every real request is reserved before HTTP and counted even on failure; a missing/unwritable database blocks calls.
+
+Conservative fixed source-side limits: **5 attempts per provider per UTC day, 10 attempts total across three providers per UTC day, and minimum 60 seconds between requests across all providers**. Counters survive process restart and are shared by processes using the same SQLite file. Provider HTTP 429 / exhausted quota does not trigger fallback. Fallback to OpenRouter remains only when a primary provider fails for another reason and the quota guard permits it. OpenRouter remains free-model-only. These are additional local safety caps, **not proof of provider-side free-tier terms or current model availability**.
+
+All `tests/test_free_ai_quota.py` checks are local mocks/SQLite and never call the three AI service APIs. Successful tests do not authorize Gserver live activation. No client-side API keys, paid escalation, or automatic load testing.
