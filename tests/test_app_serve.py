@@ -148,6 +148,61 @@ class AppServeTests(unittest.TestCase):
             self.assertTrue(json.loads(body)["excluded"])
             self.assertEqual(server.httpd.discovery_store.excluded_blogs(),{"example"})
 
+    def test_discovery_one_post_recheck_is_owner_only_and_offline(self):
+        import os
+        from tumblrkit.discovery_store import DiscoveryStore
+        from tumblrkit.tumblr_read import TumblrReadAdapter
+        from tumblrkit.bridge import Bridge
+        from tumblrkit.assistant import Assistant
+        class Stub:
+            def __init__(self):
+                self.calls=[]
+                self.results=[
+                    {"meta":{"status":200},"response":{"posts":[{"id_string":"123"}]}},
+                    ValueError("tumblr_post_unavailable"),
+                ]
+            def get(self,path,token):
+                self.calls.append(path)
+                output=self.results.pop(0)
+                if isinstance(output,BaseException): raise output
+                return output
+        private=self.tmp/"private-discovery"
+        private.mkdir(mode=0o700)
+        os.chmod(private,0o700)
+        tokenfile=private/"access-token"
+        tokenfile.write_text("nonreal-dummy-oauth-token")
+        os.chmod(tokenfile,0o600)
+        store=DiscoveryStore(private/"discovery.sqlite3")
+        store.save_page("tag:test",[{"name":"one","url":"https://one.tumblr.com"}],[
+            {"candidate_id":"one:123","blog":"one","post_id":"123",
+             "url":"https://one.tumblr.com/post/123","title":"test","type":"text",
+             "date":"","thumbnail_url":"","text_excerpt":"","tags":[],
+             "note_count":0,"media_refs":[]},
+        ],1,complete=True)
+        stub=Stub()
+        assistant=Assistant(bridge=Bridge({"tumblr":TumblrReadAdapter("owner",tokenfile,transport=stub)}),providers=[])
+        build_release(APP,self.tmp,SHA_A)
+        with AppServer(self.tmp/"current",TOKEN,assistant=assistant) as server:
+            base=f"http://127.0.0.1:{server.port}"
+            uri=base+"/discovery/recheck"
+            payload=json.dumps({"candidate_id":"one:123"}).encode()
+            headers={"Content-Type":"application/json","Origin":base}
+            status,_,_=fetch(uri,method="POST",data=payload,headers=headers)
+            self.assertEqual(status,401)
+            status,_,_=fetch(uri,TOKEN,method="POST",data=payload,
+                             headers={"Content-Type":"application/json","Origin":"https://attacker.invalid"})
+            self.assertEqual(status,403)
+            self.assertEqual(stub.calls,[])
+            status,body,_=fetch(uri,TOKEN,method="POST",data=payload,headers=headers)
+            self.assertEqual(status,200)
+            self.assertEqual(json.loads(body)["state"],"visible")
+            self.assertEqual(len(stub.calls),1)
+            status,body,_=fetch(uri,TOKEN,method="POST",data=payload,headers=headers)
+            self.assertEqual(status,200)
+            self.assertEqual(json.loads(body)["state"],"unavailable")
+            self.assertEqual(len(stub.calls),2)
+            self.assertEqual(store.read_candidates(),[])
+
     def test_rollback_restores_previous_commit(self):
         build_release(APP, self.tmp, SHA_A)
         build_release(APP, self.tmp, SHA_B)
