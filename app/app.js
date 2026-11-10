@@ -265,10 +265,23 @@
         const note=document.createElement("p");
         note.textContent="保存済み候補を表示しています。新しいAPI検索は実行していません。";
         section.appendChild(note);
-      }else if(view.complete){
+      }
+      if(view.complete){
         const note=document.createElement("p");
-        note.textContent="この条件で取得できる範囲の確認は完了しました。";
+        note.textContent="今回の巡回範囲は確認済みです。再取得は明示操作のみです。";
         section.appendChild(note);
+        const refresh=document.createElement("button");
+        refresh.type="button";
+        refresh.className="discovery-next";
+        refresh.textContent="新しく確認";
+        refresh.addEventListener("click",function(){
+          if(!window.confirm("Tumblr公式APIへ1回だけ再取得を要求します。続行しますか？"))return;
+          refresh.disabled=true;
+          const text="検索して 対象: refresh:"+view.next_target;
+          lastText=text;display(text,"user");
+          post({message:text}).finally(function(){refresh.disabled=false;});
+        });
+        section.appendChild(refresh);
       }else{
         const next=document.createElement("button");
         next.type="button";
