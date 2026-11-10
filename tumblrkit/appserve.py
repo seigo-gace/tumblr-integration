@@ -873,14 +873,9 @@ class AppServer:
         media_root=self.release.resolve().parent.parent / "data" / "media"
         media_root.mkdir(parents=True,exist_ok=True,mode=0o700)
         tools_dir=media_root.parent / "media-tools"
-        ffmpeg=tools_dir / "ffmpeg"
-        ffprobe=tools_dir / "ffprobe"
-        if (ffmpeg.is_file() and ffprobe.is_file() and not ffmpeg.is_symlink()
-                and not ffprobe.is_symlink() and not tools_dir.is_symlink()
-                and tools_dir.stat().st_mode & 0o077 == 0):
-            converter=Transcoder(str(ffprobe),str(ffmpeg))
-        else:
-            converter=Transcoder()
+        # Paths are resolved when a user explicitly saves: installing approved
+        # app-only tools later never requires restarting shared Gserver services.
+        converter=Transcoder(str(tools_dir / "ffprobe"),str(tools_dir / "ffmpeg"))
         self.httpd.media_save = MediaSave(self.httpd.discovery_store,media_root,transcoder=converter)
         self.httpd.draft_store = DraftStore(self.release.resolve().parent.parent / "data" / "drafts.sqlite3")
         self.httpd.attachment_store = AttachmentStore(self.release.resolve().parent.parent / "data")
