@@ -99,7 +99,8 @@ class DiscoveryStore:
             "cursor":0,"watermark":"","complete":False}
 
     def save_page(self,source,blogs,posts,next_cursor,complete=False,watermark=""):
-        if not isinstance(next_cursor,int) or next_cursor<0 or next_cursor>100000:
+        if (not isinstance(next_cursor,int) or isinstance(next_cursor,bool)
+                or next_cursor<0 or next_cursor>253402300799):
             raise ValueError("discovery_cursor_invalid")
         now=int(self.clock())
         with closing(self._open()) as db:
