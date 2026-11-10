@@ -75,6 +75,11 @@
         const img=document.createElement("img");img.src=source;img.alt="投稿内の画像";img.loading="lazy";
         img.referrerPolicy="no-referrer";body.appendChild(img);
       }else{
+        const video=document.createElement("video");
+        video.controls=true;video.preload="none";video.src=source;
+        video.setAttribute("playsinline","");video.referrerPolicy="no-referrer";
+        video.style.maxWidth="100%";video.style.maxHeight="65vh";
+        body.appendChild(video);
         const a=document.createElement("a");a.href=source;a.target="_blank";a.rel="noopener noreferrer";
         a.textContent="動画の参照元を開く";body.appendChild(a);
       }
