@@ -184,7 +184,7 @@
     if(view.action==="analytics.get_summary"&&rows.length){
       const numeric=rows.slice(0,20).map(function(record){
         const raw=String(record.value??"").replace(/,/g,"");
-        return {label:String(record.label??"").slice(0,60),value:/^-?\\d+(?:\\.\\d+)?$/.test(raw)?Number(raw):NaN};
+        return {label:String(record.label??"").slice(0,60),value:/^-?\d+(?:\.\d+)?$/.test(raw)?Number(raw):NaN};
       }).filter(function(item){return item.label&&Number.isFinite(item.value)&&item.value>=0;});
       const peak=Math.max(0,...numeric.map(function(item){return item.value;}));
       if(peak>0){
