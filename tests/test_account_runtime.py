@@ -41,6 +41,16 @@ class OwnerAccountTests(unittest.TestCase):
         self.transport = FakeTransport()
         self.oauth = OwnerOAuth(self.root, "recruitment", self.transport)
 
+    def test_blog_setup_is_private_and_locks_after_connection(self):
+        from tumblrkit.account_runtime import register_owner_blog, load_owner_blog
+        self.assertEqual(register_owner_blog(self.root, "recruitment.tumblr.com"), "recruitment")
+        self.assertEqual(load_owner_blog(self.root), "recruitment")
+        self.assertEqual((self.root / "owner-blog").stat().st_mode & 0o077, 0)
+        state = parse_qs(urlsplit(self.oauth.start()).query)["state"][0]
+        self.oauth.callback("state=" + state + "&code=valid-code")
+        with self.assertRaises(ValueError):
+            register_owner_blog(self.root, "private-personal")
+
     def test_authorization_owner_and_refresh_lifecycle(self):
         url = self.oauth.start()
         params = parse_qs(urlsplit(url).query)
