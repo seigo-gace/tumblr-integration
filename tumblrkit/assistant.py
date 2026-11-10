@@ -358,8 +358,8 @@ class Assistant:
     def _result_view(action, detail):
         """Bounded, fixed-order display contract; verified adapter output only."""
         spec = {
-            "tumblr.discover": ("検索結果", ("title", "type", "date", "url")),
-            "tumblr.list_posts": ("投稿一覧", ("title", "type", "date", "url")),
+            "tumblr.discover": ("検索結果", ("title", "type", "date", "thumbnail_url", "url")),
+            "tumblr.list_posts": ("投稿一覧", ("title", "type", "date", "thumbnail_url", "url")),
             "analytics.get_summary": ("集計結果", ("label", "value", "period", "url")),
             "telegram.check_membership": ("参加状況", ("name", "status", "date", "url")),
             "tumblr.publish_draft": ("投稿結果", ("title", "status", "date", "url")),
