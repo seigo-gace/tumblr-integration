@@ -10,18 +10,7 @@
   connect.addEventListener("click",async function(){
     connect.disabled=true;
     try{
-      let response=await fetch("/oauth/start",{method:"POST",credentials:"same-origin"});
-      if(response.status===503){
-        const blog=window.prompt("Tumblr運用ブログ名を入力してください（例: myblog）。個人用ブログは指定しないでください。");
-        if(!blog){connect.disabled=false;return;}
-        const setup=await fetch("/oauth/configure",{
-          method:"POST",credentials:"same-origin",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({blog:blog.trim()})
-        });
-        if(!setup.ok)throw new Error("oauth_blog_setup_failed");
-        response=await fetch("/oauth/start",{method:"POST",credentials:"same-origin"});
-      }
+      const response=await fetch("/oauth/start",{method:"POST",credentials:"same-origin"});
       if(!response.ok)throw new Error("oauth_not_ready");
       const data=await response.json();
       const url=new URL(data.authorize_url);
