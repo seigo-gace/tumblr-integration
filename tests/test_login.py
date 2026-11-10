@@ -84,7 +84,6 @@ class LoginTests(unittest.TestCase):
                 "Accept": "text/html"}
         for headers in (
             {"Origin": "https://tumblr.hentaigay.org.evil.invalid", "Host": "127.0.0.1:8081"},
-            {"Origin": "https://tumblr.hentaigay.org", "Host": "attacker.invalid"},
             {"Origin": "http://tumblr.hentaigay.org", "Host": "127.0.0.1:8081"},
         ):
             status, _, _ = request(
@@ -92,6 +91,20 @@ class LoginTests(unittest.TestCase):
                 b"token=" + TOKEN.encode(), {**base, **headers},
             )
             self.assertEqual(status, 403)
+
+    def test_public_origin_remains_valid_with_tunnel_rewritten_host(self):
+        for host in ("127.0.0.1:8081", "localhost:8081", "tumblr.hentaigay.org",
+                     "custom-tunnel-origin.internal"):
+            status, _, headers = request(
+                self.server.port, "POST", "/session",
+                b"token=" + TOKEN.encode(),
+                {"Content-Type": "application/x-www-form-urlencoded",
+                 "Accept": "text/html",
+                 "Host": host,
+                 "Origin": "https://tumblr.hentaigay.org"},
+            )
+            self.assertEqual(status, 303)
+            self.assertIn("Set-Cookie", headers)
 
     def test_unicode_owner_key_session_login(self):
         from tumblrkit.appserve import AppServer
