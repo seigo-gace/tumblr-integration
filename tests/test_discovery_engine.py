@@ -124,6 +124,25 @@ class DiscoveryEngineTests(unittest.TestCase):
         self.assertEqual(store.read_blogs("following:following"),[])
         self.assertEqual(store.read_blogs("followers:followers"),[])
 
+    def test_refresh_is_explicit_and_keeps_checkpoint_on_failure(self):
+        adapter,stub=self.scanner([
+            envelope({"total_users":1,"users":[{"name":"one"}]}),
+            ValueError("transient official API outage"),
+            envelope({"total_users":1,"users":[{"name":"two"}]}),
+        ])
+        adapter.perform("tumblr.discover","followers",{})
+        self.assertEqual(len(stub.calls),1)
+        cached=adapter.perform("tumblr.discover","followers",{})
+        self.assertTrue(cached["from_cache"])
+        self.assertEqual(len(stub.calls),1)
+        with self.assertRaises(ValueError):
+            adapter.perform("tumblr.discover","refresh:followers",{})
+        self.assertEqual(DiscoveryStore(self.root/"discovery.sqlite3").checkpoint("followers:followers")["cursor"],1)
+        updated=adapter.perform("tumblr.discover","refresh:followers",{})
+        self.assertTrue(updated["complete"])
+        self.assertEqual(len(stub.calls),3)
+        self.assertIn("offset=0",stub.calls[-1])
+
     def test_opt_in_candidate_availability_exact_id_and_unavailable(self):
         initial=envelope([{"blog_name":"one","id_string":"991",
             "post_url":"https://one.tumblr.com/post/991","summary":"post","timestamp":211}])
