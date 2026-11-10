@@ -117,6 +117,26 @@ class DiscoveryEngineTests(unittest.TestCase):
         self.assertFalse(checkpoint["complete"])
         self.assertEqual(len(stub.calls),1)
 
+    def test_realistic_unix_timestamp_cursor_persists(self):
+        now=1762891200
+        posts=[{"blog_name":"one","id_string":str(500+i),
+                "post_url":"https://one.tumblr.com/post/"+str(500+i),
+                "timestamp":now-i} for i in range(10)]
+        adapter,stub=self.scanner([envelope(posts)])
+        result=adapter.perform("tumblr.discover","tag:timestamp",{})
+        self.assertEqual(result["cursor"],now-9)
+        self.assertEqual(DiscoveryStore(self.root/"discovery.sqlite3")
+                         .checkpoint("tag:timestamp")["cursor"],now-9)
+
+    def test_oversized_provider_page_is_rejected_without_cursor_mutation(self):
+        blogs=[{"name":"blog"+str(i)} for i in range(11)]
+        adapter,stub=self.scanner([envelope({"total_blogs":30,"blogs":blogs})])
+        with self.assertRaisesRegex(ValueError,"discovery_response_unverified"):
+            adapter.perform("tumblr.discover","following",{})
+        self.assertEqual(DiscoveryStore(self.root/"discovery.sqlite3")
+                         .checkpoint("following:following")["cursor"],0)
+        self.assertEqual(len(stub.calls),1)
+
     def test_missing_timestamp_full_page_stops_without_claiming_completion(self):
         posts=[{"blog_name":"one","id_string":str(300+i),
                 "post_url":"https://one.tumblr.com/post/"+str(300+i)}
