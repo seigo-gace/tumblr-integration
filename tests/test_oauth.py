@@ -55,4 +55,44 @@ class OAuthTests(unittest.TestCase):
         token = self.oauth.exchange("state=x&code=c", "x")
         with self.assertRaises(ValueError): self.oauth.verify_identity(token)
 
+
+    def test_owner_credentials_from_private_files(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        from tumblrkit.oauth import read_owner_client_credentials
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "consumer-key").write_text("consumer-key-test-value", encoding="utf-8")
+            (root / "client-secret").write_text("consumer-secret-test-value", encoding="utf-8")
+            os.chmod(root, 0o700)
+            for name in ("consumer-key", "client-secret"):
+                os.chmod(root / name, 0o600)
+            key, secret = read_owner_client_credentials(root)
+            oauth = TumblrOAuth(key, secret, "https://example.org/oauth/callback", self.transport)
+            start = oauth.begin()
+            self.assertIn("client_id=consumer-key-test-value", start.url)
+            self.assertNotIn(secret, start.url)
+            self.assertEqual(oauth.verify_identity(oauth.exchange(
+                "state=" + start.state + "&code=abc", start.state)), "owned-blog")
+
+    def test_owner_credentials_reject_insecure_files(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        from tumblrkit.oauth import read_owner_client_credentials
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "consumer-key").write_text("consumer-key-test-value")
+            (root / "client-secret").write_text("consumer-secret-test-value")
+            os.chmod(root / "consumer-key", 0o644)
+            os.chmod(root / "client-secret", 0o600)
+            with self.assertRaises(ValueError):
+                read_owner_client_credentials(root)
+            os.chmod(root / "consumer-key", 0o600)
+            (root / "client-secret").unlink()
+            (root / "client-secret").symlink_to(root / "consumer-key")
+            with self.assertRaises(ValueError):
+                read_owner_client_credentials(root)
+
 if __name__ == "__main__": unittest.main()
