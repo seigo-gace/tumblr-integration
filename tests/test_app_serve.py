@@ -203,6 +203,58 @@ class AppServeTests(unittest.TestCase):
             self.assertEqual(len(stub.calls),2)
             self.assertEqual(store.read_candidates(),[])
 
+    def test_library_http_owner_only_bulk_update_and_resume(self):
+        import os
+        from tumblrkit.discovery_store import DiscoveryStore
+        from tumblrkit.library import Library
+        private=self.tmp/"library-private"
+        private.mkdir(mode=0o700)
+        os.chmod(private,0o700)
+        store=DiscoveryStore(private/"discovery.sqlite3")
+        store.save_page("tag:test",[{"name":"alpha","url":"https://alpha.tumblr.com"}],[{
+            "candidate_id":"alpha:123","blog":"alpha","post_id":"123",
+            "url":"https://alpha.tumblr.com/post/123","title":"test image",
+            "type":"image","date":"","thumbnail_url":"","text_excerpt":"",
+            "tags":[],"note_count":0,"media_refs":[{"url":"https://64.media.tumblr.com/photo.jpg","type":"image"}],
+        }],1,complete=True)
+        build_release(APP,self.tmp,SHA_A)
+        with AppServer(self.tmp/"current",TOKEN) as server:
+            server.httpd.library=Library(store)
+            base=f"http://127.0.0.1:{server.port}"
+            status,_,_=fetch(base+"/library")
+            self.assertEqual(status,401)
+            status,body,_=fetch(base+"/library",TOKEN)
+            self.assertEqual(status,200)
+            self.assertEqual(json.loads(body)["total"],1)
+            self.assertEqual(len(json.loads(body)["items"][0]["media"]),1)
+            update=json.dumps({"candidate_ids":["alpha:123"],"field":"favorite","value":True}).encode()
+            headers={"Content-Type":"application/json","Origin":base}
+            status,_,_=fetch(base+"/library/update",method="POST",data=update,headers=headers)
+            self.assertEqual(status,401)
+            status,_,_=fetch(base+"/library/update",TOKEN,method="POST",data=update,
+                headers={"Content-Type":"application/json","Origin":"https://evil.invalid"})
+            self.assertEqual(status,403)
+            status,body,_=fetch(base+"/library/update",TOKEN,method="POST",data=update,headers=headers)
+            self.assertEqual(status,200)
+            self.assertEqual(json.loads(body)["updated"],1)
+            status,body,_=fetch(base+"/library?filter=favorite",TOKEN)
+            self.assertEqual(status,200)
+            self.assertEqual(json.loads(body)["total"],1)
+            progress=json.dumps({"candidate_id":"alpha:123","media_index":0}).encode()
+            status,body,_=fetch(base+"/library/progress",TOKEN,method="POST",data=progress,headers=headers)
+            self.assertEqual(status,200)
+            self.assertTrue(json.loads(body)["verified"])
+            status,body,_=fetch(base+"/library?filter=seen",TOKEN)
+            self.assertEqual(status,200)
+            self.assertEqual(json.loads(body)["last_position"]["candidate_id"],"alpha:123")
+            status,_,_=fetch(base+"/library?filter=bad",TOKEN)
+            self.assertEqual(status,400)
+            status,_,_=fetch(base+"/library/update",TOKEN,method="POST",
+                              data=json.dumps({"candidate_ids":["alpha:999"],"field":"seen","value":True}).encode(),
+                              headers=headers)
+            self.assertEqual(status,400)
+        self.assertEqual(Library(store).list("favorite")["total"],1)
+
     def test_rollback_restores_previous_commit(self):
         build_release(APP, self.tmp, SHA_A)
         build_release(APP, self.tmp, SHA_B)
