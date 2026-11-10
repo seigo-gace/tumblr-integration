@@ -26,6 +26,7 @@ from tumblrkit.bridge import Bridge
 from tumblrkit.tumblr_read import adapter_from_env, TumblrReadAdapter
 from tumblrkit.account_runtime import OwnerOAuth, load_owner_blog, register_owner_blog
 from tumblrkit.drafts import DraftStore
+from tumblrkit.discovery_store import DiscoveryStore
 from tumblrkit.attachments import AttachmentStore, AttachmentError, MAX_ATTACHMENT_BYTES, IMAGE_TYPES
 
 COMMIT_MARK = "__TUMBLR_COMMIT__"
@@ -339,6 +340,18 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, '<!doctype html><html lang="ja"><meta charset="utf-8"><title>Tumblr連携</title><p>Tumblrの本人確認が完了しました。</p><a href="/">操作画面に戻る</a></html>', "text/html; charset=utf-8")
             return
+        if parts.path == "/discovery/candidates":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            try:
+                rows = self.server.discovery_store.read_candidates(limit=100)
+                blogs = self.server.discovery_store.read_blogs(limit=100)
+            except (ValueError, OSError, sqlite3.Error):
+                self._json(503, {"error": "discovery_store_unavailable"})
+                return
+            self._json(200, {"posts": rows, "blogs": blogs})
+            return
         if parts.path == "/oauth/status":
             if not _authorized(self):
                 self._unauthorized()
@@ -432,6 +445,29 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": "oauth_blog_setup_failed"})
                 return
             self._json(200, {"configured": True, "blog": blog})
+            return
+        if parts.path == "/discovery/exclude":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            bearer_ok = self.headers.get("Authorization", "").startswith("Bearer ") and _authorized(self)
+            if (self.headers.get("Origin") and not _same_origin(self)) or (not self.headers.get("Origin") and not bearer_ok):
+                self._send(403, "origin rejected\n", "text/plain; charset=utf-8")
+                return
+            try:
+                if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
+                    raise ValueError("invalid_content_type")
+                data = json.loads(self._read_body(512).decode("utf-8"))
+                if not isinstance(data, dict) or set(data) != {"blog"}:
+                    raise ValueError("invalid_discovery_payload")
+                self.server.discovery_store.exclude_blog(data["blog"])
+            except (ValueError, UnicodeError, TypeError, json.JSONDecodeError):
+                self._json(400, {"error": "invalid_discovery_exclusion"})
+                return
+            except (OSError, sqlite3.Error):
+                self._json(503, {"error": "discovery_store_unavailable"})
+                return
+            self._json(200, {"excluded": True})
             return
         if parts.path == "/oauth/start":
             if not _authorized(self):
@@ -670,6 +706,8 @@ class AppServer:
         self.httpd.owner_oauth = self.owner_oauth
         self.httpd.oauth_folder = getattr(self, 'oauth_folder', Path.home() / '.config' / 'tgtumbler' / 'tumblr-oauth')
         self.httpd.account_lock = threading.Lock()
+        self.httpd.discovery_store = DiscoveryStore(
+            Path.home() / ".config" / "tgtumbler" / "tumblr-oauth" / "discovery.sqlite3")
         self.httpd.draft_store = DraftStore(self.release.resolve().parent.parent / "data" / "drafts.sqlite3")
         self.httpd.attachment_store = AttachmentStore(self.release.resolve().parent.parent / "data")
         if self.ticket:
