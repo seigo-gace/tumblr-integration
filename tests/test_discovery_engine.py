@@ -124,6 +124,28 @@ class DiscoveryEngineTests(unittest.TestCase):
         self.assertEqual(store.read_blogs("following:following"),[])
         self.assertEqual(store.read_blogs("followers:followers"),[])
 
+    def test_opt_in_candidate_availability_exact_id_and_unavailable(self):
+        initial=envelope([{"blog_name":"one","id_string":"991",
+            "post_url":"https://one.tumblr.com/post/991","summary":"post","timestamp":211}])
+        adapter,stub=self.scanner([initial,ValueError("tumblr_post_unavailable")])
+        adapter.perform("tumblr.discover","tag:valid",{})
+        from tumblrkit.discovery import DiscoveryEngine
+        engine=DiscoveryEngine("owner",self.token,stub)
+        result=engine.recheck_candidate("one:991")
+        self.assertEqual(result["state"],"unavailable")
+        self.assertIn("id=991",stub.calls[-1])
+        self.assertEqual(DiscoveryStore(self.root/"discovery.sqlite3").read_candidates(),[])
+
+    def test_network_failure_never_marks_candidate_deleted(self):
+        initial=envelope([{"blog_name":"one","id_string":"992",
+            "post_url":"https://one.tumblr.com/post/992","summary":"post","timestamp":212}])
+        adapter,stub=self.scanner([initial,ValueError("network-failure")])
+        adapter.perform("tumblr.discover","tag:valid",{})
+        from tumblrkit.discovery import DiscoveryEngine
+        with self.assertRaises(ValueError):
+            DiscoveryEngine("owner",self.token,stub).recheck_candidate("one:992")
+        self.assertEqual(len(DiscoveryStore(self.root/"discovery.sqlite3").read_candidates()),1)
+
     def test_local_unavailable_state_not_silent_deletion(self):
         adapter,_=self.scanner([envelope([{
             "blog_name":"one","id_string":"999","post_url":"https://one.tumblr.com/post/999",
