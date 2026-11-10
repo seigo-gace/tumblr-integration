@@ -65,6 +65,48 @@ class LoginTests(unittest.TestCase):
         status, _, _ = request(self.server.port, "GET", "/app.js")
         self.assertEqual(status, 401)
 
+    def test_cloudflare_tunnel_internal_host_accepts_exact_public_origin(self):
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "text/html",
+            "Host": "127.0.0.1:8081",
+            "Origin": "https://tumblr.hentaigay.org",
+        }
+        status, _, response_headers = request(
+            self.server.port, "POST", "/session",
+            b"token=" + TOKEN.encode(), headers,
+        )
+        self.assertEqual(status, 303)
+        self.assertIn("Set-Cookie", response_headers)
+
+    def test_tunnel_origin_does_not_trust_wrong_host_or_similar_domain(self):
+        base = {"Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "text/html"}
+        for headers in (
+            {"Origin": "https://tumblr.hentaigay.org.evil.invalid", "Host": "127.0.0.1:8081"},
+            {"Origin": "https://tumblr.hentaigay.org", "Host": "attacker.invalid"},
+            {"Origin": "http://tumblr.hentaigay.org", "Host": "127.0.0.1:8081"},
+        ):
+            status, _, _ = request(
+                self.server.port, "POST", "/session",
+                b"token=" + TOKEN.encode(), {**base, **headers},
+            )
+            self.assertEqual(status, 403)
+
+    def test_unicode_owner_key_session_login(self):
+        from tumblrkit.appserve import AppServer
+        secret = "日本語パスワード!"
+        self.assertGreaterEqual(len(secret), 8)
+        with tempfile.TemporaryDirectory() as work:
+            release = build_release(ROOT / "app", Path(work), "f" * 40)
+            with AppServer(release, secret) as service:
+                from urllib.parse import urlencode
+                data = urlencode({"token": secret}).encode()
+                status, _, headers = request(service.port, "POST", "/session", data,
+                    {"Content-Type": "application/x-www-form-urlencoded", "Accept": "text/html"})
+                self.assertEqual(status, 303)
+                self.assertIn("Set-Cookie", headers)
+
     def test_wrong_login_and_cross_site_login_are_refused(self):
         base = {"Content-Type": "application/x-www-form-urlencoded", "Accept": "text/html"}
         status, _, _ = request(self.server.port, "POST", "/session", b"token=wrong", base)
