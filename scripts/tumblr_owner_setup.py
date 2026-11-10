@@ -13,7 +13,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tumblrkit.appserve import require_token
+from tumblrkit.appserve import require_token, ServeError
 
 
 class SetupError(Exception):
@@ -46,12 +46,19 @@ def setup_token(path):
 
 
 def ask_new_token():
-    value = getpass.getpass("新しいログインキー (8文字以上): ")
-    require_token(value)
-    repeat = getpass.getpass("確認のためもう一度入力: ")
-    if not hmac.compare_digest(value, repeat):
-        raise SetupError("LOGIN_KEY_CONFIRMATION_MISMATCH")
-    return value
+    for attempt in range(3):
+        value = getpass.getpass("新しいログインキー (8文字以上・空白不可): ")
+        try:
+            require_token(value)
+        except ServeError:
+            print("入力形式エラー：8〜256文字、空白・改行なしで入力してください。", flush=True)
+            continue
+        repeat = getpass.getpass("確認のためもう一度入力: ")
+        if not hmac.compare_digest(value, repeat):
+            print("確認用の入力が一致しません。", flush=True)
+            continue
+        return value
+    raise SetupError("LOGIN_KEY_INPUT_RETRY_EXCEEDED")
 
 
 def reset_token(path, root, target_sha):
