@@ -137,12 +137,14 @@ def main():
     git("merge", "--ff-only", "FETCH_HEAD")
     if git("rev-parse", "HEAD") != args.target_sha:
         raise ReleaseError("SOURCE_SHA_MISMATCH")
-    previous = root / "dist" / "current"
-    build_release(root / "app", root / "dist", args.target_sha)
-    release = previous
+    stage_root = root / "dist-staging"
+    stage_release = build_release(root / "app", stage_root, args.target_sha)
+    release = root / "dist" / "current"
+    if not wait_port(PRODUCTION_PORT, True, 1):
+        raise ReleaseError("EXISTING_PRODUCTION_NOT_RUNNING")
     if wait_port(STAGING_PORT, True, 1):
         raise ReleaseError("STAGING_PORT_IN_USE")
-    staged = start(STAGING_PORT, release, token, root)
+    staged = start(STAGING_PORT, stage_release, token, root)
     try:
         if not wait_port(STAGING_PORT, True):
             raise ReleaseError("STAGING_NOT_RUNNING")
@@ -155,6 +157,9 @@ def main():
             staged.kill()
             staged.wait(timeout=5)
     print("TUMBLR_STAGE=PASS", flush=True)
+    # Only after the detached staging app passed all checks, touch the live
+    # versioned release symlink. The prior release remains rollback-capable.
+    build_release(root / "app", root / "dist", args.target_sha)
     os.kill(old_pid, signal.SIGTERM)
     if not wait_port(PRODUCTION_PORT, False):
         raise ReleaseError("PRODUCTION_PORT_NOT_RELEASED")
@@ -166,6 +171,24 @@ def main():
     except Exception:
         if active.poll() is None:
             active.terminate()
+            try:
+                active.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                active.kill()
+        from tumblrkit.appserve import rollback_release
+        try:
+            previous_commit = rollback_release(root / "dist")
+            if not wait_port(PRODUCTION_PORT, False, 5):
+                raise ReleaseError("ROLLBACK_PORT_BUSY")
+            restored = start(PRODUCTION_PORT, root / "dist" / "current", token, root)
+            if not wait_port(PRODUCTION_PORT, True):
+                raise ReleaseError("ROLLBACK_NOT_RUNNING")
+            status, data = request(PRODUCTION_PORT, "/healthz")
+            if status != 200 or json.loads(data).get("commit") != previous_commit:
+                raise ReleaseError("ROLLBACK_HEALTH_FAILED")
+            print("TUMBLR_ROLLBACK=PASS", flush=True)
+        except Exception:
+            print("TUMBLR_ROLLBACK=FAIL", flush=True)
         raise
     print("TUMBLR_RELEASE=PASS", flush=True)
     print("TUMBLR_REVISION=" + args.target_sha, flush=True)
