@@ -80,6 +80,11 @@ class UploadTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body, "テスト文書".encode("utf-8"))
         self.assertIn("attachment;", headers["Content-Disposition"])
+        status, raw, _ = request(self.server.port, "DELETE", "/attachments/" + ident)
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(raw)["deleted"])
+        status, _, _ = request(self.server.port, "GET", "/attachments/" + ident)
+        self.assertEqual(status, 404)
 
     def test_auth_origin_and_invalid_files_are_rejected(self):
         photo = b"GIF89a" + b"rest"
