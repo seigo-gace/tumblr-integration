@@ -255,6 +255,78 @@ class AppServeTests(unittest.TestCase):
             self.assertEqual(status,400)
         self.assertEqual(Library(store).list("favorite")["total"],1)
 
+    def test_media_save_private_http_end_to_end_without_tumblr(self):
+        import os
+        from tumblrkit.discovery_store import DiscoveryStore
+        from tumblrkit.media_save import MediaSave
+        class Downloader:
+            def __init__(self):self.calls=[]
+            def probe(self,url):
+                self.calls.append("HEAD")
+                return 64
+            def fetch(self,url,path,expected):
+                self.calls.append("GET")
+                with open(path,"xb") as f:f.write(b"\x00"*64)
+                return 64
+        class Transcoder:
+            def convert(self,src,dst):
+                dst.write_bytes(b"\x00\x00\x00\x18ftypisom"+b"x"*64)
+                return dst.stat().st_size
+        folder=self.tmp/"media-private"
+        folder.mkdir(mode=0o700)
+        os.chmod(folder,0o700)
+        store=DiscoveryStore(folder/"discovery.sqlite3")
+        store.save_page("tag:test",[{"name":"owner","url":"https://owner.tumblr.com"}],[{
+            "candidate_id":"owner:55","blog":"owner","post_id":"55",
+            "url":"https://owner.tumblr.com/post/55","title":"clip",
+            "type":"video","date":"","thumbnail_url":"","text_excerpt":"",
+            "tags":[],"note_count":0,
+            "media_refs":[{"url":"https://64.media.tumblr.com/clip.mp4","type":"video"}]
+        }],1,complete=True)
+        media_root=folder/"media"
+        media_root.mkdir(mode=0o700)
+        stub=Downloader()
+        build_release(APP,self.tmp,SHA_A)
+        with AppServer(self.tmp/"current",TOKEN) as server:
+            server.httpd.media_save=MediaSave(store,media_root,stub,Transcoder())
+            base=f"http://127.0.0.1:{server.port}"
+            status,_,_=fetch(base+"/media/jobs")
+            self.assertEqual(status,401)
+            status,body,_=fetch(base+"/media/jobs",TOKEN)
+            self.assertEqual(status,200)
+            self.assertEqual(json.loads(body)["jobs"],[])
+            payload=json.dumps({"candidate_id":"owner:55","media_index":0,"rights_confirmed":True}).encode()
+            no_rights=json.dumps({"candidate_id":"owner:55","media_index":0,"rights_confirmed":False}).encode()
+            headers={"Content-Type":"application/json","Origin":base}
+            status,_,_=fetch(base+"/media/save",method="POST",data=payload,headers=headers)
+            self.assertEqual(status,401)
+            status,_,_=fetch(base+"/media/save",TOKEN,method="POST",data=payload,
+                             headers={"Content-Type":"application/json","Origin":"https://evil.invalid"})
+            self.assertEqual(status,403)
+            status,_,_=fetch(base+"/media/save",TOKEN,method="POST",data=no_rights,headers=headers)
+            self.assertEqual(status,400)
+            self.assertEqual(stub.calls,[])
+            status,body,_=fetch(base+"/media/save",TOKEN,method="POST",data=payload,headers=headers)
+            self.assertEqual(status,200)
+            result=json.loads(body)
+            self.assertTrue(result["verified"])
+            self.assertEqual(result["state"],"completed")
+            self.assertEqual(stub.calls,["HEAD","GET"])
+            job_id=result["job_id"]
+            status,_,_=fetch(base+"/media/file/"+job_id)
+            self.assertEqual(status,401)
+            status,body,_=fetch(base+"/media/file/"+job_id,TOKEN)
+            self.assertEqual(status,200)
+            self.assertIn(b"ftyp",body)
+            status,body,_=fetch(base+"/media/save",TOKEN,method="POST",data=payload,headers=headers)
+            self.assertEqual(status,200)
+            self.assertTrue(json.loads(body)["from_cache"])
+            self.assertEqual(stub.calls,["HEAD","GET"])
+            status,body,_=fetch(base+"/media/jobs",TOKEN)
+            self.assertEqual(status,200)
+            self.assertEqual(json.loads(body)["jobs"][0]["state"],"completed")
+        self.assertEqual(MediaSave(store,media_root,stub,Transcoder()).list()["jobs"][0]["source_post_id"],"55")
+
     def test_rollback_restores_previous_commit(self):
         build_release(APP, self.tmp, SHA_A)
         build_release(APP, self.tmp, SHA_B)
