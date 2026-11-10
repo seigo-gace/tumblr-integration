@@ -113,6 +113,22 @@ class DiscoveryEngineTests(unittest.TestCase):
         self.assertEqual(checkpoint["cursor"],1)
         self.assertFalse(checkpoint["complete"])
 
+    def test_existing_discovery_database_migrates_without_losing_records(self):
+        import sqlite3
+        dbpath=self.root/"discovery.sqlite3"
+        with sqlite3.connect(dbpath) as db:
+            db.execute("CREATE TABLE discovery_posts(candidate_id TEXT PRIMARY KEY, blog TEXT, post_id TEXT,"
+                       "source TEXT,url TEXT,title TEXT,post_type TEXT,posted_at TEXT,thumbnail_url TEXT,"
+                       "text_excerpt TEXT,tags_json TEXT,note_count INTEGER,state TEXT,first_seen INTEGER,last_seen INTEGER)")
+            db.execute("INSERT INTO discovery_posts VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(
+                "legacy:7","legacy","7","tag:old","https://legacy.tumblr.com/post/7","old","text",
+                "2026-11-10","","body","[]",0,"visible",1,1))
+        store=DiscoveryStore(dbpath)
+        rows=store.read_candidates()
+        self.assertEqual(len(rows),1)
+        self.assertEqual(rows[0]["candidate_id"],"legacy:7")
+        self.assertEqual(rows[0]["media_json"],"[]")
+
     def test_preserves_all_safe_image_video_media_refs_for_later_library(self):
         post={"blog_name":"one","id_string":"501","post_url":"https://one.tumblr.com/post/501",
               "summary":"media","timestamp":300,"content":[
