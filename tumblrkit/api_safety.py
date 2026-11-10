@@ -4,6 +4,9 @@ Local safety thresholds are deliberately below provider quotas; not a ban guaran
 The same SQLite file must be shared by all read adapter processes on Gserver.
 """
 from pathlib import Path
+from contextlib import closing
+import os
+import stat
 import sqlite3
 import time
 
@@ -19,19 +22,24 @@ class TumblrReadBudget:
         self.clock = clock or time.time
 
     def _open(self):
-        # Never create an unprotected quota directory or accept symlink files.
         folder = self.path.parent
-        if folder.is_symlink() or not folder.is_dir() or (folder.stat().st_mode & 0o077):
+        if (folder.is_symlink() or not folder.is_dir() or
+                folder.stat().st_uid != os.getuid() or folder.stat().st_mode & 0o077):
             raise ValueError("tumblr_budget_directory_unsafe")
         if self.path.is_symlink():
             raise ValueError("tumblr_budget_symlink")
-        if self.path.exists() and self.path.stat().st_mode & 0o077:
+        if not self.path.exists():
+            try:
+                fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                             getattr(os, "O_NOFOLLOW", 0), 0o600)
+                os.close(fd)
+            except FileExistsError:
+                pass
+        info = self.path.stat()
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_mode & 0o077):
             raise ValueError("tumblr_budget_file_unsafe")
-        db = sqlite3.connect(self.path, timeout=3, isolation_level=None)
-        if self.path.stat().st_mode & 0o077:
-            db.close()
-            raise ValueError("tumblr_budget_file_unsafe")
-        return db
+        return sqlite3.connect(self.path, timeout=3, isolation_level=None)
 
     def reserve(self, calls=2):
         if calls != 2:
@@ -39,7 +47,7 @@ class TumblrReadBudget:
         now = int(self.clock())
         hour, day = now // 3600, now // 86400
         try:
-            with self._open() as db:
+            with closing(self._open()) as db:
                 db.execute("BEGIN IMMEDIATE")
                 db.execute("CREATE TABLE IF NOT EXISTS tumblr_api_read_budget "
                            "(period TEXT NOT NULL, bucket INTEGER NOT NULL, calls INTEGER NOT NULL, "
