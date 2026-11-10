@@ -105,3 +105,8 @@ button[type=submit]:disabled{opacity:.55;cursor:wait}
 .result-bar-fill{height:100%;background:#9bbeda;border-radius:4px}
 
 .result-thumbnail{display:block;width:58px;height:58px;object-fit:cover;border-radius:7px;background:#303030}
+
+/* Local-only candidate exclusion beside the source link; no extra menu. */
+.discovery-exclude{margin-left:7px;border:1px solid var(--border);background:transparent;color:var(--sub);border-radius:7px;padding:3px 7px;font-size:11px}
+.discovery-exclude:hover{background:#303030;color:var(--text)}
+.discovery-exclude:disabled{opacity:.5}
