@@ -86,6 +86,18 @@ class UploadTests(unittest.TestCase):
         status, _, _ = request(self.server.port, "GET", "/attachments/" + ident)
         self.assertEqual(status, 404)
 
+    def test_office_zip_file_is_accepted_but_download_only(self):
+        data = bytes.fromhex("504b0304") + b"mock-archive"
+        status, raw, _ = self.upload("report.docx", data)
+        self.assertEqual(status, 201)
+        record = json.loads(raw)
+        self.assertEqual(record["media_type"],
+                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        status, body, headers = request(self.server.port, "GET", "/attachments/" + record["id"])
+        self.assertEqual(status, 200)
+        self.assertEqual(body, data)
+        self.assertTrue(headers["Content-Disposition"].startswith("attachment;"))
+
     def test_auth_origin_and_invalid_files_are_rejected(self):
         photo = b"GIF89a" + b"rest"
         self.assertEqual(self.upload("image.gif", photo, auth=False)[0], 401)
