@@ -22,6 +22,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 from tumblrkit.assistant import Assistant
+from tumblrkit.bridge import Bridge
+from tumblrkit.tumblr_read import adapter_from_env
 from tumblrkit.drafts import DraftStore
 from tumblrkit.attachments import AttachmentStore, AttachmentError, MAX_ATTACHMENT_BYTES, IMAGE_TYPES
 
@@ -547,7 +549,11 @@ class AppServer:
         self.host = loopback_host(host)
         self.port = port
         self.ticket = ticket
-        self.assistant = assistant if assistant is not None else Assistant()
+        if assistant is not None:
+            self.assistant = assistant
+        else:
+            tumblr_reader = adapter_from_env()
+            self.assistant = Assistant(bridge=Bridge({"tumblr": tumblr_reader} if tumblr_reader else {}))
         self.ticket_path = None
         self.httpd = None
         self.thread = None
