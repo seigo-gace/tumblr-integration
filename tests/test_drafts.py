@@ -48,7 +48,7 @@ class DraftEndpointTests(unittest.TestCase):
         self.assertEqual(json.loads(body)["drafts"],[])
 
     def test_restart_preserves_drafts_and_no_external_provider(self):
-        status,body=req(self.service.port,"POST","/drafts",b'{"text":"再起動しても保存"}',self.auth)
+        status,body=req(self.service.port,"POST","/drafts",'{"text":"再起動しても保存"}'.encode("utf-8"),self.auth)
         self.assertEqual(status,201)
         with AppServer(self.release,TOKEN,assistant=Assistant(providers=[])) as other:
             status,body=req(other.port,"GET","/drafts",headers=self.auth)
