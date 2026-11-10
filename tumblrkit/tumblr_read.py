@@ -97,11 +97,17 @@ def discovery_media_refs(post):
         if not isinstance(block,dict) or block.get("type") not in ("image","video"):
             continue
         kind=block["type"]
-        item=block.get("poster") if kind=="video" else block.get("media")
-        if isinstance(item,dict): item=[item]
-        if isinstance(item,list):
-            for media in item:
-                if isinstance(media,dict): accept(media.get("url"),kind)
+        media=block.get("media")
+        if isinstance(media,dict): media=[media]
+        if isinstance(media,list):
+            for entry in media:
+                if isinstance(entry,dict): accept(entry.get("url"),kind)
+        if kind=="video":
+            poster=block.get("poster")
+            if isinstance(poster,dict): poster=[poster]
+            if isinstance(poster,list):
+                for entry in poster:
+                    if isinstance(entry,dict): accept(entry.get("url"),"image")
     photos=post.get("photos")
     if isinstance(photos,list):
         for photo in photos:
