@@ -6,6 +6,23 @@
   const form=document.getElementById("chat-form");
   const instruction=document.getElementById("instruction");
   const connection=document.getElementById("connection");
+  const connect=document.getElementById("tumblr-connect");
+  connect.addEventListener("click",async function(){
+    connect.disabled=true;
+    try{
+      const response=await fetch("/oauth/start",{method:"POST",credentials:"same-origin"});
+      if(!response.ok)throw new Error("oauth_not_ready");
+      const data=await response.json();
+      const url=new URL(data.authorize_url);
+      if(url.protocol!=="https:"||url.hostname!=="www.tumblr.com"||url.pathname!=="/oauth2/authorize")
+        throw new Error("invalid_oauth_redirect");
+      window.location.assign(url.href);
+    }catch(error){
+      display("Tumblr連携を開始できません。運用ブログと認証設定を確認してください。","system");
+      connect.disabled=false;
+    }
+  });
+
   const assist=document.getElementById("assist");
   const confirm=document.getElementById("confirm");
   const attachmentPicker=document.getElementById("attachments");
