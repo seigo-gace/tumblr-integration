@@ -126,8 +126,6 @@ def verify_browser_session(port, token):
 
 def verify_attachments(port, token):
     """Exercise upload, private view, chat reference and cleanup on both ports."""
-    photo = b"\\x89PNG\\r\\n\\x1a\\n" + b"tiny-staging-probe"
-    # Decode literal escapes for binary PNG signature.
     photo = bytes.fromhex("89504e470d0a1a0a") + b"tiny-staging-probe"
     payload = json.dumps({
         "name": "upload-test.png",
