@@ -45,7 +45,7 @@ class AssistantTests(unittest.TestCase):
         result = assistant.turn("投稿一覧を見せて 対象 myblog")
         self.assertTrue(result["executed"])
         view = result["view"]
-        self.assertEqual(["title", "type", "date", "url"], view["columns"])
+        self.assertEqual(["title", "type", "date", "thumbnail_url", "url"], view["columns"])
         self.assertEqual("投稿A", view["rows"][0]["title"])
         self.assertNotIn("unexpected", view["rows"][0])
 
