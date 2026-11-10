@@ -344,13 +344,48 @@ class Assistant:
 
     def _from_bridge(self, result, provider, confirmed=False):
         if result.state == "completed":
-            return self._pack("completed", "実行結果を確認しました。次の指示を書けます。", True, action=result.action, provider=provider)
+            response = self._pack("completed", "取得結果を表示します。", True, action=result.action, provider=provider)
+            response["view"] = self._result_view(result.action, result.detail)
+            return response
         if result.state == "confirmation_required":
             return self._pack("confirmation_required", "まだ実行していません。", False, action=result.action, provider=provider)
         if result.state == "not_connected":
             lead = "確認は受け取りました。" if confirmed else "候補は見つかりました。"
             return self._pack("not_connected", lead + "接続先が無いため実行していません。", False, action=result.action, provider=provider, recovery=True)
         return self._pack(result.state, "操作は完了していません。実行していません。", False, action=result.action, provider=provider, recovery=True)
+
+    @staticmethod
+    def _result_view(action, detail):
+        """Bounded, fixed-order display contract; verified adapter output only."""
+        spec = {
+            "tumblr.discover": ("検索結果", ("title", "type", "date", "url")),
+            "tumblr.list_posts": ("投稿一覧", ("title", "type", "date", "url")),
+            "analytics.get_summary": ("集計結果", ("label", "value", "period", "url")),
+            "telegram.check_membership": ("参加状況", ("name", "status", "date", "url")),
+            "tumblr.publish_draft": ("投稿結果", ("title", "status", "date", "url")),
+            "telegram.publish_announcement": ("告知結果", ("title", "status", "date", "url")),
+        }
+        title, columns = spec.get(action, ("実行結果", ("name", "status", "date", "url")))
+        rows = detail.get("rows", detail.get("items", []))
+        if not isinstance(rows, list):
+            rows = []
+        safe_rows = []
+        for row in rows[:100]:
+            if not isinstance(row, dict):
+                continue
+            clean = {}
+            for key in columns:
+                value = row.get(key)
+                if value is None or isinstance(value, bool):
+                    clean[key] = ""
+                elif isinstance(value, (str, int, float)):
+                    clean[key] = str(value)[:500]
+                else:
+                    clean[key] = ""
+            safe_rows.append(clean)
+        return {"kind": "records", "title": title, "action": action,
+                "status": "connected", "columns": list(columns), "rows": safe_rows,
+                "total": len(rows), "truncated": len(rows) > 100}
 
     def _failure_text(self, code):
         if code in ("ai_disabled", "quota_unavailable"):
