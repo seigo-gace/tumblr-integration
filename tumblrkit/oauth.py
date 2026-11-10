@@ -76,3 +76,34 @@ class TumblrOAuth:
         if not isinstance(name, str) or not name:
             raise ValueError("Tumblr identity readback missing")
         return name
+
+def read_owner_client_credentials(directory):
+    """Load the two previously owner-registered OAuth app credentials, never log values.
+
+    Does not authorize a Tumblr account or issue an access token.
+    """
+    import os
+    import stat
+    from pathlib import Path
+
+    folder = Path(directory).expanduser()
+    if folder.is_symlink() or not folder.is_dir():
+        raise ValueError("oauth_credentials_directory_unavailable")
+    folder_stat = folder.stat()
+    if folder_stat.st_uid != os.getuid() or folder_stat.st_mode & 0o077:
+        raise ValueError("oauth_credentials_directory_unsafe")
+    values = []
+    for name in ("consumer-key", "client-secret"):
+        path = folder / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("oauth_credential_file_unavailable")
+        file_stat = path.stat()
+        if (not stat.S_ISREG(file_stat.st_mode) or
+                file_stat.st_uid != os.getuid() or file_stat.st_mode & 0o077 or
+                not 12 <= file_stat.st_size <= 4097):
+            raise ValueError("oauth_credential_file_unsafe")
+        value = path.read_text(encoding="utf-8").strip()
+        if not 12 <= len(value) <= 4096 or any(ch.isspace() for ch in value):
+            raise ValueError("oauth_credential_invalid")
+        values.append(value)
+    return tuple(values)
