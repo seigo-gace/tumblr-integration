@@ -39,9 +39,13 @@ def _safe_media(value):
     url=value["url"]
     if not isinstance(url,str) or len(url)>500 or value["type"] not in ("image","video"):
         return None
-    parsed=urlsplit(url)
-    if (parsed.scheme!="https" or parsed.username or parsed.password or parsed.port is not None
-            or not SAFE_MEDIA_HOST.fullmatch(parsed.hostname or "")):
+    try:
+        parsed=urlsplit(url)
+        valid=(parsed.scheme=="https" and not parsed.username and not parsed.password
+               and parsed.port is None and bool(SAFE_MEDIA_HOST.fullmatch(parsed.hostname or "")))
+    except ValueError:
+        return None
+    if not valid:
         return None
     return {"url":url,"type":value["type"]}
 
@@ -73,11 +77,11 @@ class Library:
         if type(limit) is not int or not 1<=limit<=100:
             raise ValueError("library_limit_invalid")
         clause={
-            "all":"p.state='visible' AND b.blocked=0",
-            "unread":"p.state='visible' AND b.blocked=0 AND COALESCE(s.seen,0)=0",
-            "favorite":"p.state='visible' AND b.blocked=0 AND COALESCE(s.favorite,0)=1",
-            "watch_later":"p.state='visible' AND b.blocked=0 AND COALESCE(s.watch_later,0)=1",
-            "seen":"p.state='visible' AND b.blocked=0 AND COALESCE(s.seen,0)=1",
+            "all":"p.state='visible' AND COALESCE(b.blocked,0)=0",
+            "unread":"p.state='visible' AND COALESCE(b.blocked,0)=0 AND COALESCE(s.seen,0)=0",
+            "favorite":"p.state='visible' AND COALESCE(b.blocked,0)=0 AND COALESCE(s.favorite,0)=1",
+            "watch_later":"p.state='visible' AND COALESCE(b.blocked,0)=0 AND COALESCE(s.watch_later,0)=1",
+            "seen":"p.state='visible' AND COALESCE(b.blocked,0)=0 AND COALESCE(s.seen,0)=1",
             "unavailable":"(p.state='unavailable' OR b.blocked=1)"
         }[filter_name]
         select="SELECT p.candidate_id,p.blog,p.post_id,p.title,p.url,p.post_type,p.posted_at,p.media_json,p.thumbnail_url,p.state,COALESCE(s.seen,0),COALESCE(s.favorite,0),COALESCE(s.watch_later,0),COALESCE(s.last_media_index,0)"
