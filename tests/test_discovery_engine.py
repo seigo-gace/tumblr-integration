@@ -113,6 +113,17 @@ class DiscoveryEngineTests(unittest.TestCase):
         self.assertEqual(checkpoint["cursor"],1)
         self.assertFalse(checkpoint["complete"])
 
+    def test_one_blog_can_be_present_in_multiple_sources_without_losing_links(self):
+        store=DiscoveryStore(self.root/"discovery.sqlite3")
+        blog={"name":"one","url":"https://one.tumblr.com"}
+        store.save_page("following:following",[blog],[],1)
+        store.save_page("followers:followers",[blog],[],1)
+        self.assertEqual(len(store.read_blogs("following:following")),1)
+        self.assertEqual(len(store.read_blogs("followers:followers")),1)
+        store.exclude_blog("one")
+        self.assertEqual(store.read_blogs("following:following"),[])
+        self.assertEqual(store.read_blogs("followers:followers"),[])
+
     def test_local_unavailable_state_not_silent_deletion(self):
         adapter,_=self.scanner([envelope([{
             "blog_name":"one","id_string":"999","post_url":"https://one.tumblr.com/post/999",
