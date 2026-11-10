@@ -79,6 +79,10 @@ class OperationAppTests(unittest.TestCase):
         self.assertIn("Number.isFinite(item.value)", self.js)
         self.assertIn(".result-table", self.css)
         self.assertIn(".result-bar-track", self.css)
+        self.assertIn('key==="thumbnail_url"', self.js)
+        self.assertIn('host.endsWith(".media.tumblr.com")', self.js)
+        self.assertIn('img.referrerPolicy="no-referrer"', self.js)
+        self.assertIn(".result-thumbnail", self.css)
 
     def test_mobile_layout(self):
         self.assertIn("@media(max-width:760px)",self.css)
