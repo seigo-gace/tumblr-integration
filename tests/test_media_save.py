@@ -2,13 +2,15 @@
 idempotency, durable result, and fail-closed. No external requests.
 """
 import os
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 from tumblrkit.discovery_store import DiscoveryStore
 from tumblrkit.media_save import (
-    MediaSave,MediaError,_media_url,_safe_media,SafeDownloader,
+    MediaSave,MediaError,_media_url,_safe_media,SafeDownloader,Transcoder,
     MAX_SOURCE_BYTES,MAX_TOTAL_SAVED_BYTES,
 )
 
@@ -59,6 +61,20 @@ class MediaSaveTests(unittest.TestCase):
         self.downloader=FakeDownloader()
         self.transcoder=FakeTranscoder()
         self.worker=MediaSave(self.db,self.media,self.downloader,self.transcoder)
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"),
+                         "local FFmpeg/ffprobe not installed on this test runner")
+    def test_real_offline_ffmpeg_probe_and_h264_mp4_conversion(self):
+        src=self.media/"generated.avi"
+        dest=self.media/"converted.mp4.part"
+        cmd=["ffmpeg","-hide_banner","-loglevel","error","-nostdin","-y",
+             "-f","lavfi","-i","color=c=blue:s=160x90:r=6:d=1",
+             "-c:v","mpeg4","-f","avi",str(src)]
+        subprocess.run(cmd,check=True,timeout=25)
+        size=Transcoder().convert(src,dest)
+        self.assertGreater(size,0)
+        self.assertIn(b"ftyp",dest.read_bytes()[:32])
+        self.assertEqual(Transcoder()._probe(dest)["video"],"h264")
 
     def test_saved_mp4_and_source_attribution_private(self):
         with self.assertRaisesRegex(MediaError,"MEDIA_RIGHTS_CONFIRMATION_REQUIRED"):
