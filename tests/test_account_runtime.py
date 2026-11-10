@@ -24,7 +24,7 @@ class FakeTransport:
                 "token_type": "bearer", "expires_in": 3600}
     def get_json(self, url, token):
         self.reads.append((url, token))
-        return {"response": {"user": {"blogs": [{"name": name} for name in self.blogs]}}}
+        return {"response": {"user": {"blogs": [{"name": name, "primary": i == 0} for i, name in enumerate(self.blogs)]}}}
 
 
 class OwnerAccountTests(unittest.TestCase):
@@ -50,6 +50,24 @@ class OwnerAccountTests(unittest.TestCase):
         self.oauth.callback("state=" + state + "&code=valid-code")
         with self.assertRaises(ValueError):
             register_owner_blog(self.root, "private-personal")
+
+    def test_first_authorization_discovers_primary_blog(self):
+        oauth = OwnerOAuth(self.root, None, self.transport)
+        state = parse_qs(urlsplit(oauth.start()).query)["state"][0]
+        result = oauth.callback("state=" + state + "&code=valid-code")
+        self.assertEqual(result["blog"], "recruitment")
+        self.assertEqual(oauth.status()["connected"], True)
+        self.assertEqual(oauth.store.read()["blog"], "recruitment")
+
+    def test_no_primary_blog_fails_closed(self):
+        class NoPrimary(FakeTransport):
+            def get_json(self, url, token):
+                return {"response": {"user": {"blogs": [{"name": "recruitment"}]}}}
+        oauth = OwnerOAuth(self.root, None, NoPrimary())
+        state = parse_qs(urlsplit(oauth.start()).query)["state"][0]
+        with self.assertRaises(ValueError):
+            oauth.callback("state=" + state + "&code=valid-code")
+        self.assertFalse(oauth.store.access.exists())
 
     def test_authorization_owner_and_refresh_lifecycle(self):
         url = self.oauth.start()
