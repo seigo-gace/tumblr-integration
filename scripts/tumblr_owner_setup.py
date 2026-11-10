@@ -37,7 +37,7 @@ def setup_token(path):
     value = getpass.getpass("Tumblr操作アプリのログインキー (8文字以上): ")
     require_token(value)
     repeat = getpass.getpass("確認のためもう一度入力: ")
-    if not hmac.compare_digest(value, repeat):
+    if not hmac.compare_digest(value.encode("utf-8"), repeat.encode("utf-8")):
         raise SetupError("LOGIN_KEY_CONFIRMATION_MISMATCH")
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as file:
@@ -54,7 +54,7 @@ def ask_new_token():
             print("入力形式エラー：8〜256文字、空白・改行なしで入力してください。", flush=True)
             continue
         repeat = getpass.getpass("確認のためもう一度入力: ")
-        if not hmac.compare_digest(value, repeat):
+        if not hmac.compare_digest(value.encode("utf-8"), repeat.encode("utf-8")):
             print("確認用の入力が一致しません。", flush=True)
             continue
         return value
