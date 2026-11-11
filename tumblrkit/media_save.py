@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS media_save_jobs(
  source_bytes INTEGER NOT NULL DEFAULT 0,
  output_bytes INTEGER NOT NULL DEFAULT 0,
  output_name TEXT NOT NULL DEFAULT '',
+ source_method TEXT NOT NULL DEFAULT '',
  sha256 TEXT NOT NULL DEFAULT '',
  created_at INTEGER NOT NULL,
  updated_at INTEGER NOT NULL,
@@ -244,6 +245,9 @@ class MediaSave:
         db=self.store._open()
         db.execute("PRAGMA foreign_keys=ON")
         db.executescript(SCHEMA)
+        columns={row[1] for row in db.execute("PRAGMA table_info(media_save_jobs)")}
+        if "source_method" not in columns:
+            db.execute("ALTER TABLE media_save_jobs ADD COLUMN source_method TEXT NOT NULL DEFAULT ''")
         return db
 
     def _directory(self):
@@ -295,17 +299,17 @@ class MediaSave:
         with closing(self._open()) as db:
             if candidate_id is None:
                 rows=db.execute("SELECT id,candidate_id,source_post_id,media_index,state,"
-                    "error_code,source_bytes,output_bytes,output_name,created_at,updated_at"
+                    "error_code,source_bytes,output_bytes,output_name,source_method,created_at,updated_at"
                     " FROM media_save_jobs ORDER BY created_at DESC LIMIT 100").fetchall()
             else:
                 if not isinstance(candidate_id,str) or not IDENT.fullmatch(candidate_id):
                     raise MediaError("MEDIA_CANDIDATE_INVALID")
                 rows=db.execute("SELECT id,candidate_id,source_post_id,media_index,state,"
-                    "error_code,source_bytes,output_bytes,output_name,created_at,updated_at"
+                    "error_code,source_bytes,output_bytes,output_name,source_method,created_at,updated_at"
                     " FROM media_save_jobs WHERE candidate_id=? ORDER BY created_at DESC LIMIT 100",
                     (candidate_id,)).fetchall()
         keys=("id","candidate_id","source_post_id","media_index","state","error_code",
-              "source_bytes","output_bytes","output_name","created_at","updated_at")
+              "source_bytes","output_bytes","output_name","source_method","created_at","updated_at")
         return {"verified":True,"jobs":[dict(zip(keys,row)) for row in rows]}
 
     def file(self,job_id):
@@ -345,10 +349,10 @@ class MediaSave:
                     " AND media_index=? AND source_url=?",(candidate_id,media_index,url)).fetchone()
                 if previous and previous[1]=="completed":
                     match=db.execute("SELECT id,candidate_id,source_post_id,media_index,state,"
-                        "error_code,source_bytes,output_bytes,output_name,created_at,updated_at"
+                        "error_code,source_bytes,output_bytes,output_name,source_method,created_at,updated_at"
                         " FROM media_save_jobs WHERE id=?",(previous[0],)).fetchone()
                     fields=("id","candidate_id","source_post_id","media_index","state","error_code",
-                            "source_bytes","output_bytes","output_name","created_at","updated_at")
+                            "source_bytes","output_bytes","output_name","source_method","created_at","updated_at")
                     job=dict(zip(fields,match))
                     if job["output_name"] and (self.root / job["output_name"]).is_file():
                         db.execute("COMMIT")
@@ -430,8 +434,8 @@ class MediaSave:
             os.replace(partial,output)
             with closing(self._open()) as db:
                 db.execute("UPDATE media_save_jobs SET state='completed',source_bytes=?,"
-                           "output_bytes=?,output_name=?,sha256=?,updated_at=? WHERE id=?",
-                           (size,output_bytes,output.name,digest,int(time.time()),job_id))
+                           "output_bytes=?,output_name=?,source_method=?,sha256=?,updated_at=? WHERE id=?",
+                           (size,output_bytes,output.name,method,digest,int(time.time()),job_id))
             return {"verified":True,"job_id":job_id,"state":"completed",
                     "method":method,"source_bytes":size,"output_bytes":output_bytes,"output_name":output.name}
         except Exception as exc:
