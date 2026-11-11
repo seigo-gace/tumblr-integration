@@ -66,6 +66,7 @@ class Bridge:
                 "tumblr_publish_uncertain",
                 "tumblr_publish_readback_unverified",
                 "tumblr_publish_rejected",
+                "tumblr_write_consent_required",
             })
             code=str(exc) if isinstance(exc,ValueError) else ""
             detail={"error_type":type(exc).__name__}
