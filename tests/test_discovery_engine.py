@@ -100,6 +100,33 @@ class DiscoveryEngineTests(unittest.TestCase):
                     adapter.perform("tumblr.discover",target,{})
         self.assertEqual(stub.calls,[])
 
+    def test_following_and_followers_resume_beyond_old_artificial_limit(self):
+        # A persisted source with a large verified offset must not be silently
+        # abandoned at 100,000. Each owner action still requests one page.
+        for mode, total_key, records_key in (
+            ("following", "total_blogs", "blogs"),
+            ("followers", "total_users", "users"),
+        ):
+            with self.subTest(mode=mode):
+                source = mode + ":" + mode
+                store = DiscoveryStore(self.root / "discovery.sqlite3")
+                store.save_page(source, [], [], 100001, complete=False)
+                adapter, stub = self.scanner([
+                    envelope({total_key: 100003, records_key: [
+                        {"name": mode + "last"}, {"name": mode + "end"}
+                    ]})
+                ])
+                first = adapter.perform("tumblr.discover", mode, {})
+                self.assertEqual(first["cursor"], 100003)
+                self.assertTrue(first["complete"])
+                self.assertEqual(first["total"], 2)
+                self.assertEqual(len(stub.calls), 1)
+                self.assertEqual(
+                    parse_qs(urlsplit(stub.calls[0]).query)["offset"], ["100001"])
+                repeated = adapter.perform("tumblr.discover", mode, {})
+                self.assertTrue(repeated["from_cache"])
+                self.assertEqual(len(stub.calls), 1)
+
     def test_following_pagination_persists_across_restart_and_dedupes(self):
         page1=envelope({"total_blogs":11,"blogs":[
             {"name":"first"},{"name":"second"},{"name":"second"}]})
