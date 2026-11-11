@@ -53,6 +53,13 @@ class OperationAppTests(unittest.TestCase):
         self.assertNotIn('フォロー・タグ・公開候補を確認',self.html)
         self.assertEqual(self.html.count('class="goal"'),6)
 
+    def test_discovery_saved_pages_never_hide_rows_beyond_first_hundred(self):
+        self.assertIn('view.stored_total',self.js)
+        self.assertIn('view.stored_offset',self.js)
+        self.assertIn('"stored_next_target","保存済みの次100件"',self.js)
+        self.assertIn('"stored_prev_target","保存済みの前100件"',self.js)
+        self.assertIn('selected_action:"tumblr.discover",selected_target:target',self.js)
+
     def test_connected_read_only_tumblr_exposes_write_reauthorization_button(self):
         self.assertIn('if(state.can_publish!==true)',self.js)
         self.assertIn('connect.textContent="投稿権限を追加"',self.js)
