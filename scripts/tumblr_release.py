@@ -223,6 +223,25 @@ def start(port, release, token, root, live_ai=False):
     return process
 
 
+def _production_process_args(args):
+    """Identify only the owned production port; leave unknown ports guarded.
+
+    Staging (8082) can exist after a previous failed staging cleanup and must
+    not make the production process appear non-unique. A missing or malformed
+    port is conservatively counted as a possible production process.
+    """
+    for index, argument in enumerate(args):
+        if argument == "--port":
+            if index + 1 >= len(args):
+                return True
+            value = args[index + 1]
+            return not (value.isdecimal() and int(value) != PRODUCTION_PORT)
+        if argument.startswith("--port="):
+            value = argument[7:]
+            return not (value.isdecimal() and int(value) != PRODUCTION_PORT)
+    return True
+
+
 def find_old(root, allow_stopped=False):
     matches = []
     for item in Path("/proc").iterdir():
@@ -234,6 +253,8 @@ def find_old(root, allow_stopped=False):
             if "tumblrkit.appserve" not in args or "serve" not in args:
                 continue
             if (item / "cwd").resolve() != root.resolve():
+                continue
+            if not _production_process_args(args):
                 continue
             matches.append(int(item.name))
         except (OSError, PermissionError, ValueError):
