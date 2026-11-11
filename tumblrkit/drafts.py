@@ -48,9 +48,16 @@ class DraftStore:
                 "SELECT id,text,updated FROM operation_drafts "
                 "ORDER BY updated DESC,id DESC LIMIT ? OFFSET ?",(limit,offset)
             ).fetchall()
-            return [{"id": i, "text": text, "updated": updated,
-                     "locked": self._has_publish_receipt(db,i)}
-                    for i,text,updated in rows]
+            result=[]
+            for ident,text,updated in rows:
+                status,post_id,current=self._published_info(db,ident,text)
+                result.append({
+                    "id":ident,"text":text,"updated":updated,
+                    "locked":self._has_publish_receipt(db,ident),
+                    "publish_state":status,"provider_post_id":post_id,
+                    "current_text":current,
+                })
+            return result
 
     def count(self):
         with self._connect() as db:
@@ -73,11 +80,49 @@ class DraftStore:
         table=db.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' "
             "AND name='tumblr_publish_receipts'").fetchone()
-        if not table:
-            return False
-        return db.execute(
+        if table and db.execute(
             "SELECT 1 FROM tumblr_publish_receipts WHERE draft_id=?",
-            (ident,)).fetchone() is not None
+            (ident,)).fetchone() is not None:
+            return True
+        has_mutations=db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='tumblr_post_mutations'").fetchone()
+        return bool(has_mutations and db.execute(
+            "SELECT 1 FROM tumblr_post_mutations WHERE revision_draft_id=?",
+            (ident,)).fetchone())
+
+    @staticmethod
+    def _published_info(db,ident,text):
+        has_receipt=db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='tumblr_publish_receipts'").fetchone()
+        if not has_receipt:
+            return "local",None,text
+        row=db.execute(
+            "SELECT post_id,state FROM tumblr_publish_receipts WHERE draft_id=?",
+            (ident,)).fetchone()
+        if not row:
+            return "local",None,text
+        post_id,state=row
+        has_mutations=db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='tumblr_post_mutations'").fetchone()
+        current=text
+        if has_mutations:
+            operations=db.execute(
+                "SELECT action,state,revision_draft_id FROM tumblr_post_mutations "
+                "WHERE source_draft_id=? ORDER BY rowid ASC",(ident,)).fetchall()
+            for action,change_state,revision in operations:
+                if action=="edit" and change_state=="verified":
+                    changed=db.execute(
+                        "SELECT text FROM operation_drafts WHERE id=?",(revision,)).fetchone()
+                    if changed:
+                        current=changed[0]
+                if change_state in ("reserved","sent"):
+                    state="changing"
+                if action=="delete" and change_state=="verified":
+                    state="deleted"
+        return ("published" if state=="verified" else state),post_id,current
 
     def update(self, ident, text, expected_text):
         """Edit same draft; optimistic CAS and immutable after publish reservation."""
