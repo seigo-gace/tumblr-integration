@@ -42,7 +42,10 @@ class TumblrReadBudget:
         return sqlite3.connect(self.path, timeout=3, isolation_level=None)
 
     def reserve(self, calls=2):
-        if calls not in (1, 2):
+        # Owner-approved one-shot engagements can require source preflight,
+        # a single write and an independent readback: reserve all three
+        # attempts atomically before any provider call.
+        if type(calls) is not int or calls not in (1, 2, 3):
             raise ValueError("tumblr_read_cost_mismatch")
         now = int(self.clock())
         hour, day = now // 3600, now // 86400
