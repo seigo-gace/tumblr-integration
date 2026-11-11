@@ -814,6 +814,9 @@ class _Handler(BaseHTTPRequestHandler):
             request_id=request_id,
             draft=payload.get("draft") is True,
             abort=payload.get("abort") is True,
+            goals=payload.get("goals", []),
+            selected_action=payload.get("selected_action"),
+            selected_target=payload.get("selected_target"),
         ))
 
 
