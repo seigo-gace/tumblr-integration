@@ -55,8 +55,19 @@ class Bridge:
         try:
             data = adapter.perform(request.action, request.target, request.payload)
         except Exception as exc:
-            # Avoid logging exception bodies or secrets in user-facing replies.
-            return ActionResult(request.request_id, request.action, "failed", {"error_type": type(exc).__name__})
+            # Only fixed, known provider codes cross the trust boundary.
+            # Never surface arbitrary exception messages or credentials.
+            codes=frozenset({
+                "tumblr_auth_expired","tumblr_permission_denied",
+                "tumblr_rate_limited","oauth_not_connected",
+                "oauth_refresh_unavailable","oauth_token_permissions",
+                "tumblr_unavailable",
+            })
+            code=str(exc) if isinstance(exc,ValueError) else ""
+            detail={"error_type":type(exc).__name__}
+            if code in codes:
+                detail["error_code"]=code
+            return ActionResult(request.request_id, request.action, "failed", detail)
         # An adapter must return an explicit, provider-read-back verification.
         if not isinstance(data, dict) or data.get("verified") is not True:
             return ActionResult(request.request_id, request.action, "unverified")
