@@ -247,12 +247,13 @@ def _order(text, providers):
 
 
 class Assistant:
-    def __init__(self, bridge=None, providers=None, transport=None):
+    def __init__(self, bridge=None, providers=None, transport=None, draft_store=None):
         self.bridge = bridge or Bridge({})
         self.providers = providers
         self.transport = transport
         self.pending = {}
-        self.drafts = {}
+        # One durable Owner draft store; no second in-memory draft ledger.
+        self.draft_store = draft_store
 
     def _available(self):
         if self.providers is not None:
@@ -265,9 +266,19 @@ class Assistant:
             self.pending.clear()
             return self._pack("aborted", "中断しました。実行していません。", False)
         if draft:
-            draft_id = uuid.uuid4().hex
-            self.drafts[draft_id] = redact(message or "")
-            return self._pack("draft_saved", "下書きとして残しました。外部へは送っていません。", False)
+            if self.draft_store is None:
+                return self._pack("not_connected",
+                    "永続下書きDBが未接続のため保存していません。",False,recovery=True)
+            try:
+                stored=self.draft_store.save(message or "")
+            except (ValueError,OSError):
+                return self._pack("failed","下書きを保存できませんでした。再実行前に保存状態を確認してください。",
+                                  False,recovery=True)
+            result=self._pack("draft_saved",
+                "下書きを既存の保存先に記録しました。Tumblrへは投稿していません。",
+                False)
+            result["draft_id"]=stored["id"]
+            return result
         if confirm:
             return self._confirm(request_id)
         if goals is None:
