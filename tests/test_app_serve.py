@@ -46,6 +46,9 @@ class AppServeTests(unittest.TestCase):
         self.assertIn('post({message:text})', client)
         self.assertIn('view.related_basis==="observed_cooccurring_tags"', client)
         self.assertIn("view.related_tags.slice(0,8)", client)
+        for action in ("engagement.like","engagement.reblog","engagement.follow"):
+            self.assertIn('selected_action:spec[0]',client)
+            self.assertIn(action,client)
         meta = json.loads((release / "RELEASE.json").read_text(encoding="utf-8"))
         self.assertEqual(meta["files"]["app.js"], hashlib.sha256((APP / "app.js").read_bytes()).hexdigest())
 
@@ -124,6 +127,17 @@ class AppServeTests(unittest.TestCase):
             status, body, _ = fetch(base + "/oauth/status", TOKEN)
             self.assertEqual(status, 200)
             self.assertTrue(json.loads(body)["connected"])
+            # After a real OAuth callback both publishing and Engagement
+            # adapters must be rebound to this *same* verified owner; a
+            # disconnected class name is not implementation.
+            self.assertIn("tumblr",server.httpd.assistant.bridge.adapters)
+            self.assertIn("engagement",server.httpd.assistant.bridge.adapters)
+            owner=server.httpd.assistant.bridge.adapters["tumblr"]
+            engage=server.httpd.assistant.bridge.adapters["engagement"]
+            self.assertIs(owner.engagement,engage)
+            self.assertEqual(engage.owner,"recruitment")
+            self.assertEqual(engage.store.path,
+                             secret_dir / "discovery.sqlite3")
             status, _, _ = fetch(base + "/oauth/callback?state=" + state + "&code=valid")
             self.assertEqual(status, 400)
 
