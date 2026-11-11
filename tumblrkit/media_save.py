@@ -27,6 +27,8 @@ from urllib.parse import urlsplit
 
 from tumblrkit.discovery_store import DiscoveryStore
 from tumblrkit.library import _safe_media, IDENT
+from tumblrkit.media_extract import ExtractorFallback, ExtractionFailure, verified_post_url
+from tumblrkit.api_safety import TumblrReadBudget
 
 MAX_SOURCE_BYTES=128*1024*1024
 MAX_OUTPUT_BYTES=256*1024*1024
@@ -230,11 +232,12 @@ class Transcoder:
         return size
 
 class MediaSave:
-    def __init__(self,discovery_store,root,downloader=None,transcoder=None):
+    def __init__(self,discovery_store,root,downloader=None,transcoder=None,extractor=None):
         self.store=discovery_store
         self.root=Path(root)
         self.downloader=downloader or SafeDownloader()
         self.transcoder=transcoder or Transcoder()
+        self.extractor=extractor or ExtractorFallback(self.root.parent / 'media-extractors' / 'bin')
         self.lock=threading.Lock()
 
     def _open(self):
@@ -259,23 +262,34 @@ class MediaSave:
             raise MediaError("MEDIA_CANDIDATE_INVALID")
         if type(index) is not int or not 0<=index<50:
             raise MediaError("MEDIA_INDEX_INVALID")
-        row=db.execute("SELECT p.post_id,p.media_json,p.state,COALESCE(b.blocked,0)"
-             " FROM discovery_posts p LEFT JOIN discovery_blogs b ON b.name=p.blog"
-             " WHERE p.candidate_id=?",(candidate_id,)).fetchone()
+        row=db.execute("SELECT p.post_id,p.media_json,p.state,COALESCE(b.blocked,0),"
+             "p.blog,p.url,p.post_type FROM discovery_posts p "
+             "LEFT JOIN discovery_blogs b ON b.name=p.blog "
+             "WHERE p.candidate_id=?",(candidate_id,)).fetchone()
         if not row or row[2]!="visible" or row[3]:
             raise MediaError("MEDIA_CANDIDATE_UNAVAILABLE")
+        post_id,raw,_,_,blog,post_url,post_type=row
         try:
-            media=json.loads(row[1])
-            chosen=media[index]
-            if not isinstance(media,list) or len(media)>50 or chosen.get("type")!="video":
+            verified_post_url(post_url,blog,post_id)
+            media=json.loads(raw)
+            if not isinstance(media,list) or len(media)>50:
                 raise MediaError("MEDIA_SELECTION_INVALID")
-            accepted=_safe_media(chosen)
-            if not accepted or accepted["type"]!="video":
+            selected=media[index] if index<len(media) else None
+            if selected is not None and selected.get("type")=="video":
+                accepted=_safe_media(selected)
+                if accepted and accepted["type"]=="video":
+                    _media_url(accepted["url"])
+                    return post_id,accepted["url"],post_url,blog,True
+            # Original Tumblr post with no direct video source, often video
+            # blocks with a poster or externally embedded video metadata.
+            # Only allow a single fallback target; never promote image posts.
+            if index!=0 or post_type not in ("video","video/mp4"):
                 raise MediaError("MEDIA_SELECTION_INVALID")
-            _media_url(accepted["url"])
+            if any(isinstance(item,dict) and item.get("type")=="video" for item in media):
+                raise MediaError("MEDIA_SELECTION_INVALID")
+            return post_id,post_url,post_url,blog,False
         except (ValueError,TypeError,KeyError,IndexError,AttributeError):
             raise MediaError("MEDIA_SELECTION_INVALID") from None
-        return row[0],accepted["url"]
 
     def list(self,candidate_id=None):
         with closing(self._open()) as db:
@@ -326,7 +340,7 @@ class MediaSave:
         with closing(self._open()) as db:
             try:
                 db.execute("BEGIN IMMEDIATE")
-                post_id,url=self._candidate(db,candidate_id,media_index)
+                post_id,url,post_url,blog,has_direct=self._candidate(db,candidate_id,media_index)
                 previous=db.execute("SELECT id,state,updated_at FROM media_save_jobs WHERE candidate_id=?"
                     " AND media_index=? AND source_url=?",(candidate_id,media_index,url)).fetchone()
                 if previous and previous[1]=="completed":
@@ -372,14 +386,42 @@ class MediaSave:
             if path.exists():
                 path.unlink()
         try:
-            size=self.downloader.probe(url)
-            if not isinstance(size,int) or size<1 or size>MAX_SOURCE_BYTES:
-                raise MediaError("MEDIA_SIZE_EXCEEDED")
-            self._space(size+MAX_OUTPUT_BYTES)
-            got=self.downloader.fetch(url,source,size)
+            # The public direct CDN source remains the first route. Only
+            # known "not available" / unsupported cases advance to the post
+            # extractors, never auth denials, 429, excess size or unsafe URLs.
+            size=None
+            method="direct"
+            if has_direct:
+                try:
+                    size=self.downloader.probe(url)
+                    if not isinstance(size,int) or size<1 or size>MAX_SOURCE_BYTES:
+                        raise MediaError("MEDIA_SIZE_EXCEEDED")
+                    self._space(size+MAX_OUTPUT_BYTES)
+                    got=self.downloader.fetch(url,source,size)
+                    if got!=size:
+                        raise MediaError("MEDIA_SIZE_CHANGED")
+                except MediaError as exc:
+                    if str(exc) not in ("MEDIA_HTTP_UNAVAILABLE","MEDIA_LENGTH_UNKNOWN",
+                                        "MEDIA_TYPE_UNSUPPORTED","MEDIA_HEAD_UNSUPPORTED"):
+                        raise
+                    if source.exists():
+                        source.unlink()
+                    size=None
+            if size is None:
+                # Reserve both bounded extractor attempts together, once for
+                # this explicitly confirmed operation, across Gserver restarts.
+                # Never bypass the read budget when provider capacity is gone.
+                TumblrReadBudget(self.store.path.parent / "tumblr-api-budget.sqlite3").reserve(2)
+                self._space(MAX_SOURCE_BYTES+MAX_OUTPUT_BYTES)
+                try:
+                    result=self.extractor.fetch(post_url,blog,post_id,source)
+                except ExtractionFailure as exc:
+                    raise MediaError(str(exc)) from None
+                size=result["bytes"]
+                method=result["method"]
+                if not isinstance(size,int) or size<=0 or size>MAX_SOURCE_BYTES:
+                    raise MediaError("MEDIA_SIZE_EXCEEDED")
             os.chmod(source,0o600)
-            if got!=size:
-                raise MediaError("MEDIA_SIZE_CHANGED")
             output_bytes=self.transcoder.convert(source,partial)
             os.chmod(partial,0o600)
             self._space(output_bytes)
@@ -391,7 +433,7 @@ class MediaSave:
                            "output_bytes=?,output_name=?,sha256=?,updated_at=? WHERE id=?",
                            (size,output_bytes,output.name,digest,int(time.time()),job_id))
             return {"verified":True,"job_id":job_id,"state":"completed",
-                    "source_bytes":size,"output_bytes":output_bytes,"output_name":output.name}
+                    "method":method,"source_bytes":size,"output_bytes":output_bytes,"output_name":output.name}
         except Exception as exc:
             error=str(exc) if isinstance(exc,MediaError) else "MEDIA_PROCESS_FAILED"
             try:
