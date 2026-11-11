@@ -353,7 +353,20 @@ class Assistant:
         if result.state == "not_connected":
             lead = "確認は受け取りました。" if confirmed else "候補は見つかりました。"
             return self._pack("not_connected", lead + "接続先が無いため実行していません。", False, action=result.action, provider=provider, recovery=True)
-        return self._pack(result.state, "操作は完了していません。実行していません。", False, action=result.action, provider=provider, recovery=True)
+        # Provider-error descriptions are fixed Japanese messages. Never
+        # include arbitrary remote bodies, tokens or exception strings.
+        notices={
+            "tumblr_auth_expired":"Tumblrの認証が失効した可能性があります。再連携してください。",
+            "tumblr_permission_denied":"Tumblrから権限不足またはアクセス拒否が返されました。操作を停止しました。",
+            "tumblr_rate_limited":"Tumblr側の制限を検知したため停止しました。自動再試行はしません。",
+            "oauth_not_connected":"Tumblrアカウントの認証情報がありません。連携してください。",
+            "oauth_refresh_unavailable":"認証の更新に必要な情報がありません。再連携してください。",
+            "oauth_token_permissions":"Tumblrの認証情報の保存権限が不適切です。安全のため停止しました。",
+            "tumblr_unavailable":"Tumblrへの接続に失敗しました。取得済みデータは変更しません。",
+        }
+        code=result.detail.get("error_code") if isinstance(result.detail,dict) else None
+        message=notices.get(code,"操作は完了していません。実行していません。")
+        return self._pack(result.state,message,False,action=result.action,provider=provider,recovery=True)
 
     @staticmethod
     def _result_view(action, detail):
