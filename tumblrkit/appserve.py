@@ -529,7 +529,11 @@ class _Handler(BaseHTTPRequestHandler):
                 if error in ("MEDIA_DISK_FULL","MEDIA_QUOTA_EXCEEDED","MEDIA_BUSY",
                              "MEDIA_JOB_IN_PROGRESS"):
                     self._json(409,{"error":error})
-                elif error in ("MEDIA_HTTP_UNAVAILABLE","MEDIA_TYPE_UNSUPPORTED","MEDIA_LENGTH_UNKNOWN",
+                elif error in ("MEDIA_HTTP_UNAVAILABLE","MEDIA_HEAD_UNSUPPORTED","MEDIA_TYPE_UNSUPPORTED",
+                               "MEDIA_EXTRACTOR_NOT_FOUND","MEDIA_EXTRACTOR_UNAVAILABLE",
+                               "MEDIA_ALL_METHODS_EXHAUSTED","MEDIA_PROVIDER_REFUSED",
+                               "MEDIA_EXTRACTOR_AMBIGUOUS","MEDIA_POST_INVALID","MEDIA_EXTRACTOR_FAILED",
+                               "MEDIA_EXTRACTOR_UNSAFE_FILE","MEDIA_LENGTH_UNKNOWN",
                                "MEDIA_SIZE_EXCEEDED","MEDIA_SIZE_CHANGED","MEDIA_DESTINATION_UNSAFE",
                                "MEDIA_CONNECT_UNAVAILABLE","MEDIA_PROBE_FAILED","MEDIA_PROBE_UNAVAILABLE",
                                "MEDIA_CONVERSION_FAILED","MEDIA_CONVERSION_UNAVAILABLE",
