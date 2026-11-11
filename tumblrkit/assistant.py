@@ -555,7 +555,7 @@ class Assistant:
                     if (isinstance(tag,str) and 0<len(tag)<=64
                             and not any(char in tag for char in "/?#&=<>")
                             and isinstance(count,int) and not isinstance(count,bool)
-                            and 0<count<=100):
+                            and count>0):
                         related.append({"tag":tag,"count":count,"target":"tag:"+tag})
                 result["related_tags"]=related
                 result["related_basis"]="observed_cooccurring_tags"
