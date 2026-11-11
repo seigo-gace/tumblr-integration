@@ -399,6 +399,34 @@ class DiscoveryEngineTests(unittest.TestCase):
         self.assertEqual(checkpoint["cursor"],1)
         self.assertFalse(checkpoint["complete"])
 
+    def test_official_custom_domain_permalink_still_preserves_real_candidate(self):
+        from json import loads
+        tags=["focus"]+[f"topic-{i}" for i in range(45)]
+        item={"blog_name":"first","id_string":"880",
+              "post_url":"https://external-custom-domain.example/posts/880",
+              "timestamp":1770000000,"tags":tags,"summary":"published item"}
+        adapter,stub=self.scanner([envelope([item])])
+        result=adapter.perform("tumblr.discover","related:focus",{})
+        self.assertEqual(result["total"],1)
+        self.assertEqual(len(result["related_tags"]),8)
+        stored=DiscoveryStore(self.root/"discovery.sqlite3").read_candidates()[0]
+        self.assertEqual(stored["url"],"https://first.tumblr.com/post/880")
+        self.assertEqual(loads(stored["tags_json"]),tags)
+        self.assertEqual(len(stub.calls),1)
+
+    def test_malformed_unblocked_candidate_must_not_advance_cursor_or_disappear(self):
+        valid={"blog_name":"first","id_string":"881",
+               "post_url":"https://first.tumblr.com/post/881","timestamp":1001}
+        broken={"blog_name":"first","id_string":"not-a-post-id",
+                "post_url":"https://first.tumblr.com/post/bad","timestamp":1000}
+        adapter,stub=self.scanner([envelope([valid,broken])])
+        with self.assertRaisesRegex(ValueError,"discovery_page_post_unverified"):
+            adapter.perform("tumblr.discover","tag:all-candidates",{})
+        store=DiscoveryStore(self.root/"discovery.sqlite3")
+        self.assertEqual(store.count_candidates("tag:all-candidates"),0)
+        self.assertEqual(store.checkpoint("tag:all-candidates")["cursor"],0)
+        self.assertEqual(len(stub.calls),1)
+
     def test_existing_discovery_database_migrates_without_losing_records(self):
         import sqlite3
         dbpath=self.root/"discovery.sqlite3"
