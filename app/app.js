@@ -786,6 +786,7 @@
       if(message){lastText=message;display(message,"user");}
       if(uploaded.length)displayAttachments(uploaded);
       instruction.value="";
+      resetDraftEdit();
       pendingFiles.splice(0,pendingFiles.length);
       refreshAttachmentList();
       await post({message:message,goals:goals,attachments:uploaded.map(function(item){return item.id;})});
@@ -815,6 +816,13 @@
   const saveDraft=document.getElementById("save-draft");
   const showDrafts=document.getElementById("show-drafts");
   let draftBusy=false;
+  let editingDraftId=null;
+  let editingOriginalText="";
+  function resetDraftEdit(){
+    editingDraftId=null;
+    editingOriginalText="";
+    saveDraft.textContent="入力を保存";
+  }
   function draftNotice(text){
     draftList.replaceChildren();
     const item=document.createElement("p");
@@ -849,16 +857,29 @@
         load.textContent="編集する";
         load.addEventListener("click",function(){
           instruction.value=draft.text;
+          if(draft.locked===true){
+            resetDraftEdit();
+            display("投稿処理の履歴があるため、この本文は変更できません。","system");
+          }else{
+            editingDraftId=draft.id;
+            editingOriginalText=draft.text;
+            saveDraft.textContent="変更を保存";
+            display("元の下書きIDを保持して編集します。まだTumblrへ送信していません。","system");
+          }
           instruction.focus();
-          display("下書きを入力欄に読み込みました。外部には送信していません。","system");
         });
         const remove=document.createElement("button");
         remove.type="button";
         remove.textContent="削除";
+        remove.disabled=draft.locked===true;
+        remove.title=draft.locked===true?"投稿処理の履歴があるため削除できません":"保存した下書きだけを削除";
         remove.addEventListener("click",function(){
           if(!window.confirm("この下書きを削除しますか？")) return;
-          draftRequest("/drafts/"+encodeURIComponent(draft.id),"DELETE").then(refreshDrafts,function(){
-            draftNotice("削除に失敗しました。下書きは保持されています。");
+          draftRequest("/drafts/"+encodeURIComponent(draft.id),"DELETE").then(function(){
+            if(editingDraftId===draft.id)resetDraftEdit();
+            return refreshDrafts();
+          },function(){
+            display("下書きを削除できませんでした。投稿履歴のある下書きは保護されます。","system");
           });
         });
         const publish=document.createElement("button");
@@ -883,10 +904,19 @@
     if(!value){draftNotice("保存する文章を入力してください。");return;}
     if(draftBusy)return;
     saveDraft.disabled=true;
-    draftRequest("/drafts","POST",{text:value}).then(function(){
-      draftNotice("下書きを保存しました。TumblrやAIへは送信していません。");
+    const wasEditing=Boolean(editingDraftId);
+    const path=wasEditing?"/drafts/"+encodeURIComponent(editingDraftId):"/drafts";
+    const method=wasEditing?"PUT":"POST";
+    const payload=wasEditing?{text:value,expected_text:editingOriginalText}:{text:value};
+    draftRequest(path,method,payload).then(function(){
+      resetDraftEdit();
+      display(wasEditing
+        ?"元の下書きを更新しました。Tumblrへは送信していません。"
+        :"新しい下書きを保存しました。Tumblrへは送信していません。","system");
+      return refreshDrafts();
     },function(){
-      draftNotice("保存に失敗しました。入力欄の文章は保持されています。");
+      display("保存できませんでした。競合または投稿処理中の可能性があります。"
+        +"元の本文・入力は変更していません。","system");
     }).finally(function(){saveDraft.disabled=false;});
   });
   showDrafts.addEventListener("click",refreshDrafts);
