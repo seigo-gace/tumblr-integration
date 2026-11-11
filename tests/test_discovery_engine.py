@@ -315,6 +315,36 @@ class DiscoveryEngineTests(unittest.TestCase):
         self.assertEqual(repeat["related_tags"][0]["count"],2)
         self.assertEqual(len(stub.calls),1)
 
+    def test_related_tags_count_all_saved_pages_not_only_displayed_hundred(self):
+        store=DiscoveryStore(self.root/"discovery.sqlite3")
+        posts=[{
+            "candidate_id":f"one:{i}","blog":"one","post_id":str(i),
+            "url":f"https://one.tumblr.com/post/{i}","title":"candidate",
+            "type":"text","date":"","thumbnail_url":"","text_excerpt":"",
+            "tags":["focus","late"] if i<25 else ["focus","regular"],
+            "note_count":0,"media_refs":[],
+        } for i in range(125)]
+        store.save_page("related:focus",
+                        [{"name":"one","url":"https://one.tumblr.com"}],
+                        posts,1000,complete=True)
+        adapter,stub=self.scanner([])
+        first=adapter.perform("tumblr.discover","saved:0:related:focus",{})
+        last=adapter.perform("tumblr.discover","saved:100:related:focus",{})
+        self.assertEqual(first["stored_total"],125)
+        self.assertEqual(len(first["rows"]),100)
+        self.assertEqual(len(last["rows"]),25)
+        expected=[
+            {"tag":"regular","count":100,"target":"tag:regular"},
+            {"tag":"late","count":25,"target":"tag:late"},
+        ]
+        self.assertEqual(first["related_tags"],expected)
+        self.assertEqual(last["related_tags"],expected)
+        self.assertEqual(stub.calls,[])
+        store.exclude_blog("one")
+        excluded=adapter.perform("tumblr.discover","saved:0:related:focus",{})
+        self.assertEqual(excluded["related_tags"],[])
+        self.assertEqual(excluded["total"],0)
+
     def test_related_search_without_verified_tags_does_not_fake_suggestions(self):
         adapter,stub=self.scanner([envelope([
             {"blog_name":"first","id_string":"90",
