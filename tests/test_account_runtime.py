@@ -126,6 +126,26 @@ class OwnerAccountTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"tumblr_write_consent_required"):
             oauth.publish_access_token()
 
+    def test_refresh_must_not_escalate_saved_scopes(self):
+        from tumblrkit.oauth import AccountTokens
+        class ElevatedRefresh(FakeTransport):
+            def post_form(self, url, data):
+                response = super().post_form(url, data)
+                if data["grant_type"] == "refresh_token":
+                    return {**response, "scope": "basic write offline_access"}
+                return response
+        oauth = OwnerOAuth(self.root, "recruitment", ElevatedRefresh())
+        oauth.store.write(AccountTokens(
+            "legacy-access-token", "bearer", "legacy-refresh-token", 3600,
+            ("basic", "offline_access")), "recruitment")
+        record = oauth.store.read()
+        record["expires_at"] = int(time.time()) - 1
+        oauth.store._atomic(oauth.store.tokens, json.dumps(record))
+        with self.assertRaisesRegex(ValueError, "oauth_refresh_scopes_invalid"):
+            oauth.refresh_if_needed()
+        self.assertFalse(oauth.status()["can_publish"])
+        self.assertEqual(oauth.store.read()["access_token"], "legacy-access-token")
+
     def test_wrong_blog_never_persists(self):
         self.transport.blogs = ("personal-private",)
         state = parse_qs(urlsplit(self.oauth.start()).query)["state"][0]
