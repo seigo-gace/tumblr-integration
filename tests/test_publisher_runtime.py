@@ -93,6 +93,25 @@ class PublisherRuntimeTests(unittest.TestCase):
                 "SELECT state FROM tumblr_publish_receipts WHERE draft_id=?",
                 (self.draft["id"],)).fetchone()[0],"verified")
 
+    def test_numeric_receipt_and_nested_blog_identity_are_supported(self):
+        class NumericProvider(OfflinePost):
+            def post_json(self,path,bearer,body,budget):
+                self.posts.append((path,bearer,body))
+                return {"meta":{"status":201},"response":{"id":23456789}}
+            def get(self,path,bearer):
+                return {"meta":{"status":200},"response":{
+                    "object_type":"post","type":"blocks",
+                    "id":23456789,"blog":{"name":"owner"},"state":"published",
+                    "content":[{"type":"text",
+                                "text":self.posts[0][2]["content"][0]["text"]}]}}
+        provider=NumericProvider()
+        publisher=PublisherAdapter("owner",self.drafts,lambda:"sample-token",
+            read_transport=provider,write_transport=provider,budget=self.budget)
+        result=publisher.perform("tumblr.publish_draft",self.draft["id"],{})
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["provider_post_id"],"23456789")
+        self.assertEqual(len(provider.posts),1)
+
     def test_unknown_result_blocks_duplicate_even_across_instance_restart(self):
         self.provider.failed="tumblr_publish_uncertain"
         with self.assertRaisesRegex(ValueError,"tumblr_publish_uncertain"):
