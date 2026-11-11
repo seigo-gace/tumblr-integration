@@ -68,6 +68,47 @@ class PostTransport:
         return payload
 
 
+    def mutate_json(self, method, path, bearer, body, budget):
+        """Official, single-attempt owner post edit/delete. No redirects/retry."""
+        edit=bool(method=="PUT" and re.fullmatch(
+            r"/v2/blog/[a-z0-9-]+\.tumblr\.com/posts/[0-9]{1,25}",path))
+        delete=bool(method=="POST" and re.fullmatch(
+            r"/v2/blog/[a-z0-9-]+\.tumblr\.com/post/delete",path))
+        if not edit and not delete:
+            raise ValueError("tumblr_mutation_path_invalid")
+        request=Request(API+path,
+            data=json.dumps(body,ensure_ascii=False).encode("utf-8"),
+            headers={"Authorization":"Bearer "+bearer,
+                     "User-Agent":"TGtumbler-Operation-Assistant/1.0",
+                     "Content-Type":"application/json",
+                     "Accept":"application/json"},method=method)
+        try:
+            with build_opener(RejectRedirects()).open(request,timeout=15) as response:
+                status=response.status
+                raw=response.read(1024*1024+1)
+        except HTTPError as exc:
+            if exc.code==429:
+                budget.pause_after_limit()
+                raise ValueError("tumblr_rate_limited") from None
+            if exc.code==401:raise ValueError("tumblr_auth_expired") from None
+            if exc.code==403:raise ValueError("tumblr_permission_denied") from None
+            if exc.code in (400,404,422):
+                raise ValueError("tumblr_mutation_rejected") from None
+            raise ValueError("tumblr_mutation_uncertain") from None
+        except (URLError,OSError,TimeoutError):
+            raise ValueError("tumblr_mutation_uncertain") from None
+        if status!=200 or len(raw)>1024*1024:
+            raise ValueError("tumblr_mutation_uncertain")
+        try:
+            payload=json.loads(raw.decode("utf-8"))
+        except (ValueError,UnicodeError):
+            raise ValueError("tumblr_mutation_uncertain") from None
+        if (not isinstance(payload,dict) or
+                payload.get("meta",{}).get("status")!=200):
+            raise ValueError("tumblr_mutation_uncertain")
+        return payload
+
+
 class PublisherAdapter:
     def __init__(self, owner_blog, draft_store, token_provider,
                  read_transport=None, write_transport=None, budget=None):
