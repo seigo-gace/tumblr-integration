@@ -213,32 +213,61 @@
       const title=document.createElement("h3");title.textContent="選択したメディア";
       panel.appendChild(title);
       const grid=document.createElement("div");grid.className="library-grid";
-      let found=0;
+      const references=[];
       selected.forEach(function(item){
         (item.media||[]).forEach(function(media,index){
           const uri=libraryMedia(media.url);
-          if(!uri||found>=200)return;
-          found++;
+          if(uri)references.push({item:item,index:index,uri:uri,type:media.type});
+        });
+      });
+      if(!references.length){
+        display("選択された候補に閲覧可能なメディア参照がありません。","system");
+        return;
+      }
+      const pager=document.createElement("div");pager.className="library-controls";
+      const previous=document.createElement("button");
+      previous.type="button";previous.textContent="前の50媒体";
+      const next=document.createElement("button");
+      next.type="button";next.textContent="次の50媒体";
+      const position=document.createElement("span");
+      let offset=0;
+      const renderMediaPage=function(){
+        grid.replaceChildren();
+        references.slice(offset,offset+50).forEach(function(ref){
           const card=document.createElement("div");card.className="library-card";
           const button=document.createElement("button");button.type="button";
-          button.textContent=item.title+" ("+(index+1)+")";
-          button.addEventListener("click",function(){libraryView(item,index);});
+          button.textContent=ref.item.title+" ("+(ref.index+1)+")";
+          button.addEventListener("click",function(){libraryView(ref.item,ref.index);});
           card.appendChild(button);
-          if(media.type==="image"){
-            const image=document.createElement("img");image.src=uri;image.alt=item.title;
+          if(ref.type==="image"){
+            const image=document.createElement("img");image.src=ref.uri;image.alt=ref.item.title;
             image.className="library-thumb";image.loading="lazy";image.referrerPolicy="no-referrer";
             card.appendChild(image);
           }else{
-            const note=document.createElement("span");note.textContent="動画参照（直接再生は未取得）";
+            const note=document.createElement("span");
+            note.textContent="動画参照（直接再生は未取得）";
             card.appendChild(note);
           }
           grid.appendChild(card);
         });
+        previous.disabled=offset===0;
+        next.disabled=offset+50>=references.length;
+        position.textContent=(offset+1)+"～"+Math.min(offset+50,references.length)+
+          " / "+references.length+"媒体";
+      };
+      previous.addEventListener("click",function(){
+        offset=Math.max(0,offset-50);renderMediaPage();
       });
-      if(!found){display("選択された候補に閲覧可能なメディア参照がありません。","system");return;}
-      const close=document.createElement("button");close.type="button";close.textContent="閉じる";
+      next.addEventListener("click",function(){
+        if(offset+50<references.length){offset+=50;renderMediaPage();}
+      });
+      pager.append(previous,position,next);
+      const close=document.createElement("button");close.type="button";
+      close.textContent="閉じる";
       close.addEventListener("click",function(){panel.remove();});
-      panel.append(grid,close);messages.appendChild(panel);messages.scrollTop=messages.scrollHeight;
+      renderMediaPage();
+      panel.append(grid,pager,close);
+      messages.appendChild(panel);messages.scrollTop=messages.scrollHeight;
     });
     bulk.appendChild(viewSelected);
     const history=document.createElement("button");history.type="button";
