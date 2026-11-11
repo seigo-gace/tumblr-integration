@@ -92,13 +92,20 @@
     const result=await libraryRequest("/library/update",{candidate_ids:ids,field:field,value:value});
     if(result.verified!==true||result.updated!==ids.length)throw new Error("library_unverified");
   }
-  async function mediaHistory(){
+  async function mediaHistory(offset=0,oldPanel=null){
     try{
-      const data=await libraryRequest("/media/jobs");
-      if(data.verified!==true||!Array.isArray(data.jobs))throw new Error("history_unverified");
-      const section=document.createElement("section");section.className="library-panel result-view";
-      const title=document.createElement("h3");title.textContent="MP4保存履歴（最新100件）";
+      const data=await libraryRequest("/media/jobs?offset="+offset+"&limit=100");
+      if(data.verified!==true||!Array.isArray(data.jobs)||
+         !Number.isInteger(data.total)||data.offset!==offset||
+         typeof data.has_next!=="boolean")throw new Error("history_unverified");
+      const section=document.createElement("section");
+      section.className="library-panel result-view";
+      const title=document.createElement("h3");title.textContent="MP4保存履歴";
       section.appendChild(title);
+      const counter=document.createElement("span");
+      counter.textContent=(data.jobs.length?offset+1:0)+"～"+(offset+data.jobs.length)+
+        " / "+data.total+"件";
+      section.appendChild(counter);
       for(const job of data.jobs){
         const line=document.createElement("div");line.className="library-controls";
         const text=document.createElement("span");
@@ -114,11 +121,30 @@
         section.appendChild(line);
       }
       if(!data.jobs.length){
-        const note=document.createElement("p");note.textContent="保存履歴はまだありません。";
+        const note=document.createElement("p");
+        note.textContent="保存履歴はまだありません。";
         section.appendChild(note);
       }
-      messages.appendChild(section);messages.scrollTop=messages.scrollHeight;
-    }catch(error){display("メディア保存履歴を取得できませんでした。","system");}
+      const pager=document.createElement("div");pager.className="library-controls";
+      const previous=document.createElement("button");
+      previous.type="button";previous.textContent="前の100件";
+      previous.disabled=offset===0;
+      previous.addEventListener("click",function(){mediaHistory(Math.max(0,offset-100),section);});
+      const next=document.createElement("button");
+      next.type="button";next.textContent="次の100件";
+      next.disabled=!data.has_next;
+      next.addEventListener("click",function(){mediaHistory(offset+100,section);});
+      const close=document.createElement("button");
+      close.type="button";close.textContent="閉じる";
+      close.addEventListener("click",function(){section.remove();});
+      pager.append(previous,next,close);
+      section.appendChild(pager);
+      if(oldPanel)oldPanel.replaceWith(section);
+      else messages.appendChild(section);
+      messages.scrollTop=messages.scrollHeight;
+    }catch(error){
+      display("メディア保存履歴を取得できませんでした。表示中の履歴は保持しています。","system");
+    }
   }
   async function mediaSave(item,index,button){
     const selected=(item.media||[])[index];
@@ -289,7 +315,7 @@
     });
     bulk.appendChild(viewSelected);
     const history=document.createElement("button");history.type="button";
-    history.textContent="MP4保存履歴";history.addEventListener("click",mediaHistory);
+    history.textContent="MP4保存履歴";history.addEventListener("click",function(){mediaHistory(0);});
     bulk.appendChild(history);
     for(const [label,field,value] of [["既読にする","seen",true],["未読にする","seen",false],["お気に入り","favorite",true],["お気に入り解除","favorite",false],["あとで見る","watch_later",true],["あとで見る解除","watch_later",false]]){
       const b=document.createElement("button");b.type="button";b.textContent=label;
