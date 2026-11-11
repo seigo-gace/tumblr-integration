@@ -172,12 +172,8 @@ class OwnerOAuth:
             raise ValueError("oauth_state_expired_or_reused")
         client = self._client()
         tokens = client.exchange(query, state)
-        # The user explicitly authorized these scopes in this OAuth state.
-        # If the token service returns a narrower scope, honour that narrower
-        # grant; existing legacy read-only tokens remain without write scope.
-        from dataclasses import replace
-        if not tokens.scopes:
-            tokens=replace(tokens,scopes=("basic","write","offline_access"))
+        # Requested scopes are not proof of granted scopes. In particular, an
+        # absent provider scope must not create a local publishing permission.
         identity = self.transport.get_json(USER_INFO, tokens.access_token)
         user = identity.get("response", {}).get("user") if isinstance(identity, dict) else None
         blogs = user.get("blogs") if isinstance(user, dict) else None
