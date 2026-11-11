@@ -53,6 +53,13 @@ class OperationAppTests(unittest.TestCase):
         self.assertNotIn('フォロー・タグ・公開候補を確認',self.html)
         self.assertEqual(self.html.count('class="goal"'),6)
 
+    def test_media_save_history_uses_real_total_and_browsable_page_controls(self):
+        self.assertIn('"/media/jobs?offset="+offset+"&limit=100"',self.js)
+        self.assertIn('"次の100件"',self.js)
+        self.assertIn('"前の100件"',self.js)
+        self.assertIn('!data.has_next',self.js)
+        self.assertNotIn('MP4保存履歴（最新100件）',self.js)
+
     def test_bulk_library_gallery_is_paginated_without_silent_200_limit(self):
         self.assertNotIn('found>=200',self.js)
         self.assertIn('references.slice(offset,offset+50)',self.js)
