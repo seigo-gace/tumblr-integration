@@ -750,6 +750,46 @@ class _Handler(BaseHTTPRequestHandler):
         else:
             self._send(204, b"", "text/plain; charset=utf-8", extra=(("Set-Cookie", cookie),))
 
+    def do_PUT(self):
+        if not _client_is_loopback(self):
+            self._send(403,"forbidden\n","text/plain; charset=utf-8")
+            return
+        if not _authorized(self):
+            self._unauthorized()
+            return
+        bearer_ok = self.headers.get("Authorization","").startswith("Bearer ") and _authorized(self)
+        if (self.headers.get("Origin") and not _same_origin(self)) or (not self.headers.get("Origin") and not bearer_ok):
+            self._send(403,"origin rejected\n","text/plain; charset=utf-8")
+            return
+        parts=urlsplit(self.path)
+        if parts.query or not parts.path.startswith("/drafts/"):
+            self._send(404,"not found\n","text/plain; charset=utf-8")
+            return
+        try:
+            if self.headers.get("Content-Type","").split(";",1)[0].strip().lower()!="application/json":
+                raise ValueError("INVALID_DRAFT")
+            data=json.loads(self._read_body().decode("utf-8"))
+            if not isinstance(data,dict) or set(data)!={"text","expected_text"}:
+                raise ValueError("INVALID_DRAFT")
+            result=self.server.draft_store.update(
+                parts.path[len("/drafts/"):],data["text"],data["expected_text"])
+        except ValueError as exc:
+            code=str(exc)
+            if code in ("DRAFT_EDIT_CONFLICT","DRAFT_PUBLISH_LOCKED"):
+                self._json(409,{"error":code.lower()})
+            elif code=="DRAFT_NOT_FOUND":
+                self._json(404,{"error":"draft_not_found"})
+            else:
+                self._json(400,{"error":"invalid_draft"})
+            return
+        except (UnicodeError,TypeError,json.JSONDecodeError):
+            self._json(400,{"error":"invalid_draft"})
+            return
+        except (OSError,sqlite3.Error):
+            self._json(503,{"error":"draft_store_unavailable"})
+            return
+        self._json(200,result)
+
     def do_DELETE(self):
         if not _client_is_loopback(self):
             self._send(403, "forbidden\n", "text/plain; charset=utf-8")
@@ -778,10 +818,13 @@ class _Handler(BaseHTTPRequestHandler):
             return
         try:
             deleted = self.server.draft_store.delete(parts.path[len("/drafts/"):])
-        except ValueError:
-            self._json(400, {"error": "invalid_draft"})
+        except ValueError as exc:
+            if str(exc)=="DRAFT_PUBLISH_LOCKED":
+                self._json(409, {"error":"draft_publish_locked"})
+            else:
+                self._json(400, {"error":"invalid_draft"})
             return
-        except OSError:
+        except (OSError,sqlite3.Error):
             self._json(503, {"error": "draft_store_unavailable"})
             return
         self._json(200, {"deleted": deleted})
