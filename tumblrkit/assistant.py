@@ -27,6 +27,9 @@ INDEX = (
     ("telegram.check_membership", ("参加確認", "メンバー確認")),
     ("telegram.publish_announcement", ("告知",)),
     ("analytics.get_summary", ("分析", "集計")),
+    ("engagement.like", ("いいね", "Like")),
+    ("engagement.reblog", ("リブログ", "Reblog")),
+    ("engagement.follow", ("フォローして", "Follow")),
 )
 SECRET = re.compile(r"(?i)(bearer\s+[A-Za-z0-9._~+/=-]{8,}|api[_-]?key\s*[:=]\s*\S+|sk-[A-Za-z0-9]+|ghp_[A-Za-z0-9]+)")
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
@@ -36,7 +39,8 @@ GOALS = frozenset(("巡回", "投稿", "キャンペーン", "紹介", "集計",
 # These are the *currently wired* dispatch actions only. Future catalog IDs
 # must be imported from the exact original 79-ID artifact, not invented here.
 GOAL_ACTIONS = {
-    "巡回": ("tumblr.discover", "tumblr.list_posts"),
+    "巡回": ("tumblr.discover", "tumblr.list_posts",
+             "engagement.like", "engagement.reblog", "engagement.follow"),
     "投稿": ("tumblr.list_posts", "tumblr.publish_draft"),
     "キャンペーン": (),
     "紹介": (),
@@ -412,6 +416,19 @@ class Assistant:
         if not target:
             text = "対象が不足しています。対象: 名前 の形で教えてください。実行していません。"
             return self._pack("unclear", text + omitted, False, recovery=True, provider=provider, action=action)
+        engagement_preview=None
+        if action.startswith("engagement."):
+            adapter=self.bridge.adapters.get("engagement")
+            if adapter is None:
+                return self._pack("not_connected",
+                    "Engagement操作の実接続がありません。実行していません。",
+                    False,recovery=True,action=action,provider=provider)
+            try:
+                engagement_preview=adapter.preview(action,target)
+            except (ValueError,OSError):
+                return self._pack("failed",
+                    "指定された保存済みの投稿・ブログを確認できません。実行していません。",
+                    False,recovery=True,action=action,provider=provider)
         if action=="tumblr.publish_draft":
             tumblr=self.bridge.adapters.get("tumblr")
             publisher=getattr(tumblr,"publisher",None)
@@ -424,6 +441,14 @@ class Assistant:
             label = "AIの提案" if ai else "既存ツール索引の候補であり、AIの判断ではありません"
             text = label + "。プレビュー: " + action + " を " + target + " に対して行う操作です。まだ実行していません。"
             expected_digest=None
+            if engagement_preview is not None:
+                operation={"engagement.like":"いいね",
+                           "engagement.reblog":"リブログ",
+                           "engagement.follow":"フォロー"}[action]
+                text=("Tumblr本人確認："+operation+"を1件だけ行います。\n"
+                      "対象ブログ："+engagement_preview["blog"]+"\n"
+                      "対象："+str(engagement_preview["title"])[:150]+"\n"
+                      "確認を押すまでは実行しません。再実行を自動化しません。")
             if action=="tumblr.publish_draft":
                 tumblr=self.bridge.adapters.get("tumblr")
                 publisher=getattr(tumblr,"publisher",None)
@@ -491,6 +516,12 @@ class Assistant:
             "tumblr_publish_readback_unverified":"Tumblrの投稿読戻しが一致しません。実行済みと扱いません。",
             "tumblr_publish_rejected":"Tumblrが投稿を拒否しました。公開完了していません。",
             "tumblr_write_consent_required":"Tumblr投稿の権限が未承諾です。Tumblr連携から投稿権限を承諾してください。投稿していません。",
+            "engagement_target_missing":"保存済みの対象を確認できないため、Tumblrには送信していません。",
+            "engagement_target_invalid":"選択された対象の形式が正しくありません。操作していません。",
+            "engagement_provider_refused":"Tumblr公式APIが操作を拒否しました。反映済みとは扱いません。",
+            "engagement_post_uncertain":"Tumblrへの操作結果が不明です。二重操作防止のため自動再送しません。",
+            "engagement_readback_unverified":"Tumblr側の反映を読み戻せませんでした。再送せず、再照合が必要です。",
+            "engagement_reconcile_required":"以前の操作結果が不明です。二重操作防止のため再実行しません。",
         }
         code=result.detail.get("error_code") if isinstance(result.detail,dict) else None
         message=notices.get(code,"操作は完了していません。実行していません。")
@@ -505,6 +536,9 @@ class Assistant:
             "analytics.get_summary": ("集計結果", ("label", "value", "period", "url")),
             "telegram.check_membership": ("参加状況", ("name", "status", "date", "url")),
             "tumblr.publish_draft": ("投稿結果", ("title", "status", "date", "url")),
+            "engagement.like": ("いいね確認結果", ("name", "status", "date", "url")),
+            "engagement.reblog": ("リブログ確認結果", ("name", "status", "date", "url")),
+            "engagement.follow": ("フォロー確認結果", ("name", "status", "date", "url")),
             "telegram.publish_announcement": ("告知結果", ("title", "status", "date", "url")),
         }
         title, columns = spec.get(action, ("実行結果", ("name", "status", "date", "url")))
