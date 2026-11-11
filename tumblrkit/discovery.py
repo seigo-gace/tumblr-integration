@@ -129,7 +129,13 @@ class DiscoveryEngine:
             offset=int(parts[1])
             if offset%100:
                 raise ValueError("discovery_saved_page_invalid")
-            mode,term=self.source_spec(parts[2])
+            raw_source=parts[2]
+            if raw_source in ("following:following","followers:followers"):
+                mode,term=raw_source.split(":",1)
+            elif raw_source.startswith(("tag:","related:","blog:")):
+                mode,term=self.source_spec(raw_source)
+            else:
+                raise ValueError("discovery_saved_page_invalid")
             source=mode+":"+term
             if mode=="blog" and not self.store.is_selected_blog(term):
                 raise ValueError("discovery_blog_not_selected")
