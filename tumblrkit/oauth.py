@@ -24,6 +24,7 @@ class AccountTokens:
     token_type: str
     refresh_token: str | None
     expires_in: int | None
+    scopes: tuple[str, ...] = ()
 
 class TumblrOAuth:
     def __init__(self, client_id: str, client_secret: str, redirect_uri: str, transport: Transport):
@@ -67,7 +68,16 @@ class TumblrOAuth:
             raise ValueError("invalid refresh token")
         if expiry is not None and (type(expiry) is not int or expiry <= 0):
             raise ValueError("invalid token lifetime")
-        return AccountTokens(token, kind, refresh, expiry)
+        # OAuth servers may return a space-delimited scope string. Unknown or
+        # narrowed scopes must not authorize publishing.
+        scopes=response.get("scope")
+        if scopes is None:
+            granted=()
+        elif isinstance(scopes,str) and set(scopes.split()).issubset(SCOPES):
+            granted=tuple(scopes.split())
+        else:
+            raise ValueError("oauth_scopes_invalid")
+        return AccountTokens(token, kind, refresh, expiry, granted)
 
     def verify_identity(self, tokens: AccountTokens) -> str:
         result = self._transport.get_json(USER_INFO, tokens.access_token)
