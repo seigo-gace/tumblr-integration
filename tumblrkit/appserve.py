@@ -337,7 +337,7 @@ class _Handler(BaseHTTPRequestHandler):
         parts = urlsplit(self.path)
         # Browser entry URLs can include harmless query parameters.
         # They must never obscure the login page with a plain-text 400.
-        if parts.query and parts.path not in ("/", "/index.html", "/login", "/oauth/callback", "/library"):
+        if parts.query and parts.path not in ("/", "/index.html", "/login", "/oauth/callback", "/library", "/media/jobs"):
             self._send(400, "bad request\n", "text/plain; charset=utf-8")
             return
         if parts.path == "/oauth/callback":
