@@ -524,6 +524,28 @@ class Assistant:
         result = {"kind": "records", "title": title, "action": action,
                   "status": "connected", "columns": list(columns), "rows": safe_rows,
                   "total": len(rows), "truncated": len(rows) > 100}
+        if action=="tumblr.list_posts":
+            offset=detail.get("page_offset")
+            page_size=detail.get("page_size")
+            verified_total=detail.get("total")
+            if (type(offset) is int and offset>=0 and offset%20==0
+                    and type(page_size) is int and 0<=page_size<=20):
+                result["page_offset"]=offset
+                result["page_size"]=page_size
+                if type(verified_total) is int and verified_total>=0:
+                    result["total"]=verified_total
+                    result["total_verified"]=True
+                else:
+                    result["total"]=None
+                    result["total_verified"]=False
+                result["truncated"]=False
+                for key in ("next_target","prev_target"):
+                    value=detail.get(key)
+                    if isinstance(value,str) and re.fullmatch(r"posts:(0|[1-9][0-9]{0,13})",value):
+                        result[key]=value
+                owner=detail.get("owner_blog")
+                if isinstance(owner,str) and re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}",owner):
+                    result["owner_blog"]=owner
         if action == "tumblr.discover":
             stored_total=detail.get("stored_total")
             stored_offset=detail.get("stored_offset")
