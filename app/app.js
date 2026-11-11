@@ -614,6 +614,30 @@
         section.appendChild(button);
       });
     }
+    if(view.action==="tumblr.list_posts"&&Number.isInteger(view.page_offset)){
+      const line=document.createElement("p");
+      const last=view.page_offset+(view.page_size||0);
+      line.textContent="本人投稿 "+(view.page_size?view.page_offset+1:0)+"～"+last+
+        " / "+(view.total_verified===true?view.total+"件":"総数未確認");
+      section.appendChild(line);
+      const pager=document.createElement("div");
+      pager.className="draft-actions";
+      [["prev_target","前の投稿20件"],["next_target","次の投稿20件"]]
+        .forEach(function(entry){
+          const target=view[entry[0]];
+          if(typeof target!=="string"||!/^posts:(0|[1-9][0-9]{0,13})$/.test(target))return;
+          const button=document.createElement("button");
+          button.type="button";button.textContent=entry[1];
+          button.addEventListener("click",function(){
+            if(!window.confirm("本人のTumblr投稿を公式APIから1ページ確認しますか？"))return;
+            button.disabled=true;
+            post({selected_action:"tumblr.list_posts",selected_target:target})
+              .finally(function(){button.disabled=false;});
+          });
+          pager.appendChild(button);
+        });
+      if(pager.children.length)section.appendChild(pager);
+    }
     if(view.action==="tumblr.discover"&&
        Number.isInteger(view.stored_total)&&Number.isInteger(view.stored_offset)){
       const progress=document.createElement("p");
