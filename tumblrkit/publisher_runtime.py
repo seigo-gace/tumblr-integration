@@ -122,7 +122,7 @@ class PublisherAdapter:
         if not isinstance(post_id,str) or not POST_ID.fullmatch(post_id):
             raise ValueError("tumblr_publish_post_id_invalid")
         raw=self.reader.get(
-            "/v2/blog/"+self.blog+".tumblr.com/posts/"+post_id+"?npf=true",
+            "/v2/blog/"+self.blog+".tumblr.com/posts/"+post_id+"?post_format=npf",
             bearer)
         if (not isinstance(raw,dict) or raw.get("meta",{}).get("status")!=200
                 or not isinstance(raw.get("response"),dict)):
