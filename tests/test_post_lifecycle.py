@@ -198,6 +198,61 @@ class PublishedLifecycleTests(unittest.TestCase):
                                       {"expected_digest":preview["approval"]})
         self.assertEqual(len([x for x in self.fake.calls if x[0]=="edit"]),0)
 
+    def test_explicit_reconcile_unknown_edit_reads_provider_without_repost(self):
+        target,revision=self._edit("編集結果が一時不明")
+        approved=self.publisher.lifecycle.preview("tumblr.edit_post",target)
+        self.fake.fail_next="tumblr_mutation_uncertain"
+        with self.assertRaisesRegex(ValueError,"tumblr_mutation_uncertain"):
+            self.publisher.lifecycle.perform("tumblr.edit_post",target,
+                                             {"expected_digest":approved["approval"]})
+        pending=self.store.list()
+        source=next(x for x in pending if x["id"]==self.source["id"])
+        self.assertEqual(source["publish_state"],"changing")
+        # Initial GET still sees the old text, so no fabricated verification.
+        result=self.assistant.turn(selected_action="tumblr.reconcile_post",
+                                   selected_target=self.source["id"])
+        self.assertNotEqual(result["state"],"completed")
+        self.assertFalse(result["executed"])
+        self.assertEqual(len([x for x in self.fake.calls if x[0]=="edit"]),0)
+        # Real Tumblr may have accepted the mutation before network failure.
+        self.fake.text="編集結果が一時不明"
+        restored=PublisherAdapter("owner",DraftStore(self.store.path),
+            lambda:"test-owner-token",read_transport=self.fake,
+            write_transport=self.fake,budget=self.budget)
+        reader=TumblrReadAdapter("owner",self.store.path.parent/"token",
+            transport=self.fake,token_provider=lambda:"test-owner-token")
+        reader.publisher=restored
+        assistant=Assistant(bridge=Bridge({"tumblr":reader}),providers=[])
+        verified=assistant.turn(selected_action="tumblr.reconcile_post",
+                                selected_target=self.source["id"])
+        self.assertEqual(verified["state"],"completed")
+        self.assertEqual(verified["view"]["rows"][0]["status"],"edited")
+        self.assertEqual(len([x for x in self.fake.calls if x[0]=="edit"]),0)
+        with sqlite3.connect(self.store.path) as db:
+            self.assertEqual(db.execute(
+                "SELECT state FROM tumblr_post_mutations "
+                "WHERE operation_key=?",
+                ("edit:"+revision["id"],)).fetchone()[0],"verified")
+
+    def test_explicit_reconcile_unknown_delete_never_reissues_delete(self):
+        approved=self.publisher.lifecycle.preview(
+            "tumblr.delete_post",self.source["id"])
+        self.fake.fail_next="tumblr_mutation_uncertain"
+        with self.assertRaisesRegex(ValueError,"tumblr_mutation_uncertain"):
+            self.publisher.lifecycle.perform("tumblr.delete_post",
+                self.source["id"],{"expected_digest":approved["approval"]})
+        denied=self.assistant.turn(selected_action="tumblr.reconcile_post",
+                                  selected_target=self.source["id"])
+        self.assertEqual(denied["state"],"failed")
+        self.fake.deleted=True
+        readback=self.assistant.turn(selected_action="tumblr.reconcile_post",
+                                    selected_target=self.source["id"])
+        self.assertEqual(readback["state"],"completed")
+        self.assertEqual(readback["view"]["rows"][0]["status"],"deleted")
+        self.assertEqual(len([x for x in self.fake.calls if x[0]=="delete"]),0)
+        current=next(x for x in self.store.list() if x["id"]==self.source["id"])
+        self.assertEqual(current["publish_state"],"deleted")
+
     def test_external_change_blocks_update_and_delete_without_side_effects(self):
         target,_=self._edit("勝手に上書きさせない")
         preview=self.publisher.lifecycle.preview("tumblr.edit_post",target)
