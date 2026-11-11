@@ -358,13 +358,22 @@ class _Handler(BaseHTTPRequestHandler):
             if not _authorized(self):
                 self._unauthorized()
                 return
-            if parts.query:
+            from urllib.parse import parse_qs
+            params=parse_qs(parts.query,keep_blank_values=True)
+            if set(params)-{"offset","limit"} or any(len(v)!=1 for v in params.values()):
                 self._json(400,{"error":"media_query_invalid"})
                 return
             try:
-                self._json(200,self.server.media_save.list())
-            except (MediaError,ValueError,OSError,sqlite3.Error):
+                offset=int(params.get("offset",["0"])[0])
+                limit=int(params.get("limit",["100"])[0])
+                result=self.server.media_save.list(offset=offset,limit=limit)
+            except (MediaError,ValueError,OverflowError):
+                self._json(400,{"error":"media_query_invalid"})
+                return
+            except (OSError,sqlite3.Error):
                 self._json(503,{"error":"media_store_unavailable"})
+                return
+            self._json(200,result)
             return
         if parts.path.startswith("/media/file/"):
             if not _authorized(self):
