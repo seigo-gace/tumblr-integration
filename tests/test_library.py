@@ -81,6 +81,35 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(self.library.list("all")["total"],1)
         self.assertEqual(self.library.list("unavailable")["total"],2)
 
+    def test_cross_page_selection_and_atomic_150_item_bulk_update(self):
+        posts=[{
+            "candidate_id":f"alpha:{i}","blog":"alpha","post_id":str(i),
+            "url":f"https://alpha.tumblr.com/post/{i}",
+            "title":f"post {i}","type":"image","date":"",
+            "thumbnail_url":"","text_excerpt":"","tags":[],"note_count":0,
+            "media_refs":[{"url":f"https://64.media.tumblr.com/a{i}.jpg",
+                           "type":"image"}],
+        } for i in range(2000,2150)]
+        self.store.save_page("tag:bulk",[],posts,150,complete=True)
+        ids=[item["candidate_id"] for item in posts]
+        selected=self.library.selected([ids[1],ids[119],ids[149]])
+        self.assertEqual([item["candidate_id"] for item in selected["items"]],
+                         [ids[1],ids[119],ids[149]])
+        self.assertEqual(len(selected["items"][2]["media"]),1)
+        self.assertEqual(self.library.update(ids,"favorite",True)["updated"],150)
+        selected=self.library.selected([ids[149],ids[1]])
+        self.assertTrue(all(item["favorite"] for item in selected["items"]))
+        self.assertGreaterEqual(self.library.list("favorite")["total"],150)
+        # The previous artificial 100000-offset ceiling must not hide
+        # candidates; a real empty late page is safe and honest.
+        self.assertEqual(self.library.list(offset=100001)["items"],[])
+        self.store.exclude_blog("alpha")
+        with self.assertRaisesRegex(ValueError,"library_candidate_unavailable"):
+            self.library.selected([ids[0]])
+        with self.assertRaisesRegex(ValueError,"library_candidate_unavailable"):
+            self.library.update([ids[0],"beta:101"],"seen",True)
+        self.assertFalse(self.library.selected(["beta:101"])["items"][0]["seen"])
+
     def test_invalid_updates_are_atomic_and_never_change_provider(self):
         for ids,field,value in [
             (["alpha:100","absent:555"],"seen",True),
