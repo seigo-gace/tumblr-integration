@@ -120,6 +120,21 @@ class DiscoveryEngine:
     def scan(self,target,payload=None):
         if payload not in ({},None):
             raise ValueError("discovery_payload_unsupported")
+        if isinstance(target,str) and target.startswith("saved:"):
+            # Explicitly page the already-stored source without another
+            # provider request, shared quota reservation or cursor mutation.
+            parts=target.split(":",2)
+            if (len(parts)!=3 or not re.fullmatch(r"(0|[1-9][0-9]{0,8})",parts[1])):
+                raise ValueError("discovery_saved_page_invalid")
+            offset=int(parts[1])
+            if offset%100:
+                raise ValueError("discovery_saved_page_invalid")
+            mode,term=self.source_spec(parts[2])
+            source=mode+":"+term
+            if mode=="blog" and not self.store.is_selected_blog(term):
+                raise ValueError("discovery_blog_not_selected")
+            return self._result(source,mode,self.store.checkpoint(source),
+                                from_cache=True,offset=offset)
         refresh=isinstance(target,str) and target.startswith("refresh:")
         mode,term=self.source_spec(target[8:] if refresh else target)
         source=mode+":"+term
@@ -246,17 +261,24 @@ class DiscoveryEngine:
                                  watermark=str(max(timestamps)) if timestamps else checkpoint["watermark"])
         return self._result(source,mode,self.store.checkpoint(source))
 
-    def _result(self,source,mode,checkpoint,from_cache=False):
+    def _result(self,source,mode,checkpoint,from_cache=False,offset=0):
         if mode in ("following","followers"):
-            entries=self.store.read_blogs(source,limit=100)
+            stored_total=self.store.count_blogs(source)
+            entries=self.store.read_blogs(source,limit=100,offset=offset)
             rows=[{"blog":entry["name"],"title":entry["name"],"type":"blog","date":"",
                    "thumbnail_url":"","url":entry["url"]} for entry in entries]
         else:
-            posts=self.store.read_candidates(source,limit=100)
+            stored_total=self.store.count_candidates(source)
+            posts=self.store.read_candidates(source,limit=100,offset=offset)
             rows=[{"blog":p["blog"],"candidate_id":p["candidate_id"],"title":p["title"],"type":p["type"],"date":p["date"],
                    "thumbnail_url":p["thumbnail_url"],"url":p["url"]} for p in posts]
         next_target = mode if mode in ("following","followers") else source
-        result={"verified":True,"rows":rows,"total":len(rows),
+        result={"verified":True,"rows":rows,"total":stored_total,
+                "stored_total":stored_total,"stored_offset":offset,
+                "stored_next_target":("saved:"+str(offset+100)+":"+source)
+                                      if offset+100<stored_total else None,
+                "stored_prev_target":("saved:"+str(offset-100)+":"+source)
+                                      if offset>=100 else None,
                 "source":source,"cursor":checkpoint["cursor"],
                 "next_target":next_target,
                 "complete":checkpoint["complete"],"from_cache":from_cache}
