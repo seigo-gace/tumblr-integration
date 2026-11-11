@@ -62,6 +62,10 @@ class Bridge:
                 "tumblr_rate_limited","oauth_not_connected",
                 "oauth_refresh_unavailable","oauth_token_permissions",
                 "tumblr_unavailable",
+                "tumblr_publish_reconcile_required",
+                "tumblr_publish_uncertain",
+                "tumblr_publish_readback_unverified",
+                "tumblr_publish_rejected",
             })
             code=str(exc) if isinstance(exc,ValueError) else ""
             detail={"error_type":type(exc).__name__}
