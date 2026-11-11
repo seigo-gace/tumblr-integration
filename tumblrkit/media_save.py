@@ -26,7 +26,6 @@ from contextlib import closing
 from urllib.parse import urlsplit
 
 from tumblrkit.discovery_store import DiscoveryStore
-from tumblrkit.tumblr_read import MAX_DISCOVERY_MEDIA_REFS
 from tumblrkit.library import _safe_media, IDENT
 from tumblrkit.media_extract import ExtractorFallback, ExtractionFailure, verified_post_url
 from tumblrkit.api_safety import TumblrReadBudget
@@ -270,7 +269,7 @@ class MediaSave:
     def _candidate(self,db,candidate_id,index):
         if not isinstance(candidate_id,str) or not IDENT.fullmatch(candidate_id):
             raise MediaError("MEDIA_CANDIDATE_INVALID")
-        if type(index) is not int or not 0<=index<MAX_DISCOVERY_MEDIA_REFS:
+        if type(index) is not int or index<0:
             raise MediaError("MEDIA_INDEX_INVALID")
         row=db.execute("SELECT p.post_id,p.media_json,p.state,COALESCE(b.blocked,0),"
              "p.blog,p.url,p.post_type FROM discovery_posts p "
@@ -282,7 +281,7 @@ class MediaSave:
         try:
             verified_post_url(post_url,blog,post_id)
             media=json.loads(raw)
-            if not isinstance(media,list) or len(media)>MAX_DISCOVERY_MEDIA_REFS:
+            if not isinstance(media,list):
                 raise MediaError("MEDIA_SELECTION_INVALID")
             selected=media[index] if index<len(media) else None
             if selected is not None and selected.get("type")=="video":
