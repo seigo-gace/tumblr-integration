@@ -169,8 +169,13 @@ class TumblrReadAdapter:
         self.transport = transport or OfficialTransport(
             TumblrReadBudget(Path(token_file).expanduser().parent / "tumblr-api-budget.sqlite3"))
         self.token_provider = token_provider
+        self.publisher = None
 
     def perform(self, action, target, payload):
+        if action == "tumblr.publish_draft":
+            if self.publisher is None:
+                raise ValueError("tumblr_publish_unavailable")
+            return self.publisher.perform(action,target,payload)
         if action == "tumblr.discover":
             return self._discover(target, payload)
         if action != "tumblr.list_posts":
