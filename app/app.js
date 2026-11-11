@@ -648,6 +648,61 @@
     messages.appendChild(section);
     messages.scrollTop=messages.scrollHeight;
   }
+  // Plans come from the authenticated server's bounded action contract.
+  // A visible choice and an explicit target are required before dispatch.
+  function renderPlan(plan){
+    if(!plan||plan.evidence!=="existing_bridge_registry"||
+       !Array.isArray(plan.goals)||!Array.isArray(plan.recommendations))return;
+    const section=document.createElement("section");
+    section.className="result-view";
+    const title=document.createElement("h3");
+    title.textContent="選択目的の実行候補";
+    section.appendChild(title);
+    if(!plan.recommendations.length){
+      const note=document.createElement("p");
+      note.textContent="現在接続済みの操作候補はありません。勝手に実行しません。";
+      section.appendChild(note);
+    }
+    const labels={
+      "tumblr.discover":"公開候補を検索",
+      "tumblr.list_posts":"投稿一覧を確認",
+      "tumblr.publish_draft":"下書きの公開を確認",
+      "analytics.get_summary":"集計を確認",
+    };
+    plan.recommendations.slice(0,3).forEach(function(item){
+      if(!item||typeof item.action!=="string"||
+         !Object.prototype.hasOwnProperty.call(labels,item.action))return;
+      const wrapper=document.createElement("div");
+      wrapper.className="draft-actions";
+      const label=document.createElement("span");
+      label.textContent=labels[item.action]+"（"+String(item.goal||"目的")+"）";
+      wrapper.appendChild(label);
+      const input=document.createElement("input");
+      input.type="text";
+      input.maxLength=64;
+      input.placeholder="対象（必須）";
+      input.setAttribute("aria-label",labels[item.action]+"の対象");
+      wrapper.appendChild(input);
+      const submit=document.createElement("button");
+      submit.type="button";
+      submit.textContent=item.confirmation_required?"内容を確認":"実行";
+      submit.addEventListener("click",function(){
+        const target=input.value.trim();
+        if(!target){display("対象を入力してください。まだ実行していません。","system");input.focus();return;}
+        submit.disabled=true;
+        post({selected_action:item.action,selected_target:target}).finally(function(){submit.disabled=false;});
+      });
+      wrapper.appendChild(submit);
+      section.appendChild(wrapper);
+    });
+    if(Array.isArray(plan.not_connected_goals)&&plan.not_connected_goals.length){
+      const note=document.createElement("p");
+      note.textContent="未接続の目的："+plan.not_connected_goals.join("・")+"。実装済みとは表示しません。";
+      section.appendChild(note);
+    }
+    messages.appendChild(section);
+    messages.scrollTop=messages.scrollHeight;
+  }
   function showAssist(turn){
     const open=Boolean(turn&&turn.recovery);
     assist.hidden=!open;
@@ -656,6 +711,7 @@
   function apply(turn){
     display(turn.text||"応答を表示できません。実行していません。","system");
     renderView(turn.view);
+    renderPlan(turn.plan);
     connection.textContent=turn.executed?"外部操作：結果を確認":"外部接続：未実行";
     pending=turn.request_id||null;
     showAssist(turn);
@@ -681,9 +737,7 @@
     const goals=Array.from(selectedGoals);
     const files=pendingFiles.slice();
     if(!text&&!goals.length&&!files.length)return;
-    const message=goals.length
-      ? "目的："+goals.join("・")+"\n"+(text||"この目的でできる操作と必要な確認を案内してください。")
-      : text;
+    const message=text;
     sending=true;
     sendButton.disabled=true;
     try{
@@ -694,7 +748,7 @@
       instruction.value="";
       pendingFiles.splice(0,pendingFiles.length);
       refreshAttachmentList();
-      await post({message:message,attachments:uploaded.map(function(item){return item.id;})});
+      await post({message:message,goals:goals,attachments:uploaded.map(function(item){return item.id;})});
     }catch(error){
       display("添付の送信に失敗しました。選択したファイルと入力文は残しています。","system");
     }finally{
