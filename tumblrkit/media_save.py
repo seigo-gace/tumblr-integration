@@ -119,7 +119,12 @@ class SafeDownloader:
         })
         response=conn.getresponse()
         if response.status!=200:
+            code=response.status
             conn.close()
+            if code in (401,403,429):
+                raise MediaError("MEDIA_PROVIDER_REFUSED")
+            if code==405 and method=="HEAD":
+                raise MediaError("MEDIA_HEAD_UNSUPPORTED")
             raise MediaError("MEDIA_HTTP_UNAVAILABLE")
         kind=response.getheader("Content-Type","").split(";",1)[0].strip().lower()
         if kind not in ("video/mp4","video/webm","video/quicktime","application/octet-stream"):
