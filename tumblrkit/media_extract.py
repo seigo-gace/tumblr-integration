@@ -70,6 +70,7 @@ class ExtractorFallback:
             cmd=[executable,"--config-ignore","--retries","0",
                  "--http-timeout","12","--range","1-3","--post-range","1",
                  "--filesize-max","128M","--limit-rate","2M",
+                 "--filter","extension in ('mp4','webm','mov','m4v','mkv','avi')",
                  "--no-mtime","--directory",str(folder),url]
         elif name=="yt-dlp":
             cmd=[executable,"--ignore-config","--no-playlist","--no-progress",
