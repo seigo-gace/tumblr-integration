@@ -19,9 +19,9 @@ class FakeTransport:
         self.posts.append((url, dict(data)))
         if data["grant_type"] == "refresh_token":
             return {"access_token": "new-access-token-123", "refresh_token": "new-refresh-token-456",
-                    "token_type": "bearer", "expires_in": 3600}
+                    "token_type": "bearer", "expires_in": 3600, "scope": "basic write offline_access"}
         return {"access_token": "initial-access-token-123", "refresh_token": "initial-refresh-token-456",
-                "token_type": "bearer", "expires_in": 3600}
+                "token_type": "bearer", "expires_in": 3600, "scope": "basic write offline_access"}
     def get_json(self, url, token):
         self.reads.append((url, token))
         return {"response": {"user": {"blogs": [{"name": name, "primary": i == 0} for i, name in enumerate(self.blogs)]}}}
@@ -111,6 +111,22 @@ class OwnerAccountTests(unittest.TestCase):
         self.oauth.store._atomic(self.oauth.store.tokens,json.dumps(record))
         self.assertEqual(self.oauth.publish_access_token(),"new-access-token-123")
         self.assertTrue(self.oauth.status()["can_publish"])
+
+    def test_missing_provider_scope_does_not_infer_write_consent(self):
+        class NoScope(FakeTransport):
+            def post_form(self, url, data):
+                response = super().post_form(url, data)
+                if data["grant_type"] == "authorization_code":
+                    response.pop("scope")
+                return response
+        oauth = OwnerOAuth(self.root, "recruitment", NoScope())
+        state = parse_qs(urlsplit(oauth.start()).query)["state"][0]
+        oauth.callback("state=" + state + "&code=valid-code")
+        self.assertTrue(oauth.status()["connected"])
+        self.assertFalse(oauth.status()["can_publish"])
+        self.assertEqual(oauth.store.read()["scopes"], [])
+        with self.assertRaisesRegex(ValueError, "tumblr_write_consent_required"):
+            oauth.publish_access_token()
 
     def test_provider_narrowed_scope_does_not_gain_write_privilege(self):
         class Narrow(FakeTransport):
