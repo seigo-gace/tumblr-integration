@@ -448,7 +448,9 @@ class Assistant:
                     "確認した本文が変更または削除されました。公開していません。"
                     "現在の下書きを表示して再確認してください。",
                     False,recovery=True,action=action,provider="confirmed")
-        result = self.bridge.dispatch(ActionRequest(request_id, action, target, confirmed=True))
+        payload={"expected_digest":expected_digest} if action=="tumblr.publish_draft" else {}
+        result = self.bridge.dispatch(ActionRequest(request_id, action, target,
+                                                    payload=payload,confirmed=True))
         self.pending.pop(request_id, None)
         return self._from_bridge(result, "confirmed", confirmed=True)
 
@@ -472,6 +474,7 @@ class Assistant:
             "oauth_refresh_unavailable":"認証の更新に必要な情報がありません。再連携してください。",
             "oauth_token_permissions":"Tumblrの認証情報の保存権限が不適切です。安全のため停止しました。",
             "tumblr_unavailable":"Tumblrへの接続に失敗しました。取得済みデータは変更しません。",
+            "tumblr_publish_draft_changed":"確認後に下書き本文が変わりました。公開せず、再確認を要求します。",
             "tumblr_publish_reconcile_required":"前回の投稿結果が不確定です。二重投稿防止のため再送せず、投稿状況の照合が必要です。",
             "tumblr_publish_uncertain":"投稿結果を確認できません。二重投稿防止のため自動再送しません。",
             "tumblr_publish_readback_unverified":"Tumblrの投稿読戻しが一致しません。実行済みと扱いません。",
