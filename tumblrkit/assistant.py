@@ -24,6 +24,8 @@ INDEX = (
     ("tumblr.discover", ("検索", "見つけ", "発見")),
     ("tumblr.list_posts", ("一覧", "投稿を見")),
     ("tumblr.publish_draft", ("公開", "投稿して")),
+    ("tumblr.edit_post", ("投稿を編集", "公開後編集")),
+    ("tumblr.delete_post", ("投稿を削除", "公開投稿削除")),
     ("telegram.check_membership", ("参加確認", "メンバー確認")),
     ("telegram.publish_announcement", ("告知",)),
     ("analytics.get_summary", ("分析", "集計")),
@@ -41,7 +43,8 @@ GOALS = frozenset(("巡回", "投稿", "キャンペーン", "紹介", "集計",
 GOAL_ACTIONS = {
     "巡回": ("tumblr.discover", "tumblr.list_posts",
              "engagement.like", "engagement.reblog", "engagement.follow"),
-    "投稿": ("tumblr.list_posts", "tumblr.publish_draft"),
+    "投稿": ("tumblr.list_posts", "tumblr.publish_draft",
+             "tumblr.edit_post", "tumblr.delete_post"),
     "キャンペーン": (),
     "紹介": (),
     "集計": ("analytics.get_summary",),
@@ -295,7 +298,10 @@ class Assistant:
             saved_discovery=(selected_action=="tumblr.discover" and
                              isinstance(selected_target,str) and
                              selected_target.startswith("saved:"))
-            maximum=150 if saved_discovery else 64
+            edit_target=(selected_action=="tumblr.edit_post" and
+                         isinstance(selected_target,str) and
+                         re.fullmatch(r"[a-f0-9]{32}:[a-f0-9]{32}",selected_target))
+            maximum=150 if saved_discovery else (65 if edit_target else 64)
             if (not isinstance(selected_action,str) or selected_action not in ALLOWED
                     or not isinstance(selected_target,str) or not 0<len(selected_target)<=maximum):
                 return self._pack("invalid_tool","未登録の操作または不正な対象を拒否しました。実行していません。",False,recovery=True)
@@ -429,7 +435,8 @@ class Assistant:
                 return self._pack("failed",
                     "指定された保存済みの投稿・ブログを確認できません。実行していません。",
                     False,recovery=True,action=action,provider=provider)
-        if action=="tumblr.publish_draft":
+        if action in ("tumblr.publish_draft","tumblr.edit_post",
+                      "tumblr.delete_post"):
             tumblr=self.bridge.adapters.get("tumblr")
             publisher=getattr(tumblr,"publisher",None)
             if publisher is None:
@@ -460,6 +467,24 @@ class Assistant:
                                           False,recovery=True,action=action,provider=provider)
                     expected_digest=hashlib.sha256(saved["text"].encode("utf-8")).hexdigest()
                     text="Tumblr公開前確認。対象：本人のブログ\n投稿本文：\n"+saved["text"]+"\n確認ボタンを押すまで公開しません。"
+            if action in ("tumblr.edit_post","tumblr.delete_post"):
+                try:
+                    intent=publisher.lifecycle.preview(action,target)
+                except (ValueError,OSError):
+                    return self._pack("failed",
+                        "既存投稿の状態または修正案を確認できません。実行していません。",
+                        False,recovery=True,action=action,provider=provider)
+                expected_digest=intent["approval"]
+                if action=="tumblr.edit_post":
+                    text=("本人のTumblr公開投稿の編集前確認。投稿ID："+intent["post_id"]+
+                          "\n現在の本文：\n"+intent["current_text"]+
+                          "\n変更後の全文：\n"+intent["new_text"]+
+                          "\n確認を押すまでTumblrには反映しません。")
+                else:
+                    text=("【取り消せない削除】本人のTumblr公開投稿を削除します。"+
+                          "\n投稿ID："+intent["post_id"]+
+                          "\n現在の本文：\n"+intent["current_text"]+
+                          "\n削除後は元へ戻せません。確認まで実行しません。")
             self.pending[request_id] = (action, target, expected_digest)
             return self._pack("confirmation_required", text + omitted + question, False, request_id=request_id, action=action, provider=provider)
         result = self.bridge.dispatch(ActionRequest(uuid.uuid4().hex, action, target))
@@ -484,7 +509,21 @@ class Assistant:
                     "確認した本文が変更または削除されました。公開していません。"
                     "現在の下書きを表示して再確認してください。",
                     False,recovery=True,action=action,provider="confirmed")
-        payload={"expected_digest":expected_digest} if action=="tumblr.publish_draft" else {}
+        payload={"expected_digest":expected_digest} if action in (
+            "tumblr.publish_draft","tumblr.edit_post","tumblr.delete_post") else {}
+        if action in ("tumblr.edit_post","tumblr.delete_post"):
+            tumblr=self.bridge.adapters.get("tumblr")
+            publisher=getattr(tumblr,"publisher",None)
+            try:
+                current=publisher.lifecycle.preview(action,target) if publisher else None
+            except (ValueError,OSError):
+                current=None
+            if current is None or current.get("approval")!=expected_digest:
+                self.pending.pop(request_id,None)
+                return self._pack("failed",
+                    "確認時から公開投稿または編集案が変わりました。"
+                    "再度内容を表示して確認してください。Tumblrへは送信していません。",
+                    False,recovery=True,action=action,provider="confirmed")
         result = self.bridge.dispatch(ActionRequest(request_id, action, target,
                                                     payload=payload,confirmed=True))
         self.pending.pop(request_id, None)
@@ -516,6 +555,13 @@ class Assistant:
             "tumblr_publish_readback_unverified":"Tumblrの投稿読戻しが一致しません。実行済みと扱いません。",
             "tumblr_publish_rejected":"Tumblrが投稿を拒否しました。公開完了していません。",
             "tumblr_write_consent_required":"Tumblr投稿の権限が未承諾です。Tumblr連携から投稿権限を承諾してください。投稿していません。",
+            "tumblr_post_approval_stale":"投稿内容または承認対象が変更されています。再確認が必要です。",
+            "tumblr_post_external_changed":"Tumblr側の現在の本文と記録が一致しません。上書き・削除は行いません。",
+            "tumblr_post_reconcile_required":"前回操作の結果が不確定です。二重操作を防ぐため再送しません。",
+            "tumblr_post_readback_unverified":"Tumblr側で編集・削除結果を確認できず、完了扱いにしません。",
+            "tumblr_mutation_uncertain":"変更結果を確認できません。二重操作を防ぐため自動再送しません。",
+            "tumblr_mutation_rejected":"Tumblrが変更操作を拒否しました。完了していません。",
+
             "engagement_target_missing":"保存済みの対象を確認できないため、Tumblrには送信していません。",
             "engagement_target_invalid":"選択された対象の形式が正しくありません。操作していません。",
             "engagement_provider_refused":"Tumblr公式APIが操作を拒否しました。反映済みとは扱いません。",
@@ -536,6 +582,8 @@ class Assistant:
             "analytics.get_summary": ("集計結果", ("label", "value", "period", "url")),
             "telegram.check_membership": ("参加状況", ("name", "status", "date", "url")),
             "tumblr.publish_draft": ("投稿結果", ("title", "status", "date", "url")),
+            "tumblr.edit_post": ("編集結果", ("title", "status", "date", "url")),
+            "tumblr.delete_post": ("削除結果", ("title", "status", "date", "url")),
             "engagement.like": ("いいね確認結果", ("name", "status", "date", "url")),
             "engagement.reblog": ("リブログ確認結果", ("name", "status", "date", "url")),
             "engagement.follow": ("フォロー確認結果", ("name", "status", "date", "url")),
