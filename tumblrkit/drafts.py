@@ -45,6 +45,18 @@ class DraftStore:
             ).fetchall()
         return [{"id": i, "text": text, "updated": updated} for i,text,updated in rows]
 
+    def get(self, ident):
+        """Return one exact immutable, app-owned draft by ID for publishing."""
+        if (not isinstance(ident,str) or len(ident)!=32
+                or any(char not in "0123456789abcdef" for char in ident)):
+            raise ValueError("INVALID_DRAFT")
+        with self._connect() as db:
+            row=db.execute("SELECT id,text,updated FROM operation_drafts WHERE id=?",
+                           (ident,)).fetchone()
+        if not row:
+            raise ValueError("DRAFT_NOT_FOUND")
+        return {"id":row[0],"text":row[1],"updated":row[2]}
+
     def delete(self, ident):
         if not isinstance(ident, str) or len(ident) != 32 or not all(c in "0123456789abcdef" for c in ident):
             raise ValueError("INVALID_DRAFT")
