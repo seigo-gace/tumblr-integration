@@ -55,7 +55,17 @@ def _owner_tumblr_adapter(owner_oauth,blog,release):
     reader.publisher=PublisherAdapter(
         blog,DraftStore(draft_path),owner_oauth.publish_access_token,
         read_transport=reader.transport,budget=reader.transport.budget)
+    from tumblrkit.engagement_runtime import EngagementAdapter
+    reader.engagement=EngagementAdapter(
+        blog,DiscoveryStore(owner_oauth.store.folder / "discovery.sqlite3"),
+        owner_oauth.publish_access_token,reader.transport,reader.transport.budget)
     return reader
+
+
+def _bind_owner_adapters(bridge, owner_oauth, blog, release):
+    reader=_owner_tumblr_adapter(owner_oauth,blog,release)
+    bridge.adapters["tumblr"]=reader
+    bridge.adapters["engagement"]=reader.engagement
 
 
 class ServeError(SystemExit):
@@ -347,8 +357,9 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 linked = self.server.owner_oauth.callback(parts.query)
                 with self.server.account_lock:
-                    self.server.assistant.bridge.adapters["tumblr"] = _owner_tumblr_adapter(
-                        self.server.owner_oauth,linked["blog"],self.server.release)
+                    _bind_owner_adapters(
+                        self.server.assistant.bridge,self.server.owner_oauth,
+                        linked["blog"],self.server.release)
             except (ValueError, PermissionError, OSError, TypeError):
                 self._send(400, "Tumblr認可に失敗しました。再ログイン後に連携をやり直してください。", "text/plain; charset=utf-8")
                 return
@@ -528,13 +539,15 @@ class _Handler(BaseHTTPRequestHandler):
                     blog = register_owner_blog(self.server.oauth_folder, payload["blog"])
                     if self.server.owner_oauth is None:
                         self.server.owner_oauth = OwnerOAuth(self.server.oauth_folder, blog)
-                        self.server.assistant.bridge.adapters["tumblr"] = _owner_tumblr_adapter(
-                            self.server.owner_oauth,blog,self.server.release)
+                        _bind_owner_adapters(
+                            self.server.assistant.bridge,self.server.owner_oauth,
+                            blog,self.server.release)
                     elif self.server.owner_oauth.blog != blog:
                         # Changed unconnected blog; use the same existing account adapter boundary.
                         self.server.owner_oauth = OwnerOAuth(self.server.oauth_folder, blog)
-                        self.server.assistant.bridge.adapters["tumblr"] = _owner_tumblr_adapter(
-                            self.server.owner_oauth,blog,self.server.release)
+                        _bind_owner_adapters(
+                            self.server.assistant.bridge,self.server.owner_oauth,
+                            blog,self.server.release)
             except (ValueError, OSError, TypeError, UnicodeError, json.JSONDecodeError):
                 self._json(400, {"error": "oauth_blog_setup_failed"})
                 return
@@ -939,6 +952,8 @@ class AppServer:
             adapters={"analytics": analytics}
             if tumblr_reader:
                 adapters["tumblr"]=tumblr_reader
+                if getattr(tumblr_reader,"engagement",None) is not None:
+                    adapters["engagement"]=tumblr_reader.engagement
             self.assistant = Assistant(bridge=Bridge(adapters))
         self.ticket_path = None
         self.httpd = None
