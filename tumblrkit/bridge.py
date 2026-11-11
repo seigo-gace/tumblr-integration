@@ -10,8 +10,10 @@ ALLOWED = frozenset({
     "tumblr.discover", "tumblr.list_posts", "tumblr.publish_draft",
     "telegram.check_membership", "telegram.publish_announcement",
     "analytics.get_summary",
+    "engagement.like", "engagement.reblog", "engagement.follow",
 })
-CONFIRM = frozenset({"tumblr.publish_draft", "telegram.publish_announcement"})
+CONFIRM = frozenset({"tumblr.publish_draft", "telegram.publish_announcement",
+                     "engagement.like", "engagement.reblog", "engagement.follow"})
 
 class Adapter(Protocol):
     def perform(self, action: str, target: str, payload: dict[str, Any]) -> dict[str, Any]: ...
@@ -68,6 +70,12 @@ class Bridge:
                 "tumblr_publish_readback_unverified",
                 "tumblr_publish_rejected",
                 "tumblr_write_consent_required",
+                "engagement_target_missing",
+                "engagement_target_invalid",
+                "engagement_provider_refused",
+                "engagement_post_uncertain",
+                "engagement_readback_unverified",
+                "engagement_reconcile_required",
             })
             code=str(exc) if isinstance(exc,ValueError) else ""
             detail={"error_type":type(exc).__name__}
