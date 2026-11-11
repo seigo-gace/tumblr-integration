@@ -220,6 +220,43 @@ class PublishedPostLifecycle:
                          "https://"+self.publisher.blog+".tumblr.com/post/"+post_id)}],
         }
 
+    def reconcile(self,source):
+        """Read-only reconciliation of a previously uncertain edit/delete.
+
+        Never send an additional PUT or DELETE. The verified provider state
+        must match the exact locally approved content before changing ledger.
+        """
+        if not isinstance(source,str) or not HEX32.fullmatch(source):
+            raise ValueError("tumblr_post_target_invalid")
+        with closing(self.drafts._connect()) as db:
+            self._schema(db)
+            row=db.execute(
+                "SELECT operation_key,action,post_id,revision_draft_id,state "
+                "FROM tumblr_post_mutations WHERE source_draft_id=? "
+                "AND state IN ('reserved','sent') ORDER BY rowid DESC LIMIT 1",
+                (source,)).fetchone()
+            if row is None:
+                raise ValueError("tumblr_post_reconcile_missing")
+            key,kind,post_id,revision,state=row
+            if kind not in ("edit","delete") or not POST_ID.fullmatch(post_id):
+                raise ValueError("tumblr_post_identity_conflict")
+            new_text=None
+            if kind=="edit":
+                revised=db.execute(
+                    "SELECT text FROM operation_drafts WHERE id=?",
+                    (revision,)).fetchone()
+                if not revised:
+                    raise ValueError("tumblr_post_revision_missing")
+                new_text=revised[0]
+        self.publisher.budget.reserve(1)
+        bearer=self.publisher.token_provider()
+        if kind=="edit":
+            self._verify_text(post_id,new_text,bearer)
+        else:
+            self._verify_deleted(post_id,bearer)
+        self._change_state(key,"verified")
+        return self._result(kind,post_id,new_text)
+
     def perform(self,action,target,payload):
         kind,source,revision=self._parse(action,target)
         if (not isinstance(payload,dict) or
