@@ -53,6 +53,15 @@ class OperationAppTests(unittest.TestCase):
         self.assertNotIn('フォロー・タグ・公開候補を確認',self.html)
         self.assertEqual(self.html.count('class="goal"'),6)
 
+    def test_bulk_library_gallery_is_paginated_without_silent_200_limit(self):
+        self.assertNotIn('found>=200',self.js)
+        self.assertIn('references.slice(offset,offset+50)',self.js)
+        self.assertIn('position.textContent=',self.js)
+        self.assertIn('"/library/selected",{candidate_ids:batch}',self.js)
+        self.assertIn('selectedCount.textContent=',self.js)
+        self.assertIn('libraryOffset+=50;showLibrary()',self.js)
+        self.assertNotIn('libraryOffset+=50;librarySelection.clear()',self.js)
+
     def test_owner_post_list_has_genuine_next_previous_page_controls(self):
         self.assertIn('view.action==="tumblr.list_posts"',self.js)
         self.assertIn('"next_target","次の投稿20件"',self.js)
