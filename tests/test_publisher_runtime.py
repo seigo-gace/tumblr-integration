@@ -93,6 +93,44 @@ class PublisherRuntimeTests(unittest.TestCase):
                 "SELECT state FROM tumblr_publish_receipts WHERE draft_id=?",
                 (self.draft["id"],)).fetchone()[0],"verified")
 
+    def test_changed_draft_between_preview_and_confirm_cannot_publish(self):
+        reader=TumblrReadAdapter("owner",self.folder/"access",
+            transport=self.provider,token_provider=lambda:"sample-token")
+        reader.publisher=self.publisher
+        chat=Assistant(bridge=Bridge({"tumblr":reader}),providers=[])
+        before=chat.turn(selected_action="tumblr.publish_draft",
+                         selected_target=self.draft["id"])
+        self.assertEqual(before["state"],"confirmation_required")
+        self.assertIn("本人確認済みの募集文。",before["text"])
+        self.drafts.update(self.draft["id"],"全く違う新しい本文",
+                           "本人確認済みの募集文。")
+        denied=chat.turn(confirm=True,request_id=before["request_id"])
+        self.assertEqual(denied["state"],"failed")
+        self.assertFalse(denied["executed"])
+        self.assertIn("変更",denied["text"])
+        self.assertEqual(self.provider.posts,[])
+        self.assertEqual(self.budget.costs,[])
+        # A fresh preview of the changed text can be confirmed normally.
+        next_preview=chat.turn(selected_action="tumblr.publish_draft",
+                                selected_target=self.draft["id"])
+        self.assertIn("全く違う新しい本文",next_preview["text"])
+        approved=chat.turn(confirm=True,request_id=next_preview["request_id"])
+        self.assertEqual(approved["state"],"completed")
+        self.assertEqual(len(self.provider.posts),1)
+
+    def test_deleted_draft_between_preview_and_confirm_does_not_publish(self):
+        reader=TumblrReadAdapter("owner",self.folder/"access",
+            transport=self.provider,token_provider=lambda:"sample-token")
+        reader.publisher=self.publisher
+        chat=Assistant(bridge=Bridge({"tumblr":reader}),providers=[])
+        preview=chat.turn(selected_action="tumblr.publish_draft",
+                          selected_target=self.draft["id"])
+        self.assertTrue(self.drafts.delete(self.draft["id"]))
+        denied=chat.turn(confirm=True,request_id=preview["request_id"])
+        self.assertEqual(denied["state"],"failed")
+        self.assertFalse(denied["executed"])
+        self.assertEqual(self.provider.posts,[])
+
     def test_numeric_receipt_and_nested_blog_identity_are_supported(self):
         class NumericProvider(OfflinePost):
             def post_json(self,path,bearer,body,budget):
