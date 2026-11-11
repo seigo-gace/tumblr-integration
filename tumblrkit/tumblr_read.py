@@ -16,10 +16,9 @@ from tumblrkit.api_safety import TumblrReadBudget
 BLOG = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}(?:\.tumblr\.com)?$", re.I)
 API = "https://api.tumblr.com"
 MAX_REPLY = 1024 * 1024
-# NPF may contain multiple original image/video blocks and multiple safe
-# renditions for each. One page is bounded by the official response limit;
-# never silently drop the 51st media URL from a verified post.
-MAX_DISCOVERY_MEDIA_REFS = 512
+# The official transport caps each JSON reply by MAX_REPLY. Do not add an
+# unrelated arbitrary per-post media-count ceiling: every safe distinct URL
+# within the bounded official response must remain selectable.
 
 
 def normalize_blog(value):
@@ -99,10 +98,6 @@ def discovery_media_refs(post):
                 or not (host=="media.tumblr.com" or host.endswith(".media.tumblr.com"))
                 or url in seen):
             return
-        if len(found)>=MAX_DISCOVERY_MEDIA_REFS:
-            # Explicitly stop: treating truncated candidate media as complete
-            # would be a design violation. No cursor is committed on failure.
-            raise ValueError("discovery_media_refs_limit_exceeded")
         seen.add(url)
         found.append({"url":url,"type":kind})
     for block in post.get("content",[]) if isinstance(post.get("content"),list) else []:
