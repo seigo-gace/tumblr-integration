@@ -666,7 +666,7 @@ class Assistant:
             if (detail.get("related_basis")=="observed_cooccurring_tags"
                     and isinstance(candidates,list)):
                 related=[]
-                for candidate in candidates[:8]:
+                for candidate in candidates:
                     if not isinstance(candidate,dict):
                         continue
                     tag=candidate.get("tag")
