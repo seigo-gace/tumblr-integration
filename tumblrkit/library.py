@@ -72,7 +72,7 @@ class Library:
     def list(self,filter_name="all",offset=0,limit=50):
         if filter_name not in ("all","unread","favorite","watch_later","seen","unavailable"):
             raise ValueError("library_filter_invalid")
-        if type(offset) is not int or offset<0 or offset>100000:
+        if type(offset) is not int or offset<0 or offset>9223372036854775807:
             raise ValueError("library_offset_invalid")
         if type(limit) is not int or not 1<=limit<=100:
             raise ValueError("library_limit_invalid")
@@ -176,7 +176,7 @@ class Library:
     def update(self,candidate_ids,field,value):
         if field not in ("seen","favorite","watch_later"):
             raise ValueError("library_field_invalid")
-        if type(value) is not bool or not isinstance(candidate_ids,list) or not 1<=len(candidate_ids)<=100:
+        if type(value) is not bool or not isinstance(candidate_ids,list) or not candidate_ids:
             raise ValueError("library_update_invalid")
         ids=[self._id(x) for x in candidate_ids]
         if len(set(ids))!=len(ids):
@@ -185,11 +185,19 @@ class Library:
         with closing(self._open()) as db:
             try:
                 db.execute("BEGIN IMMEDIATE")
-                rows=db.execute(
-                    "SELECT p.candidate_id FROM discovery_posts p LEFT JOIN discovery_blogs b ON b.name=p.blog"
-                    " WHERE p.candidate_id IN ("+",".join("?" for _ in ids)+") AND p.state='visible' AND COALESCE(b.blocked,0)=0",ids).fetchall()
-                if len(rows)!=len(ids):
-                    raise ValueError("library_candidate_unavailable")
+                # Validate *every* selected item before making any change.
+                # Chunks avoid SQLite's bound-variable limit; a single
+                # transaction keeps all changes atomic across pages.
+                for start in range(0,len(ids),100):
+                    batch=ids[start:start+100]
+                    rows=db.execute(
+                        "SELECT p.candidate_id FROM discovery_posts p "
+                        "LEFT JOIN discovery_blogs b ON b.name=p.blog "
+                        "WHERE p.candidate_id IN ("+",".join("?" for _ in batch)+") "
+                        "AND p.state='visible' AND COALESCE(b.blocked,0)=0",
+                        batch).fetchall()
+                    if len(rows)!=len(batch):
+                        raise ValueError("library_candidate_unavailable")
                 for ident in ids:
                     db.execute("INSERT INTO library_state(candidate_id,updated_at) VALUES(?,?) "
                                "ON CONFLICT(candidate_id) DO NOTHING",(ident,now))
