@@ -162,8 +162,9 @@ class DiscoveryStore:
                 db.execute("ROLLBACK")
                 raise
 
-    def read_candidates(self,source=None,limit=100):
-        if not 1<=limit<=100: raise ValueError("discovery_limit_invalid")
+    def read_candidates(self,source=None,limit=100,offset=0):
+        if not 1<=limit<=100 or type(offset) is not int or offset<0:
+            raise ValueError("discovery_limit_invalid")
         with closing(self._open()) as db:
             if source:
                 posts=db.execute("SELECT candidate_id,blog,post_id,url,title,post_type,posted_at,"
@@ -171,13 +172,13 @@ class DiscoveryStore:
                                  " WHERE candidate_id IN (SELECT candidate_id FROM discovery_post_sources WHERE source=?)"
                                  " AND state='visible' AND blog NOT IN"
                                  " (SELECT name FROM discovery_blogs WHERE blocked=1)"
-                                 " ORDER BY last_seen DESC LIMIT ?",(source,limit)).fetchall()
+                                 " ORDER BY last_seen DESC,candidate_id ASC LIMIT ? OFFSET ?",(source,limit,offset)).fetchall()
             else:
                 posts=db.execute("SELECT candidate_id,blog,post_id,url,title,post_type,posted_at,"
                                  "thumbnail_url,text_excerpt,tags_json,media_json,note_count,state FROM discovery_posts"
                                  " WHERE state='visible' AND blog NOT IN"
                                  " (SELECT name FROM discovery_blogs WHERE blocked=1)"
-                                 " ORDER BY last_seen DESC LIMIT ?",(limit,)).fetchall()
+                                 " ORDER BY last_seen DESC,candidate_id ASC LIMIT ? OFFSET ?",(limit,offset)).fetchall()
         columns=("candidate_id","blog","post_id","url","title","type","date",
                  "thumbnail_url","text_excerpt","tags_json","media_json","note_count","state")
         return [dict(zip(columns,item)) for item in posts]
@@ -194,17 +195,48 @@ class DiscoveryStore:
             rows=db.execute("SELECT name FROM discovery_blogs WHERE blocked=1").fetchall()
         return {row[0] for row in rows}
 
-    def read_blogs(self,source=None,limit=100):
+    def read_blogs(self,source=None,limit=100,offset=0):
+        if not 1<=limit<=100 or type(offset) is not int or offset<0:
+            raise ValueError("discovery_limit_invalid")
         with closing(self._open()) as db:
             if source:
                 rows=db.execute("SELECT b.name,b.url,? FROM discovery_blogs b"
                                 " WHERE b.name IN (SELECT name FROM discovery_blog_sources WHERE source=?)"
-                                " AND b.blocked=0 ORDER BY b.last_seen DESC LIMIT ?",
-                                (source,source,limit)).fetchall()
+                                " AND b.blocked=0 ORDER BY b.last_seen DESC,b.name ASC LIMIT ? OFFSET ?",
+                                (source,source,limit,offset)).fetchall()
             else:
                 rows=db.execute("SELECT name,url,source FROM discovery_blogs WHERE blocked=0"
-                                " ORDER BY last_seen DESC LIMIT ?",(limit,)).fetchall()
+                                " ORDER BY last_seen DESC,name ASC LIMIT ? OFFSET ?",(limit,offset)).fetchall()
         return [{"name":name,"url":url,"source":src} for name,url,src in rows]
+
+    def count_candidates(self,source=None):
+        """Count all visible, unblocked persisted candidates, not first 100."""
+        with closing(self._open()) as db:
+            if source is not None:
+                row=db.execute(
+                    "SELECT COUNT(*) FROM discovery_posts WHERE "
+                    "candidate_id IN (SELECT candidate_id FROM discovery_post_sources WHERE source=?) "
+                    "AND state='visible' AND blog NOT IN "
+                    "(SELECT name FROM discovery_blogs WHERE blocked=1)",
+                    (source,)).fetchone()
+            else:
+                row=db.execute(
+                    "SELECT COUNT(*) FROM discovery_posts WHERE state='visible' "
+                    "AND blog NOT IN (SELECT name FROM discovery_blogs WHERE blocked=1)"
+                ).fetchone()
+        return row[0]
+
+    def count_blogs(self,source=None):
+        """Count the entire selected source, excluding owner-blocked blogs."""
+        with closing(self._open()) as db:
+            if source is not None:
+                row=db.execute(
+                    "SELECT COUNT(*) FROM discovery_blogs b WHERE "
+                    "b.name IN (SELECT name FROM discovery_blog_sources WHERE source=?) "
+                    "AND b.blocked=0",(source,)).fetchone()
+            else:
+                row=db.execute("SELECT COUNT(*) FROM discovery_blogs WHERE blocked=0").fetchone()
+        return row[0]
 
     def is_selected_blog(self,name):
         """Check all durable following/follower links, not only UI page 1."""
