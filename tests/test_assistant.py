@@ -67,6 +67,36 @@ class AssistantTests(unittest.TestCase):
         self.assertTrue(view["truncated"])
         self.assertEqual(["label", "value", "period", "url"], view["columns"])
 
+    def test_assistant_draft_requires_persistent_store_not_ephemeral_success(self):
+        standalone=Assistant(providers=[])
+        response=standalone.turn("保存されていない本文",draft=True)
+        self.assertEqual(response["state"],"not_connected")
+        self.assertFalse(response["executed"])
+        self.assertFalse(hasattr(standalone,"drafts"))
+
+    def test_assistant_draft_is_same_persistent_owner_draft_as_ui(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            release=build_release(ROOT/"app",Path(folder),SHA)
+            owner_assistant=Assistant(providers=[])
+            with AppServer(release,TOKEN,assistant=owner_assistant) as server:
+                status,result=post(f"http://127.0.0.1:{server.port}/assistant",
+                                   TOKEN,{"message":"共通の永続下書き","draft":True})
+                self.assertEqual(status,200)
+                self.assertEqual(result["state"],"draft_saved")
+                self.assertFalse(result["executed"])
+                draft_id=result["draft_id"]
+                self.assertRegex(draft_id,r"^[0-9a-f]{32}$")
+                self.assertEqual(server.httpd.draft_store.get(draft_id)["text"],
+                                 "共通の永続下書き")
+                status,body=post(f"http://127.0.0.1:{server.port}/assistant",
+                                 TOKEN,{"message":"","draft":True})
+                self.assertEqual(status,200)
+                self.assertEqual(body["state"],"failed")
+            from tumblrkit.drafts import DraftStore
+            reopened=DraftStore(Path(folder)/"data"/"drafts.sqlite3")
+            self.assertEqual(reopened.get(draft_id)["text"],"共通の永続下書き")
+
     def test_six_goals_not_flattened_into_single_action_or_omitted(self):
         adapter=RecordingAdapter()
         assistant=Assistant(bridge=Bridge({"tumblr":adapter}),providers=[])
