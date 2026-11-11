@@ -43,7 +43,9 @@ class DraftStore:
             rows = db.execute(
                 "SELECT id,text,updated FROM operation_drafts ORDER BY updated DESC,id DESC LIMIT 100"
             ).fetchall()
-        return [{"id": i, "text": text, "updated": updated} for i,text,updated in rows]
+            return [{"id": i, "text": text, "updated": updated,
+                     "locked": self._has_publish_receipt(db,i)}
+                    for i,text,updated in rows]
 
     def get(self, ident):
         """Return one exact immutable, app-owned draft by ID for publishing."""
