@@ -86,7 +86,8 @@ class OperationAppTests(unittest.TestCase):
         self.assertIn('draft.publish_state==="changing"',self.js)
         self.assertIn('selected_action:"tumblr.reconcile_post"',self.js)
         self.assertIn('reconcile.textContent="投稿結果を再照合"',self.js)
-        self.assertIn('["tumblr.publish_draft","tumblr.edit_post","tumblr.delete_post"]',self.js)
+        self.assertIn('["tumblr.publish_draft","tumblr.edit_post","tumblr.delete_post",',self.js)
+        self.assertIn('"tumblr.reconcile_post"].includes(item.action)',self.js)
         self.assertNotIn('input.placeholder="投稿ID"',self.js)
 
     def test_discovery_saved_pages_never_hide_rows_beyond_first_hundred(self):
