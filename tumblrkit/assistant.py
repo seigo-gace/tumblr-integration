@@ -371,7 +371,7 @@ class Assistant:
                         "requires_target":True,
                         "confirmation_required":action in CONFIRM,
                     })
-        return {"goals":list(goals),"recommendations":actions[:3],
+        return {"goals":list(goals),"recommendations":actions,
                 "not_connected_goals":unavailable,
                 "all_actions_count":len(actions),"evidence":"existing_bridge_registry",
                 "executed":False}
