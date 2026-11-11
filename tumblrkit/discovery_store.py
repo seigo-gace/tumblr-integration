@@ -238,6 +238,32 @@ class DiscoveryStore:
                 row=db.execute("SELECT COUNT(*) FROM discovery_blogs WHERE blocked=0").fetchone()
         return row[0]
 
+    def tag_frequencies(self,source):
+        """Count distinct observed tags from *every* visible source post.
+
+        Do not use the 100-row UI page as the evidence universe for related
+        recommendations. Stream the private query; don't load every post.
+        """
+        from collections import Counter
+        counts=Counter()
+        with closing(self._open()) as db:
+            rows=db.execute(
+                "SELECT p.tags_json FROM discovery_posts p "
+                "JOIN discovery_post_sources x ON x.candidate_id=p.candidate_id "
+                "WHERE x.source=? AND p.state='visible' AND p.blog NOT IN "
+                "(SELECT name FROM discovery_blogs WHERE blocked=1)",(source,))
+            for (raw,) in rows:
+                try:
+                    found=json.loads(raw)
+                except (TypeError,ValueError):
+                    continue
+                if not isinstance(found,list):
+                    continue
+                distinct={tag.strip() for tag in found
+                          if isinstance(tag,str) and tag.strip()}
+                counts.update(distinct)
+        return counts
+
     def is_selected_blog(self,name):
         """Check all durable following/follower links, not only UI page 1."""
         from tumblrkit.tumblr_read import normalize_blog
