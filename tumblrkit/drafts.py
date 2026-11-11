@@ -38,14 +38,23 @@ class DraftStore:
             )
         return {"id": ident, "text": value}
 
-    def list(self):
+    def list(self,offset=0,limit=100):
+        # Page size is a response budget; all persisted drafts remain reachable.
+        if (type(offset) is not int or not 0<=offset<=9223372036854775807
+                or type(limit) is not int or not 1<=limit<=100):
+            raise ValueError("INVALID_DRAFT_PAGE")
         with self._connect() as db:
-            rows = db.execute(
-                "SELECT id,text,updated FROM operation_drafts ORDER BY updated DESC,id DESC LIMIT 100"
+            rows=db.execute(
+                "SELECT id,text,updated FROM operation_drafts "
+                "ORDER BY updated DESC,id DESC LIMIT ? OFFSET ?",(limit,offset)
             ).fetchall()
             return [{"id": i, "text": text, "updated": updated,
                      "locked": self._has_publish_receipt(db,i)}
                     for i,text,updated in rows]
+
+    def count(self):
+        with self._connect() as db:
+            return db.execute("SELECT COUNT(*) FROM operation_drafts").fetchone()[0]
 
     def get(self, ident):
         """Return one exact immutable, app-owned draft by ID for publishing."""
