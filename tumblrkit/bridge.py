@@ -8,11 +8,13 @@ from typing import Protocol, Any
 
 ALLOWED = frozenset({
     "tumblr.discover", "tumblr.list_posts", "tumblr.publish_draft",
+    "tumblr.edit_post", "tumblr.delete_post",
     "telegram.check_membership", "telegram.publish_announcement",
     "analytics.get_summary",
     "engagement.like", "engagement.reblog", "engagement.follow",
 })
-CONFIRM = frozenset({"tumblr.publish_draft", "telegram.publish_announcement",
+CONFIRM = frozenset({"tumblr.publish_draft", "tumblr.edit_post",
+                     "tumblr.delete_post", "telegram.publish_announcement",
                      "engagement.like", "engagement.reblog", "engagement.follow"})
 
 class Adapter(Protocol):
@@ -70,6 +72,17 @@ class Bridge:
                 "tumblr_publish_readback_unverified",
                 "tumblr_publish_rejected",
                 "tumblr_write_consent_required",
+                "tumblr_post_target_invalid",
+                "tumblr_post_not_verified",
+                "tumblr_post_already_deleted",
+                "tumblr_post_reconcile_required",
+                "tumblr_post_revision_missing",
+                "tumblr_post_revision_invalid",
+                "tumblr_post_approval_stale",
+                "tumblr_post_readback_unverified",
+                "tumblr_post_external_changed",
+                "tumblr_mutation_uncertain",
+                "tumblr_mutation_rejected",
                 "engagement_target_missing",
                 "engagement_target_invalid",
                 "engagement_provider_refused",
