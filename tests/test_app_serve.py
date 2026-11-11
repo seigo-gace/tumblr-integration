@@ -44,6 +44,8 @@ class AppServeTests(unittest.TestCase):
         self.assertIn('fetch("/oauth/status"', client)
         self.assertIn("oauthStatus.textContent=", client)
         self.assertIn('post({message:text})', client)
+        self.assertIn('view.related_basis==="observed_cooccurring_tags"', client)
+        self.assertIn("view.related_tags.slice(0,8)", client)
         meta = json.loads((release / "RELEASE.json").read_text(encoding="utf-8"))
         self.assertEqual(meta["files"]["app.js"], hashlib.sha256((APP / "app.js").read_bytes()).hexdigest())
 
