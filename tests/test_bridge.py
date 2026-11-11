@@ -40,6 +40,25 @@ class BridgeTests(unittest.TestCase):
         bridge=Bridge({"telegram":Empty()})
         self.assertEqual("unverified",bridge.dispatch(ActionRequest("r4","telegram.check_membership","group")).state)
 
+    def test_only_known_auth_and_permission_errors_reach_ui(self):
+        from tumblrkit.assistant import Assistant
+        class Denied:
+            def __init__(self,code): self.code=code
+            def perform(self,*args): raise ValueError(self.code)
+        for code,fragment in (
+            ("tumblr_auth_expired","認証が失効"),
+            ("tumblr_permission_denied","権限不足"),
+            ("tumblr_rate_limited","制限を検知"),
+        ):
+            with self.subTest(code=code):
+                bot=Assistant(bridge=Bridge({"tumblr":Denied(code)}),providers=[])
+                response=bot.turn("検索して 対象: tag:test")
+                self.assertEqual(response["state"],"failed")
+                self.assertIn(fragment,response["text"])
+        private=Assistant(bridge=Bridge({"tumblr":Denied("super-secret-provider-body")}),providers=[])
+        response=private.turn("検索して 対象: tag:test")
+        self.assertNotIn("super-secret",response["text"])
+
     def test_unknown_action_is_rejected(self):
         with self.assertRaises(ValueError):
             Bridge({}).dispatch(ActionRequest("r5","telegram.delete_group","group"))
