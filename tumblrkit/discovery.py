@@ -49,20 +49,30 @@ class DiscoveryEngine:
         blog_value=item.get("blog_name")
         raw_id=item.get("id_string") or item.get("id")
         raw_url=item.get("post_url")
-        if not isinstance(blog_value,str) or not isinstance(raw_url,str):
+        if not isinstance(blog_value,str):
             return None
         post_id=str(raw_id)
         if not post_id.isascii() or not post_id.isdecimal() or len(post_id)>25:
             return None
         try:
             blog=normalize_blog(blog_value)
-            parsed=urlsplit(raw_url)
-            if (parsed.scheme!="https" or parsed.username or parsed.password
-                    or not parsed.netloc or len(raw_url)>500
-                    or parsed.hostname not in (blog+".tumblr.com","www.tumblr.com","tumblr.com")):
-                return None
         except (TypeError,ValueError):
             return None
+        # The official Tumblr response may advertise a custom-domain
+        # permalink or omit it. Candidate identity comes from the verified
+        # Tumblr blog + post ID, not a third-party link hostname. Preserve the
+        # item with a canonical first-party permalink instead of dropping it.
+        canonical="https://"+blog+".tumblr.com/post/"+post_id
+        if not isinstance(raw_url,str) or len(raw_url)>500:
+            raw_url=canonical
+        try:
+            parsed=urlsplit(raw_url)
+            if (parsed.scheme!="https" or parsed.username or parsed.password
+                    or not parsed.netloc or parsed.hostname not in
+                    (blog+".tumblr.com","www.tumblr.com","tumblr.com")):
+                raw_url=canonical
+        except (TypeError,ValueError):
+            raw_url=canonical
         if blog in blocked:
             return None
         thumbnail,media_type=media_thumbnail(item)
@@ -80,7 +90,9 @@ class DiscoveryEngine:
         tags=item.get("tags")
         if not isinstance(tags,list):
             tags=[]
-        tags=[t[:100] for t in tags[:30] if isinstance(t,str)]
+        # Do not silently omit the 31st tag: Related recommendations
+        # must be based on the full bounded official response.
+        tags=[t for t in tags if isinstance(t,str)]
         text=item.get("summary") or item.get("title") or ""
         if not isinstance(text,str):
             text=""
@@ -222,9 +234,22 @@ class DiscoveryEngine:
             unique={}
             for item in payload[:SOURCE_LIMIT]:
                 post=self._post(item,blocked)
-                if mode=="blog" and post and post["blog"]!=term:
+                if post is None:
+                    if not isinstance(item,dict):
+                        raise ValueError("discovery_page_post_unverified")
+                    try:
+                        rejected_blog=normalize_blog(item.get("blog_name"))
+                    except (TypeError,ValueError):
+                        raise ValueError("discovery_page_post_unverified") from None
+                    if rejected_blog not in blocked:
+                        # Only an explicit owner blocklist may remove a valid
+                        # candidate from this page. Bad API entries never
+                        # advance a cursor and silently skip unseen posts.
+                        raise ValueError("discovery_page_post_unverified")
+                    continue
+                if mode=="blog" and post["blog"]!=term:
                     raise ValueError("discovery_blog_post_mismatch")
-                if post: unique[post["candidate_id"]]=post
+                unique[post["candidate_id"]]=post
             timestamps=[]
             for item in payload[:SOURCE_LIMIT]:
                 if not isinstance(item,dict):
