@@ -401,6 +401,17 @@ class Assistant:
             self.pending[request_id] = (action, target)
             label = "AIの提案" if ai else "既存ツール索引の候補であり、AIの判断ではありません"
             text = label + "。プレビュー: " + action + " を " + target + " に対して行う操作です。まだ実行していません。"
+            if action=="tumblr.publish_draft":
+                tumblr=self.bridge.adapters.get("tumblr")
+                publisher=getattr(tumblr,"publisher",None)
+                if publisher is not None:
+                    try:
+                        saved=publisher.drafts.get(target)
+                    except (ValueError,OSError):
+                        self.pending.pop(request_id,None)
+                        return self._pack("failed","保存済み下書きを確認できません。投稿していません。",
+                                          False,recovery=True,action=action,provider=provider)
+                    text="Tumblr公開前確認。対象：本人のブログ\n投稿本文：\n"+saved["text"]+"\n確認ボタンを押すまで公開しません。"
             return self._pack("confirmation_required", text + omitted + question, False, request_id=request_id, action=action, provider=provider)
         result = self.bridge.dispatch(ActionRequest(uuid.uuid4().hex, action, target))
         return self._from_bridge(result, provider)
@@ -434,6 +445,10 @@ class Assistant:
             "oauth_refresh_unavailable":"認証の更新に必要な情報がありません。再連携してください。",
             "oauth_token_permissions":"Tumblrの認証情報の保存権限が不適切です。安全のため停止しました。",
             "tumblr_unavailable":"Tumblrへの接続に失敗しました。取得済みデータは変更しません。",
+            "tumblr_publish_reconcile_required":"前回の投稿結果が不確定です。二重投稿防止のため再送せず、投稿状況の照合が必要です。",
+            "tumblr_publish_uncertain":"投稿結果を確認できません。二重投稿防止のため自動再送しません。",
+            "tumblr_publish_readback_unverified":"Tumblrの投稿読戻しが一致しません。実行済みと扱いません。",
+            "tumblr_publish_rejected":"Tumblrが投稿を拒否しました。公開完了していません。",
         }
         code=result.detail.get("error_code") if isinstance(result.detail,dict) else None
         message=notices.get(code,"操作は完了していません。実行していません。")
