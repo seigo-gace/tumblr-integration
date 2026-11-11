@@ -45,7 +45,9 @@ class AppServeTests(unittest.TestCase):
         self.assertIn("oauthStatus.textContent=", client)
         self.assertIn('post({message:text})', client)
         self.assertIn('view.related_basis==="observed_cooccurring_tags"', client)
-        self.assertIn("view.related_tags.slice(0,8)", client)
+        self.assertIn("function showMoreRelated()", client)
+        self.assertIn("until=Math.min(shown+8,view.related_tags.length)", client)
+        self.assertIn("関連タグをさらに表示", client)
         for action in ("engagement.like","engagement.reblog","engagement.follow"):
             self.assertIn('selected_action:spec[0]',client)
             self.assertIn(action,client)
