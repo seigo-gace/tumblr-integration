@@ -117,7 +117,8 @@ def discovery_media_refs(post):
                 variants=[photo.get("original_size")]
             for variant in variants[:1]:
                 if isinstance(variant,dict): accept(variant.get("url"),"image")
-    accept(post.get("thumbnail_url"),"video")
+    accept(post.get("video_url"),"video")
+    accept(post.get("thumbnail_url"),"image")
     return found
 
 def media_thumbnail(post):
