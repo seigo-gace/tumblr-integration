@@ -72,6 +72,40 @@ class MediaFallbackTests(unittest.TestCase):
         self.assertEqual(candidate["type"],"video")
         self.assertEqual(candidate["media_refs"][0]["type"],"image")
 
+    def test_many_npf_renditions_are_preserved_without_silent_50_ref_drop(self):
+        from tumblrkit.tumblr_read import discovery_media_refs,MAX_DISCOVERY_MEDIA_REFS
+        blocks=[]
+        for image in range(25):
+            blocks.append({"type":"image","media":[
+                {"url":f"https://64.media.tumblr.com/{image}-{size}.jpg"}
+                for size in range(4)]})
+        refs=discovery_media_refs({"content":blocks})
+        self.assertEqual(len(refs),100)
+        self.assertEqual(refs[99]["url"],"https://64.media.tumblr.com/24-3.jpg")
+        self.assertGreater(MAX_DISCOVERY_MEDIA_REFS,100)
+        overflow={"content":[{"type":"image","media":[
+            {"url":f"https://64.media.tumblr.com/p-{index}.jpg"}
+            for index in range(MAX_DISCOVERY_MEDIA_REFS+1)]}]}
+        with self.assertRaisesRegex(ValueError,"discovery_media_refs_limit_exceeded"):
+            discovery_media_refs(overflow)
+
+    def test_video_selection_above_previous_index_49_remains_available(self):
+        self.add_post(False)
+        refs=[{"url":f"https://64.media.tumblr.com/photo-{i}.jpg","type":"image"}
+              for i in range(60)]
+        refs.append({"url":"https://64.media.tumblr.com/late-video.mp4","type":"video"})
+        with self.store._open() as db:
+            import json
+            db.execute("UPDATE discovery_posts SET media_json=? WHERE candidate_id=?",
+                       (json.dumps(refs),"one:123"))
+            picked=self.worker()._candidate(db,"one:123",60)
+        self.assertEqual(picked[0],"123")
+        self.assertEqual(picked[1],"https://64.media.tumblr.com/late-video.mp4")
+        self.assertTrue(picked[4])
+        with self.store._open() as db:
+            with self.assertRaisesRegex(MediaError,"MEDIA_INDEX_INVALID"):
+                self.worker()._candidate(db,"one:123",len(refs)+500)
+
     def test_legacy_tumblr_video_url_is_preserved_as_video(self):
         from tumblrkit.tumblr_read import discovery_media_refs
         post={"video_url":"https://64.media.tumblr.com/legacy.mp4",
