@@ -11,6 +11,7 @@ from contextlib import closing
 from urllib.parse import urlsplit
 
 from tumblrkit.discovery_store import DiscoveryStore
+from tumblrkit.tumblr_read import MAX_DISCOVERY_MEDIA_REFS
 
 IDENT = re.compile(r"[a-z0-9][a-z0-9-]{0,62}:[0-9]{1,25}\Z")
 SAFE_MEDIA_HOST = re.compile(r"(?:[a-z0-9-]+\.)?media\.tumblr\.com\Z")
@@ -98,7 +99,7 @@ class Library:
                 raw=json.loads(media_json)
             except (TypeError,ValueError):
                 raw=[]
-            media=[item for item in (_safe_media(x) for x in raw[:50]) if item] if isinstance(raw,list) else []
+            media=[item for item in (_safe_media(x) for x in raw[:MAX_DISCOVERY_MEDIA_REFS]) if item] if isinstance(raw,list) else []
             records.append({"candidate_id":candidate,"blog":blog,"post_id":post_id,
                 "title":title,"url":url,"type":kind,"date":date,"media":media,
                 "thumbnail_url":thumbnail,"state":state,"seen":bool(seen),
@@ -130,7 +131,7 @@ class Library:
             source=json.loads(raw)
         except (TypeError,ValueError):
             source=[]
-        media=[item for item in (_safe_media(x) for x in source[:50]) if item] if isinstance(source,list) else []
+        media=[item for item in (_safe_media(x) for x in source[:MAX_DISCOVERY_MEDIA_REFS]) if item] if isinstance(source,list) else []
         if not media:
             return None
         index=min(session[1],len(media)-1)
@@ -170,7 +171,7 @@ class Library:
 
     def progress(self,candidate_id,media_index):
         self._id(candidate_id)
-        if type(media_index) is not int or media_index<0 or media_index>49:
+        if type(media_index) is not int or not 0<=media_index<MAX_DISCOVERY_MEDIA_REFS:
             raise ValueError("library_media_index_invalid")
         now=int(time.time())
         with closing(self._open()) as db:
