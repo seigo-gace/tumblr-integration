@@ -289,6 +289,10 @@ class MediaSave:
                 if accepted and accepted["type"]=="video":
                     _media_url(accepted["url"])
                     return post_id,accepted["url"],post_url,blog,True
+            # A present but invalid video source is not evidence that the
+            # provider has no direct source. Do not bypass its URL guard.
+            if isinstance(selected,dict) and selected.get("type")=="video" and selected.get("url"):
+                raise MediaError("MEDIA_SELECTION_INVALID")
             # Original Tumblr post with no direct video source, often video
             # blocks with a poster or externally embedded video metadata.
             # Only allow a single fallback target; never promote image posts.
