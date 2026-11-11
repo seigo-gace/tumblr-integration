@@ -94,6 +94,10 @@ class PrivateTokenStore:
         if not isinstance(payload, dict) or not all(isinstance(payload.get(k), str) for k in
                     ("access_token", "refresh_token", "blog")):
             raise ValueError("oauth_stored_token_invalid")
+        granted=payload.get("scopes",[])
+        if not isinstance(granted,list) or any(not isinstance(item,str) for item in granted):
+            raise ValueError("oauth_stored_scopes_invalid")
+        payload["scopes"]=granted
         return payload
 
     def write(self, tokens, blog):
@@ -107,7 +111,8 @@ class PrivateTokenStore:
         payload = {"access_token": tokens.access_token,
                    "refresh_token": tokens.refresh_token or "",
                    "blog": normalize_blog(blog),
-                   "expires_at": int(time.time()) + tokens.expires_in if tokens.expires_in else 0}
+                   "expires_at": int(time.time()) + tokens.expires_in if tokens.expires_in else 0,
+                   "scopes": list(tokens.scopes)}
         # Preflight both paths before writing; no silent overwrites of unsafe files.
         self._atomic(self.tokens, json.dumps(payload, separators=(",", ":")) + "\n")
         self._atomic(self.access, tokens.access_token + "\n")
@@ -144,7 +149,7 @@ class OwnerOAuth:
         return self.oauth
 
     def start(self):
-        start = self._client().begin(("basic", "offline_access"))
+        start = self._client().begin(("basic", "write", "offline_access"))
         now = self.clock()
         with self._lock:
             self._pending = {state: expires for state, expires in self._pending.items() if expires > now}
@@ -167,6 +172,12 @@ class OwnerOAuth:
             raise ValueError("oauth_state_expired_or_reused")
         client = self._client()
         tokens = client.exchange(query, state)
+        # The user explicitly authorized these scopes in this OAuth state.
+        # If the token service returns a narrower scope, honour that narrower
+        # grant; existing legacy read-only tokens remain without write scope.
+        from dataclasses import replace
+        if not tokens.scopes:
+            tokens=replace(tokens,scopes=("basic","write","offline_access"))
         identity = self.transport.get_json(USER_INFO, tokens.access_token)
         user = identity.get("response", {}).get("user") if isinstance(identity, dict) else None
         blogs = user.get("blogs") if isinstance(user, dict) else None
@@ -196,7 +207,15 @@ class OwnerOAuth:
         selected = record.get("blog")
         owned = bool(selected and (self.blog is None or selected == self.blog))
         return {"connected": owned, "blog": selected if owned else None,
-                "expires_at": record.get("expires_at", 0)}
+                "expires_at": record.get("expires_at", 0),
+                "can_publish": owned and "write" in record.get("scopes", [])}
+
+    def publish_access_token(self):
+        # Tokens saved before owner reauthorization never receive write access.
+        record=self.store.read()
+        if record is None or "write" not in record.get("scopes",[]):
+            raise ValueError("tumblr_write_consent_required")
+        return self.refresh_if_needed()
 
     def refresh_if_needed(self):
         with self._lock:
@@ -219,7 +238,18 @@ class OwnerOAuth:
                 raise ValueError("oauth_refresh_invalid")
             if not isinstance(refresh, str) or not 12 <= len(refresh) <= 4096:
                 raise ValueError("oauth_refresh_invalid")
-            self.store.write(AccountTokens(token, "bearer", refresh, lifetime), record["blog"])
+            returned=result.get("scope")
+            prior=tuple(record.get("scopes",[]))
+            if returned is not None:
+                if not isinstance(returned,str):
+                    raise ValueError("oauth_refresh_scopes_invalid")
+                allowed=frozenset(("basic","write","offline_access"))
+                granted=tuple(returned.split())
+                if not set(granted).issubset(allowed):
+                    raise ValueError("oauth_refresh_scopes_invalid")
+            else:
+                granted=prior
+            self.store.write(AccountTokens(token, "bearer", refresh, lifetime, granted), record["blog"])
             return token
 
 def load_owner_blog(directory):
