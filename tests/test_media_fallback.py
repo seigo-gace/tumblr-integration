@@ -126,7 +126,7 @@ class MediaFallbackTests(unittest.TestCase):
             chosen=self.worker()._candidate(db,"one:123",539)
         self.assertEqual(chosen[1],"https://64.media.tumblr.com/clip-539.mp4")
         with self.store._open() as db:
-            with self.assertRaisesRegex(MediaError,"MEDIA_SELECTION_INVALID"):
+            with self.assertRaisesRegex(MediaError,"MEDIA_INDEX_INVALID"):
                 self.worker()._candidate(db,"one:123",540)
 
     def test_legacy_tumblr_video_url_is_preserved_as_video(self):
