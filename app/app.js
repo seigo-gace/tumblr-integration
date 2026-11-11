@@ -91,7 +91,6 @@
     if(!ids.length)return;
     const result=await libraryRequest("/library/update",{candidate_ids:ids,field:field,value:value});
     if(result.verified!==true||result.updated!==ids.length)throw new Error("library_unverified");
-    await showLibrary();
   }
   async function mediaHistory(){
     try{
@@ -203,12 +202,31 @@
     filter.value=libraryFilter;
     filter.addEventListener("change",function(){libraryFilter=filter.value;libraryOffset=0;librarySelection.clear();showLibrary();});
     const total=document.createElement("span");total.textContent=String(data.total)+"件";
+    const selectedCount=document.createElement("span");
+    const updateSelectionCount=function(){
+      selectedCount.textContent="選択中："+librarySelection.size+"件（ページ間で保持）";
+    };
+    updateSelectionCount();
     const bulk=document.createElement("div");bulk.className="library-controls";
     const viewSelected=document.createElement("button");
     viewSelected.type="button";viewSelected.textContent="選択した画像・動画を閲覧";
-    viewSelected.addEventListener("click",function(){
-      const selected=data.items.filter(function(item){return librarySelection.has(item.candidate_id)&&item.state==="visible";});
-      if(!selected.length){display("閲覧する候補を選択してください。","system");return;}
+    viewSelected.addEventListener("click",async function(){
+      const ids=Array.from(librarySelection);
+      if(!ids.length){display("閲覧する候補を選択してください。","system");return;}
+      let selected=[];
+      viewSelected.disabled=true;
+      try{
+        for(let i=0;i<ids.length;i+=5){
+          const batch=ids.slice(i,i+5);
+          const result=await libraryRequest("/library/selected",{candidate_ids:batch});
+          if(result.verified!==true||!Array.isArray(result.items)||
+             result.items.length!==batch.length)throw new Error("selection_unverified");
+          selected.push(...result.items);
+        }
+      }catch(error){
+        display("選択した候補をすべて読み込めませんでした。選択状態は保持しています。","system");
+        return;
+      }finally{viewSelected.disabled=false;}
       const panel=document.createElement("section");panel.className="library-viewer";
       const title=document.createElement("h3");title.textContent="選択したメディア";
       panel.appendChild(title);
@@ -276,17 +294,26 @@
     for(const [label,field,value] of [["既読にする","seen",true],["未読にする","seen",false],["お気に入り","favorite",true],["お気に入り解除","favorite",false],["あとで見る","watch_later",true],["あとで見る解除","watch_later",false]]){
       const b=document.createElement("button");b.type="button";b.textContent=label;
       b.addEventListener("click",async function(){
-        try{await libraryUpdate(Array.from(librarySelection),field,value);librarySelection.clear();}
-        catch(error){display("選択項目を更新できませんでした。","system");}
+        try{
+          await libraryUpdate(Array.from(librarySelection),field,value);
+          librarySelection.clear();
+          await showLibrary();
+        }catch(error){
+          display("選択項目をまとめて更新できませんでした。変更結果を確認してください。","system");
+        }
       });bulk.appendChild(b);
     }
-    controls.append(filter,total);
+    controls.append(filter,total,selectedCount);
     const cards=document.createElement("div");cards.className="library-grid";
     for(const item of data.items){
       const card=document.createElement("article");card.className="library-card";
       const check=document.createElement("input");check.type="checkbox";check.checked=librarySelection.has(item.candidate_id);
       check.setAttribute("aria-label",(item.title||item.candidate_id)+"を選択");
-      check.addEventListener("change",function(){if(check.checked)librarySelection.add(item.candidate_id);else librarySelection.delete(item.candidate_id);});
+      check.addEventListener("change",function(){
+        if(check.checked)librarySelection.add(item.candidate_id);
+        else librarySelection.delete(item.candidate_id);
+        updateSelectionCount();
+      });
       const name=document.createElement("strong");name.textContent=item.title||"(タイトルなし)";
       const meta=document.createElement("small");meta.textContent=item.blog+" • "+item.date+" • "+(item.seen?"既読":"未読")+
         (item.favorite?" • ★お気に入り":"")+(item.watch_later?" • あとで見る":"");
@@ -320,8 +347,8 @@
     const prev=document.createElement("button");prev.type="button";prev.textContent="前の50件";
     const next=document.createElement("button");next.type="button";next.textContent="次の50件";
     prev.disabled=libraryOffset===0;next.disabled=libraryOffset+data.items.length>=data.total;
-    prev.addEventListener("click",function(){libraryOffset=Math.max(0,libraryOffset-50);librarySelection.clear();showLibrary();});
-    next.addEventListener("click",function(){libraryOffset+=50;librarySelection.clear();showLibrary();});
+    prev.addEventListener("click",function(){libraryOffset=Math.max(0,libraryOffset-50);showLibrary();});
+    next.addEventListener("click",function(){libraryOffset+=50;showLibrary();});
     pager.append(prev,next);
     if(data.resume_item&&typeof data.resume_item.candidate_id==="string"){
       const resume=document.createElement("button");resume.type="button";resume.textContent="前回の続き";
