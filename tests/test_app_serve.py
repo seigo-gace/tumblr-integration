@@ -234,6 +234,24 @@ class AppServeTests(unittest.TestCase):
             self.assertEqual(status,200)
             self.assertEqual(json.loads(body)["total"],1)
             self.assertEqual(len(json.loads(body)["items"][0]["media"]),1)
+            selected=json.dumps({"candidate_ids":["alpha:123"]}).encode()
+            headers={"Content-Type":"application/json","Origin":base}
+            status,_,_=fetch(base+"/library/selected",method="POST",
+                             data=selected,headers=headers)
+            self.assertEqual(status,401)
+            status,_,_=fetch(base+"/library/selected",TOKEN,method="POST",
+                             data=selected,headers={"Content-Type":"application/json",
+                                                    "Origin":"https://attacker.invalid"})
+            self.assertEqual(status,403)
+            status,body,_=fetch(base+"/library/selected",TOKEN,method="POST",
+                                data=selected,headers=headers)
+            self.assertEqual(status,200)
+            self.assertEqual(json.loads(body)["items"][0]["candidate_id"],"alpha:123")
+            self.assertEqual(len(json.loads(body)["items"][0]["media"]),1)
+            status,_,_=fetch(base+"/library/selected",TOKEN,method="POST",
+                             data=json.dumps({"candidate_ids":["alpha:999"]}).encode(),
+                             headers=headers)
+            self.assertEqual(status,400)
             update=json.dumps({"candidate_ids":["alpha:123"],"field":"favorite","value":True}).encode()
             headers={"Content-Type":"application/json","Origin":base}
             status,_,_=fetch(base+"/library/update",method="POST",data=update,headers=headers)
