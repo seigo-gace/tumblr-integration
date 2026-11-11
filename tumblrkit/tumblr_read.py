@@ -167,6 +167,12 @@ class TumblrReadAdapter:
         self.publisher = None
 
     def perform(self, action, target, payload):
+        if action=="tumblr.reconcile_post":
+            if self.publisher is None:
+                raise ValueError("tumblr_publish_unavailable")
+            if payload not in ({},None):
+                raise ValueError("tumblr_post_payload_unsupported")
+            return self.publisher.lifecycle.reconcile(target)
         if action in ("tumblr.edit_post","tumblr.delete_post"):
             if self.publisher is None:
                 raise ValueError("tumblr_publish_unavailable")
