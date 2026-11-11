@@ -111,6 +111,42 @@ class ReleaseScriptContract(unittest.TestCase):
         self.assertIn("old_pid = find_old(root, allow_stopped=args.recover_stopped)",code)
         self.assertIn("if old_pid is not None:",code)
 
+    def test_process_selection_does_not_count_staging_as_production(self):
+        import importlib.util
+        from unittest.mock import patch
+        spec=importlib.util.spec_from_file_location("private_tumblr_release_processes",SCRIPT)
+        release=importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(release)
+        base=["python3","-B","-m","tumblrkit.appserve","serve"]
+        self.assertTrue(release._production_process_args(base+["--port","8081"]))
+        self.assertTrue(release._production_process_args(base+["--port=8081"]))
+        self.assertFalse(release._production_process_args(base+["--port","8082"]))
+        self.assertFalse(release._production_process_args(base+["--port=8082"]))
+        self.assertTrue(release._production_process_args(base))
+        self.assertTrue(release._production_process_args(base+["--port","invalid"]))
+        self.assertTrue(release._production_process_args(base+["--port"]))
+        # Simulated /proc verifies the process is not selected merely because
+        # it shares the production checkout directory.
+        class Entry:
+            def __init__(self, name, root, argv):
+                self.name=name
+                self.root=root
+                self.argv=argv
+            def __truediv__(self, name):
+                parent=self
+                class Part:
+                    def read_bytes(self):
+                        return "\\0".join(parent.argv).encode()+b"\\0"
+                    def resolve(self):
+                        return parent.root
+                return Part()
+        from pathlib import Path
+        with patch.object(Path,"iterdir",return_value=[
+            Entry("101",Path("/tmp/tumblr-checkout"),base+["--port","8081"]),
+            Entry("202",Path("/tmp/tumblr-checkout"),base+["--port","8082"]),
+        ]):
+            self.assertEqual(release.find_old(Path("/tmp/tumblr-checkout")),101)
+
     def test_staging_verifies_before_live_process_termination(self):
         code = SCRIPT.read_text(encoding="utf-8")
         self.assertLess(code.index("verify(STAGING_PORT"), code.index("os.kill(old_pid"))
