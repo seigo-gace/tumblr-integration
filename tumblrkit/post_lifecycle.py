@@ -121,6 +121,23 @@ class PublishedPostLifecycle:
         with closing(self.drafts._connect()) as db:
             self._schema(db)
             db.execute("BEGIN IMMEDIATE")
+            existing=db.execute(
+                "SELECT state,digest,post_id FROM tumblr_post_mutations "
+                "WHERE operation_key=?",(key,)).fetchone()
+            if existing and existing[0]=="verified":
+                if approved!=existing[1]:
+                    raise ValueError("tumblr_post_approval_stale")
+                latest=db.execute(
+                    "SELECT operation_key FROM tumblr_post_mutations "
+                    "WHERE source_draft_id=? ORDER BY rowid DESC LIMIT 1",
+                    (source,)).fetchone()
+                if not latest or latest[0]!=key:
+                    raise ValueError("tumblr_post_approval_stale")
+                revised=db.execute(
+                    "SELECT text FROM operation_drafts WHERE id=?",(revision,)
+                ).fetchone() if revision else None
+                db.commit()
+                return key,"verified",existing[2],None,(revised[0] if revised else None)
             post_id,current,new_text=self._db_snapshot(db,source,revision,key)
             fingerprint=self._approval(action,source,revision,post_id,current,new_text)
             if approved!=fingerprint:
@@ -211,14 +228,24 @@ class PublishedPostLifecycle:
                 not re.fullmatch(r"[0-9a-f]{64}",payload["expected_digest"])):
             raise ValueError("tumblr_post_approval_required")
         approved=payload["expected_digest"]
-        # Check target and DB provenance before any private network request.
+        # Establish OAuth and available shared-call budget before creating a
+        # durable write reservation. A missing key/quota cannot lock a draft
+        # that has never been sent to Tumblr.
+        key=kind+":"+(revision or source)
+        with closing(self.drafts._connect()) as db:
+            self._schema(db)
+            previous=db.execute(
+                "SELECT state FROM tumblr_post_mutations WHERE operation_key=?",
+                (key,)).fetchone()
+        if previous and previous[0]=="reserved":
+            raise ValueError("tumblr_post_reconcile_required")
+        self.publisher.budget.reserve(1 if previous else 3)
+        bearer=self.publisher.token_provider()
         claim=self._claim(kind,source,revision,approved)
         key,state,post_id,old_text,new_text=claim
         if state=="reserved":
             raise ValueError("tumblr_post_reconcile_required")
         if state in ("sent","verified"):
-            self.publisher.budget.reserve(1)
-            bearer=self.publisher.token_provider()
             if kind=="edit":
                 self._verify_text(post_id,new_text,bearer)
             else:
@@ -227,8 +254,6 @@ class PublishedPostLifecycle:
                 self._change_state(key,"verified")
             return self._result(kind,post_id,new_text)
         # Exactly one remote mutation per new operation, at most three calls.
-        self.publisher.budget.reserve(3)
-        bearer=self.publisher.token_provider()
         try:
             self._verify_text(post_id,old_text,bearer)
         except ValueError:
