@@ -833,6 +833,7 @@
       "tumblr.publish_draft":"下書きの公開を確認",
       "tumblr.edit_post":"公開済み投稿の編集",
       "tumblr.delete_post":"公開済み投稿の削除",
+      "tumblr.reconcile_post":"前回の投稿変更を照合",
       "engagement.like":"指定投稿にいいね",
       "engagement.reblog":"指定投稿をリブログ",
       "engagement.follow":"指定ブログをフォロー",
@@ -867,7 +868,8 @@
       const label=document.createElement("span");
       label.textContent=labels[item.action]+"（"+String(item.goal||"目的")+"）";
       wrapper.appendChild(label);
-      if(["tumblr.publish_draft","tumblr.edit_post","tumblr.delete_post"].includes(item.action)){
+      if(["tumblr.publish_draft","tumblr.edit_post","tumblr.delete_post",
+          "tumblr.reconcile_post"].includes(item.action)){
         const browse=document.createElement("button");
         browse.type="button";
         browse.textContent="保存した投稿・下書きを選択";
@@ -1099,7 +1101,16 @@
         if(draft.publish_state==="changing"){
           const state=document.createElement("span");
           state.textContent="前回の変更結果を照合するまで再送しません";
-          controls.appendChild(state);
+          const reconcile=document.createElement("button");
+          reconcile.type="button";
+          reconcile.textContent="投稿結果を再照合";
+          reconcile.addEventListener("click",function(){
+            reconcile.disabled=true;
+            post({selected_action:"tumblr.reconcile_post",
+                  selected_target:draft.id}).then(refreshDrafts)
+              .finally(function(){reconcile.disabled=false;});
+          });
+          controls.append(state,reconcile);
         }
         item.append(text,controls);
         draftList.appendChild(item);
