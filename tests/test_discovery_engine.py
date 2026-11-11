@@ -64,6 +64,58 @@ class DiscoveryEngineTests(unittest.TestCase):
         store=DiscoveryStore(self.root/"discovery.sqlite3")
         self.assertEqual(len(store.read_blogs("following:following")),3)
 
+    def test_followed_blog_posts_become_library_candidates_with_source_and_resume(self):
+        post=lambda i: {"blog_name":"first","id_string":str(i),
+            "post_url":"https://first.tumblr.com/post/"+str(i),
+            "summary":"real candidate","timestamp":2000-i,
+            "content":[{"type":"image","media":[{"url":"https://64.media.tumblr.com/"+str(i)+".jpg"}]}]}
+        first_page=[post(i) for i in range(10)]
+        adapter,stub=self.scanner([
+            envelope({"total_blogs":1,"blogs":[{"name":"first"}]}),
+            envelope({"blog":{"name":"first"},"posts":first_page}),
+            envelope({"blog":{"name":"first"},"posts":[post(20)]}),
+        ])
+        adapter.perform("tumblr.discover","following",{})
+        result=adapter.perform("tumblr.discover","blog:first",{})
+        self.assertEqual(len(result["rows"]),10)
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["cursor"],1991)
+        self.assertIn("/v2/blog/first.tumblr.com/posts?",stub.calls[1])
+        self.assertIn("npf=true",stub.calls[1])
+        from tumblrkit.library import Library
+        listing=Library(DiscoveryStore(self.root/"discovery.sqlite3")).list()
+        self.assertEqual(listing["total"],10)
+        self.assertEqual(listing["items"][0]["blog"],"first")
+        resumed=TumblrReadAdapter("owner",self.token,transport=stub)
+        result=resumed.perform("tumblr.discover","blog:first",{})
+        self.assertTrue(result["complete"])
+        self.assertIn("before=1991",stub.calls[2])
+        self.assertEqual(Library(DiscoveryStore(self.root/"discovery.sqlite3")).list()["total"],11)
+
+    def test_unselected_or_excluded_blog_does_not_fetch_any_posts(self):
+        adapter,stub=self.scanner([envelope({"total_blogs":1,"blogs":[{"name":"first"}]})])
+        adapter.perform("tumblr.discover","following",{})
+        with self.assertRaisesRegex(ValueError,"discovery_blog_not_selected"):
+            adapter.perform("tumblr.discover","blog:other",{})
+        self.assertEqual(len(stub.calls),1)
+        store=DiscoveryStore(self.root/"discovery.sqlite3")
+        store.exclude_blog("first")
+        with self.assertRaisesRegex(ValueError,"discovery_blog_not_selected"):
+            adapter.perform("tumblr.discover","blog:first",{})
+        self.assertEqual(len(stub.calls),1)
+
+    def test_blog_identity_mismatch_never_commits_candidates_or_cursor(self):
+        adapter,stub=self.scanner([
+            envelope({"total_users":1,"users":[{"name":"first"}]}),
+            envelope({"blog":{"name":"other"},"posts":[]}),
+        ])
+        adapter.perform("tumblr.discover","followers",{})
+        with self.assertRaisesRegex(ValueError,"discovery_blog_identity_unverified"):
+            adapter.perform("tumblr.discover","blog:first",{})
+        store=DiscoveryStore(self.root/"discovery.sqlite3")
+        self.assertEqual(store.checkpoint("blog:first")["cursor"],0)
+        self.assertEqual(store.read_candidates(),[])
+
     def test_followers_scope_is_owner_blog_only(self):
         adapter,stub=self.scanner([envelope({
             "total_users":1,"users":[{"name":"reader"}]})])
