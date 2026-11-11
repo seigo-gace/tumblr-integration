@@ -319,22 +319,27 @@ class MediaSave:
         except (ValueError,TypeError,KeyError,IndexError,AttributeError):
             raise MediaError("MEDIA_SELECTION_INVALID") from None
 
-    def list(self,candidate_id=None):
+    def list(self,candidate_id=None,offset=0,limit=100):
+        if (type(offset) is not int or not 0<=offset<=9223372036854775807
+                or type(limit) is not int or not 1<=limit<=100):
+            raise MediaError("MEDIA_HISTORY_PAGE_INVALID")
+        if candidate_id is not None and (not isinstance(candidate_id,str)
+                                         or not IDENT.fullmatch(candidate_id)):
+            raise MediaError("MEDIA_CANDIDATE_INVALID")
+        where=" WHERE candidate_id=?" if candidate_id is not None else ""
+        args=(candidate_id,) if candidate_id is not None else ()
+        fields=("SELECT id,candidate_id,source_post_id,media_index,state,"
+                "error_code,source_bytes,output_bytes,output_name,source_method,"
+                "created_at,updated_at FROM media_save_jobs")
         with closing(self._open()) as db:
-            if candidate_id is None:
-                rows=db.execute("SELECT id,candidate_id,source_post_id,media_index,state,"
-                    "error_code,source_bytes,output_bytes,output_name,source_method,created_at,updated_at"
-                    " FROM media_save_jobs ORDER BY created_at DESC LIMIT 100").fetchall()
-            else:
-                if not isinstance(candidate_id,str) or not IDENT.fullmatch(candidate_id):
-                    raise MediaError("MEDIA_CANDIDATE_INVALID")
-                rows=db.execute("SELECT id,candidate_id,source_post_id,media_index,state,"
-                    "error_code,source_bytes,output_bytes,output_name,source_method,created_at,updated_at"
-                    " FROM media_save_jobs WHERE candidate_id=? ORDER BY created_at DESC LIMIT 100",
-                    (candidate_id,)).fetchall()
+            total=db.execute("SELECT COUNT(*) FROM media_save_jobs"+where,args).fetchone()[0]
+            rows=db.execute(fields+where+" ORDER BY created_at DESC,id DESC "
+                            "LIMIT ? OFFSET ?",args+(limit,offset)).fetchall()
         keys=("id","candidate_id","source_post_id","media_index","state","error_code",
               "source_bytes","output_bytes","output_name","source_method","created_at","updated_at")
-        return {"verified":True,"jobs":[dict(zip(keys,row)) for row in rows]}
+        return {"verified":True,"jobs":[dict(zip(keys,row)) for row in rows],
+                "total":total,"offset":offset,"limit":limit,
+                "has_next":offset+len(rows)<total}
 
     def file(self,job_id):
         if not isinstance(job_id,str) or not KEY.fullmatch(job_id):
