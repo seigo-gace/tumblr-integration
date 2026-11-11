@@ -39,6 +39,11 @@ class AppServeTests(unittest.TestCase):
         self.assertIn(SHA_A, html)
         self.assertNotIn("__TUMBLR_COMMIT__", html)
         self.assertEqual((release / "app.js").read_bytes(), (APP / "app.js").read_bytes())
+        self.assertIn('id="oauth-status"', html)
+        client=(release / "app.js").read_text(encoding="utf-8")
+        self.assertIn('fetch("/oauth/status"', client)
+        self.assertIn("oauthStatus.textContent=", client)
+        self.assertIn('post({message:text})', client)
         meta = json.loads((release / "RELEASE.json").read_text(encoding="utf-8"))
         self.assertEqual(meta["files"]["app.js"], hashlib.sha256((APP / "app.js").read_bytes()).hexdigest())
 
