@@ -45,6 +45,61 @@ class DiscoveryEngineTests(unittest.TestCase):
         stub=FakePages(pages)
         return TumblrReadAdapter("owner",self.token,transport=stub),stub
 
+    def test_more_than_hundred_saved_posts_are_all_reachable_without_provider(self):
+        store=DiscoveryStore(self.root/"discovery.sqlite3")
+        posts=[{
+            "candidate_id":f"first:{i}","blog":"first","post_id":str(i),
+            "url":f"https://first.tumblr.com/post/{i}","title":f"Post {i}",
+            "type":"text","date":"","thumbnail_url":"","text_excerpt":"",
+            "tags":[],"note_count":0,"media_refs":[],
+        } for i in range(135)]
+        store.save_page("tag:many",
+            [{"name":"first","url":"https://first.tumblr.com"}],
+            posts,135,complete=True)
+        adapter,stub=self.scanner([])
+        first=adapter.perform("tumblr.discover","saved:0:tag:many",{})
+        self.assertEqual(first["total"],135)
+        self.assertEqual(len(first["rows"]),100)
+        self.assertEqual(first["stored_next_target"],"saved:100:tag:many")
+        self.assertIsNone(first["stored_prev_target"])
+        second=adapter.perform("tumblr.discover",first["stored_next_target"],{})
+        self.assertEqual(second["total"],135)
+        self.assertEqual(len(second["rows"]),35)
+        self.assertEqual(second["stored_prev_target"],"saved:0:tag:many")
+        self.assertIsNone(second["stored_next_target"])
+        visited={r["candidate_id"] for r in first["rows"]+second["rows"]}
+        self.assertEqual(len(visited),135)
+        self.assertEqual(stub.calls,[])
+        self.assertEqual(store.checkpoint("tag:many")["cursor"],135)
+        store.exclude_blog("first")
+        filtered=adapter.perform("tumblr.discover","saved:0:tag:many",{})
+        self.assertEqual(filtered["total"],0)
+        self.assertEqual(filtered["rows"],[])
+
+    def test_over_hundred_following_blogs_use_local_pages_and_actual_totals(self):
+        store=DiscoveryStore(self.root/"discovery.sqlite3")
+        blogs=[{"name":f"blog{i}","url":f"https://blog{i}.tumblr.com"} for i in range(125)]
+        store.save_page("following:following",blogs,[],125,complete=True)
+        adapter,stub=self.scanner([])
+        first=adapter.perform("tumblr.discover","following",{})
+        self.assertEqual(first["total"],125)
+        self.assertEqual(len(first["rows"]),100)
+        second=adapter.perform("tumblr.discover","saved:100:following:following",{})
+        self.assertEqual(second["total"],125)
+        self.assertEqual(len(second["rows"]),25)
+        self.assertEqual(len({r["blog"] for r in first["rows"]+second["rows"]}),125)
+        self.assertEqual(stub.calls,[])
+
+    def test_saved_page_guards_reject_invalid_offset_without_provider_calls(self):
+        adapter,stub=self.scanner([])
+        for target in ("saved:-100:tag:focus","saved:1:tag:focus",
+                       "saved:0100:tag:focus","saved:100:notreal:target",
+                       "saved:999999999999:tag:focus"):
+            with self.subTest(target=target):
+                with self.assertRaises(ValueError):
+                    adapter.perform("tumblr.discover",target,{})
+        self.assertEqual(stub.calls,[])
+
     def test_following_pagination_persists_across_restart_and_dedupes(self):
         page1=envelope({"total_blogs":11,"blogs":[
             {"name":"first"},{"name":"second"},{"name":"second"}]})
