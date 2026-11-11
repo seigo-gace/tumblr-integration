@@ -31,11 +31,13 @@ class DiscoveryEngine:
             return "following","following"
         if target in ("followers","フォロワー"):
             return "followers","followers"
-        if target.startswith("tag:") or target.startswith("related:"):
+        if target.startswith(("tag:","related:","blog:")):
             mode,term=target.split(":",1)
         else:
             mode,term="tag",target
         term=term.strip()
+        if mode=="blog":
+            return mode,normalize_blog(term)
         if not term or len(term)>64 or TAG_INVALID.search(term):
             raise ValueError("discovery_tag_invalid")
         return mode,term
@@ -126,6 +128,12 @@ class DiscoveryEngine:
             return self._result(source,mode,checkpoint,from_cache=True)
         # The old cursor remains committed on network/permission/rate failure.
         offset=0 if refresh else checkpoint["cursor"]
+        if mode=="blog":
+            # The owner must have explicitly discovered this blog in a
+            # following/followers source, not typed an arbitrary target.
+            linked=self.store.read_blogs(limit=100)
+            if term not in {item["name"] for item in linked}:
+                raise ValueError("discovery_blog_not_selected")
         if mode=="following":
             if offset>100000: raise ValueError("discovery_cursor_invalid")
             path="/v2/user/following?"+urlencode({"limit":SOURCE_LIMIT,"offset":offset})
@@ -133,6 +141,10 @@ class DiscoveryEngine:
             if offset>100000: raise ValueError("discovery_cursor_invalid")
             path="/v2/blog/"+self.blog+".tumblr.com/followers?"+urlencode({
                 "limit":SOURCE_LIMIT,"offset":offset})
+        elif mode=="blog":
+            args={"limit":SOURCE_LIMIT,"npf":"true"}
+            if offset>0: args["before"]=offset
+            path="/v2/blog/"+term+".tumblr.com/posts?"+urlencode(args)
         else:
             args={"tag":term,"limit":SOURCE_LIMIT,"filter":"text"}
             if offset>0: args["before"]=offset
@@ -169,12 +181,21 @@ class DiscoveryEngine:
             self.store.save_page(source,list(unique.values()),[],next_cursor,
                                  complete=complete,watermark=str(count))
         else:
+            if mode=="blog":
+                if not isinstance(payload,dict):
+                    raise ValueError("discovery_response_unverified")
+                blog_info=payload.get("blog")
+                if not isinstance(blog_info,dict) or normalize_blog(blog_info.get("name",""))!=term:
+                    raise ValueError("discovery_blog_identity_unverified")
+                payload=payload.get("posts")
             if not isinstance(payload,list) or len(payload)>SOURCE_LIMIT:
                 raise ValueError("discovery_response_unverified")
             blocked=self.store.excluded_blogs()
             unique={}
             for item in payload[:SOURCE_LIMIT]:
                 post=self._post(item,blocked)
+                if mode=="blog" and post and post["blog"]!=term:
+                    raise ValueError("discovery_blog_post_mismatch")
                 if post: unique[post["candidate_id"]]=post
             timestamps=[]
             for item in payload[:SOURCE_LIMIT]:
