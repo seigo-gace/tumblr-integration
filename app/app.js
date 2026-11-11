@@ -669,7 +669,28 @@
       "tumblr.publish_draft":"下書きの公開を確認",
       "analytics.get_summary":"集計を確認",
     };
-    plan.recommendations.slice(0,3).forEach(function(item){
+    let visibleStart=0;
+    const actions=document.createElement("div");
+    section.appendChild(actions);
+    const pager=document.createElement("div");
+    pager.className="draft-actions";
+    const previous=document.createElement("button");
+    previous.type="button";
+    previous.textContent="前の候補";
+    const next=document.createElement("button");
+    next.type="button";
+    next.textContent="次の候補";
+    const count=document.createElement("span");
+    pager.append(previous,count,next);
+    const renderActions=function(){
+      actions.replaceChildren();
+      previous.disabled=visibleStart===0;
+      next.disabled=visibleStart+3>=plan.recommendations.length;
+      count.textContent=plan.recommendations.length
+        ? (visibleStart+1)+"～"+Math.min(visibleStart+3,plan.recommendations.length)+
+          " / "+plan.recommendations.length+"件"
+        : "";
+      plan.recommendations.slice(visibleStart,visibleStart+3).forEach(function(item){
       if(!item||typeof item.action!=="string"||
          !Object.prototype.hasOwnProperty.call(labels,item.action))return;
       const wrapper=document.createElement("div");
@@ -693,8 +714,17 @@
         post({selected_action:item.action,selected_target:target}).finally(function(){submit.disabled=false;});
       });
       wrapper.appendChild(submit);
-      section.appendChild(wrapper);
+      actions.appendChild(wrapper);
+      });
+    };
+    previous.addEventListener("click",function(){
+      visibleStart=Math.max(0,visibleStart-3);renderActions();
     });
+    next.addEventListener("click",function(){
+      if(visibleStart+3<plan.recommendations.length){visibleStart+=3;renderActions();}
+    });
+    renderActions();
+    if(plan.recommendations.length>3)section.appendChild(pager);
     if(Array.isArray(plan.not_connected_goals)&&plan.not_connected_goals.length){
       const note=document.createElement("p");
       note.textContent="未接続の目的："+plan.not_connected_goals.join("・")+"。実装済みとは表示しません。";
