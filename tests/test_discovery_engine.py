@@ -468,10 +468,14 @@ class DiscoveryEngineTests(unittest.TestCase):
         adapter,stub=self.scanner([envelope([item])])
         result=adapter.perform("tumblr.discover","related:focus",{})
         self.assertEqual(result["total"],1)
-        self.assertEqual(len(result["related_tags"]),8)
+        self.assertEqual(len(result["related_tags"]),45)
         stored=DiscoveryStore(self.root/"discovery.sqlite3").read_candidates()[0]
         self.assertEqual(stored["url"],"https://first.tumblr.com/post/880")
         self.assertEqual(loads(stored["tags_json"]),tags)
+        from tumblrkit.assistant import Assistant
+        view=Assistant._result_view("tumblr.discover",result)
+        self.assertEqual(len(view["related_tags"]),45)
+        self.assertEqual(view["related_tags"][-1]["target"],"tag:topic-9")
         self.assertEqual(len(stub.calls),1)
 
     def test_malformed_unblocked_candidate_must_not_advance_cursor_or_disappear(self):
