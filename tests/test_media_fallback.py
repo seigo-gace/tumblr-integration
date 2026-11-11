@@ -73,7 +73,7 @@ class MediaFallbackTests(unittest.TestCase):
         self.assertEqual(candidate["media_refs"][0]["type"],"image")
 
     def test_many_npf_renditions_are_preserved_without_silent_50_ref_drop(self):
-        from tumblrkit.tumblr_read import discovery_media_refs,MAX_DISCOVERY_MEDIA_REFS
+        from tumblrkit.tumblr_read import discovery_media_refs,MAX_REPLY
         blocks=[]
         for image in range(25):
             blocks.append({"type":"image","media":[
@@ -82,12 +82,16 @@ class MediaFallbackTests(unittest.TestCase):
         refs=discovery_media_refs({"content":blocks})
         self.assertEqual(len(refs),100)
         self.assertEqual(refs[99]["url"],"https://64.media.tumblr.com/24-3.jpg")
-        self.assertGreater(MAX_DISCOVERY_MEDIA_REFS,100)
-        overflow={"content":[{"type":"image","media":[
+        # The official network response is bounded by MAX_REPLY bytes, not
+        # by a fabricated per-post count. Every safe URL in that response
+        # must remain eligible, including references beyond old position 512.
+        self.assertGreater(MAX_REPLY,500000)
+        many={"content":[{"type":"image","media":[
             {"url":f"https://64.media.tumblr.com/p-{index}.jpg"}
-            for index in range(MAX_DISCOVERY_MEDIA_REFS+1)]}]}
-        with self.assertRaisesRegex(ValueError,"discovery_media_refs_limit_exceeded"):
-            discovery_media_refs(overflow)
+            for index in range(700)]}]}
+        refs=discovery_media_refs(many)
+        self.assertEqual(len(refs),700)
+        self.assertEqual(refs[699]["url"],"https://64.media.tumblr.com/p-699.jpg")
 
     def test_video_selection_above_previous_index_49_remains_available(self):
         self.add_post(False)
@@ -105,6 +109,25 @@ class MediaFallbackTests(unittest.TestCase):
         with self.store._open() as db:
             with self.assertRaisesRegex(MediaError,"MEDIA_INDEX_INVALID"):
                 self.worker()._candidate(db,"one:123",len(refs)+500)
+
+    def test_media_after_old_512_limit_remains_selectable(self):
+        from tumblrkit.tumblr_read import discovery_media_refs
+        import json
+        refs=discovery_media_refs({"content":[{
+            "type":"video",
+            "media":[{"url":f"https://64.media.tumblr.com/clip-{i}.mp4"}
+                     for i in range(540)]
+        }]})
+        self.assertEqual(len(refs),540)
+        self.add_post(False)
+        with self.store._open() as db:
+            db.execute("UPDATE discovery_posts SET media_json=? WHERE candidate_id=?",
+                       (json.dumps(refs),"one:123"))
+            chosen=self.worker()._candidate(db,"one:123",539)
+        self.assertEqual(chosen[1],"https://64.media.tumblr.com/clip-539.mp4")
+        with self.store._open() as db:
+            with self.assertRaisesRegex(MediaError,"MEDIA_SELECTION_INVALID"):
+                self.worker()._candidate(db,"one:123",540)
 
     def test_legacy_tumblr_video_url_is_preserved_as_video(self):
         from tumblrkit.tumblr_read import discovery_media_refs
