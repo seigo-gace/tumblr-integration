@@ -65,6 +65,10 @@ class OfficialTransport:
                 raise ValueError("tumblr_rate_limited") from None
             if exc.code == 404:
                 raise ValueError("tumblr_post_unavailable") from None
+            if exc.code == 401:
+                raise ValueError("tumblr_auth_expired") from None
+            if exc.code == 403:
+                raise ValueError("tumblr_permission_denied") from None
             raise ValueError("tumblr_unavailable") from None
         except (URLError, OSError, TimeoutError):
             raise ValueError("tumblr_unavailable") from None
