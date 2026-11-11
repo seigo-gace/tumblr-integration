@@ -85,6 +85,14 @@ class PublisherAdapter:
             db.execute(PUBLISH_SCHEMA)
             db.execute("BEGIN IMMEDIATE")
             try:
+                # Atomically bind the approval to the actual draft bytes
+                # before reserving the receipt. DraftStore.update uses the
+                # same BEGIN IMMEDIATE lock, so edits cannot sneak in between
+                # final verification and external posting.
+                original=db.execute("SELECT text FROM operation_drafts WHERE id=?",
+                                    (draft_id,)).fetchone()
+                if not original or hashlib.sha256(original[0].encode("utf-8")).hexdigest()!=digest:
+                    raise ValueError("tumblr_publish_draft_changed")
                 row=db.execute("SELECT digest,state,post_id FROM tumblr_publish_receipts "
                                "WHERE draft_id=?",(draft_id,)).fetchone()
                 if not row:
@@ -97,7 +105,7 @@ class PublisherAdapter:
                         raise ValueError("tumblr_publish_draft_changed")
                     state,post_id=row[1],row[2]
                 db.commit()
-                return state,post_id
+                return state,post_id,original[0]
             except Exception:
                 db.rollback()
                 raise
@@ -149,13 +157,21 @@ class PublisherAdapter:
     def perform(self,action,target,payload):
         if action!="tumblr.publish_draft":
             raise ValueError("tumblr_publish_action_invalid")
-        if payload not in ({},None):
+        if payload is None:
+            payload={}
+        if not isinstance(payload,dict) or set(payload)-{"expected_digest"}:
+            raise ValueError("tumblr_publish_payload_unsupported")
+        approved_digest=payload.get("expected_digest")
+        if approved_digest is not None and (not isinstance(approved_digest,str)
+                or not re.fullmatch(r"[0-9a-f]{64}",approved_digest)):
             raise ValueError("tumblr_publish_payload_unsupported")
         draft=self.drafts.get(target)
         content=draft["text"]
         if not content or len(content)>2000:
             raise ValueError("tumblr_publish_text_invalid")
         digest=hashlib.sha256(content.encode("utf-8")).hexdigest()
+        if approved_digest is not None and approved_digest!=digest:
+            raise ValueError("tumblr_publish_draft_changed")
         # Reserve for both official calls up front, even if a later response
         # fails. The safe durable state is committed before any POST attempt.
         with closing(self.drafts._connect()) as db:
@@ -164,7 +180,7 @@ class PublisherAdapter:
                                 "WHERE draft_id=?",(target,)).fetchone()
         self.budget.reserve(1 if existing else 2)
         bearer=self.token_provider()
-        state,post_id=self._claim(target,digest)
+        state,post_id,content=self._claim(target,digest)
         if state=="reserved":
             raise ValueError("tumblr_publish_reconcile_required")
         if state=="reserved_new":
