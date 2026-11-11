@@ -701,24 +701,41 @@
         empty.textContent="関連タグは確認できませんでした。推測で追加しません。";
         section.appendChild(empty);
       }
-      view.related_tags.slice(0,8).forEach(function(item){
-        if(!item||typeof item.tag!=="string"||
-           !Number.isInteger(item.count)||item.count<1||
-           item.target!=="tag:"+item.tag||item.tag.length>64)return;
-        const button=document.createElement("button");
-        button.type="button";
-        button.className="discovery-next";
-        button.textContent="#"+item.tag+" ("+item.count+"件)";
-        button.setAttribute("aria-label","関連タグ "+item.tag+" の公開投稿を取得");
-        button.addEventListener("click",function(){
-          if(!window.confirm("関連タグの公開投稿をTumblr公式APIから1ページ取得しますか？"))return;
-          button.disabled=true;
-          const text="検索して 対象: "+item.target;
-          lastText=text;display(text,"user");
-          post({message:text}).finally(function(){button.disabled=false;});
-        });
-        section.appendChild(button);
-      });
+      // Keep the view compact without hiding the ninth or later real tag.
+      // "さらに表示" only reveals already verified local results; no API call.
+      const tagList=document.createElement("div");
+      section.appendChild(tagList);
+      let shown=0;
+      const more=document.createElement("button");
+      more.type="button";
+      more.className="discovery-next";
+      more.textContent="関連タグをさらに表示";
+      function showMoreRelated(){
+        const until=Math.min(shown+8,view.related_tags.length);
+        for(;shown<until;shown++){
+          const item=view.related_tags[shown];
+          if(!item||typeof item.tag!=="string"||
+             !Number.isInteger(item.count)||item.count<1||
+             item.target!=="tag:"+item.tag||item.tag.length>64)continue;
+          const button=document.createElement("button");
+          button.type="button";
+          button.className="discovery-next";
+          button.textContent="#"+item.tag+" ("+item.count+"件)";
+          button.setAttribute("aria-label","関連タグ "+item.tag+" の公開投稿を取得");
+          button.addEventListener("click",function(){
+            if(!window.confirm("関連タグの公開投稿をTumblr公式APIから1ページ取得しますか？"))return;
+            button.disabled=true;
+            const text="検索して 対象: "+item.target;
+            lastText=text;display(text,"user");
+            post({message:text}).finally(function(){button.disabled=false;});
+          });
+          tagList.appendChild(button);
+        }
+        more.hidden=shown>=view.related_tags.length;
+      }
+      more.addEventListener("click",showMoreRelated);
+      showMoreRelated();
+      if(!more.hidden)section.appendChild(more);
     }
     if(view.action==="tumblr.list_posts"&&Number.isInteger(view.page_offset)){
       const line=document.createElement("p");
