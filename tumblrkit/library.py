@@ -92,6 +92,11 @@ class Library:
             rows=db.execute(select+join+where+" ORDER BY p.last_seen DESC,p.candidate_id ASC LIMIT ? OFFSET ?",
                             (limit,offset)).fetchall()
             session=db.execute("SELECT candidate_id,media_index FROM library_session WHERE key='last'").fetchone()
+        records=self._decode_records(rows)
+        return records
+
+    @staticmethod
+    def _decode_records(rows):
         records=[]
         for candidate,blog,post_id,title,url,kind,date,media_json,thumbnail,state,seen,fav,later,index in rows:
             try:
@@ -107,6 +112,34 @@ class Library:
         return {"verified":True,"items":records,"total":count,"offset":offset,"limit":limit,
                 "filter":filter_name,"last_position":{"candidate_id":session[0],"media_index":session[1]} if session else None,
                 "resume_item":self.resume_item() if session else None}
+
+    def selected(self,candidate_ids):
+        """Resolve the owner's exact cross-page selections in one private DB.
+
+        Bounded request batches are a transport detail, not a limit on how
+        many Library pages the user may select across.
+        """
+        if not isinstance(candidate_ids,list) or not 1<=len(candidate_ids)<=100:
+            raise ValueError("library_selection_invalid")
+        ids=[self._id(ident) for ident in candidate_ids]
+        if len(set(ids))!=len(ids):
+            raise ValueError("library_duplicate_ids")
+        select=("SELECT p.candidate_id,p.blog,p.post_id,p.title,p.url,p.post_type,"
+                "p.posted_at,p.media_json,p.thumbnail_url,p.state,"
+                "COALESCE(s.seen,0),COALESCE(s.favorite,0),COALESCE(s.watch_later,0),"
+                "COALESCE(s.last_media_index,0) ")
+        placeholders=",".join("?" for _ in ids)
+        with closing(self._open()) as db:
+            rows=db.execute(select+
+                "FROM discovery_posts p LEFT JOIN discovery_blogs b ON b.name=p.blog "
+                "LEFT JOIN library_state s ON s.candidate_id=p.candidate_id "
+                "WHERE p.candidate_id IN ("+placeholders+") AND p.state='visible' "
+                "AND COALESCE(b.blocked,0)=0",ids).fetchall()
+        records={item["candidate_id"]:item for item in self._decode_records(rows)}
+        if len(records)!=len(ids):
+            raise ValueError("library_candidate_unavailable")
+        return {"verified":True,"items":[records[ident] for ident in ids],
+                "total":len(ids)}
 
     def resume_item(self):
         """Resolve the previously viewed candidate by stable ID, independent of pagination."""
