@@ -118,6 +118,24 @@ class DiscoveryEngineTests(unittest.TestCase):
         self.assertIn("offset=20",stub.calls[3])
         self.assertEqual(len(DiscoveryStore(self.root/"discovery.sqlite3").read_candidates()),20)
 
+    def test_blog_offset_can_page_without_timestamps(self):
+        records=[{"blog_name":"first","id_string":str(i),
+                  "post_url":"https://first.tumblr.com/post/"+str(i)}
+                 for i in range(20,30)]
+        adapter,stub=self.scanner([
+            envelope({"total_blogs":1,"blogs":[{"name":"first"}]}),
+            envelope({"blog":{"name":"first"},"posts":records}),
+            envelope({"blog":{"name":"first"},"posts":[]}),
+        ])
+        adapter.perform("tumblr.discover","following",{})
+        page=adapter.perform("tumblr.discover","blog:first",{})
+        self.assertEqual(page["cursor"],10)
+        self.assertFalse(page["complete"])
+        self.assertEqual(len(DiscoveryStore(self.root/"discovery.sqlite3").read_candidates()),10)
+        page=adapter.perform("tumblr.discover","blog:first",{})
+        self.assertTrue(page["complete"])
+        self.assertIn("offset=10",stub.calls[2])
+
     def test_legacy_timestamp_checkpoint_is_preserved_not_reinterpreted(self):
         store=DiscoveryStore(self.root/"discovery.sqlite3")
         store.save_page("following:following",[{"name":"first","url":"https://first.tumblr.com"}],[],1,True)
