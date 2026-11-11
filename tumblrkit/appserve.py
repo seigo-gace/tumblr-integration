@@ -53,7 +53,7 @@ def _owner_tumblr_adapter(owner_oauth,blog,release):
     from tumblrkit.publisher_runtime import PublisherAdapter
     draft_path=Path(release).resolve().parent.parent / "data" / "drafts.sqlite3"
     reader.publisher=PublisherAdapter(
-        blog,DraftStore(draft_path),owner_oauth.refresh_if_needed,
+        blog,DraftStore(draft_path),owner_oauth.publish_access_token,
         read_transport=reader.transport,budget=reader.transport.budget)
     return reader
 
