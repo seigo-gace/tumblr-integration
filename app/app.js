@@ -108,16 +108,17 @@
   }
   async function libraryView(item,index){
     if(!item||!Array.isArray(item.media)||!item.media.length)return;
-    const media=item.media.filter(function(m){return libraryMedia(m.url);});
+    const media=item.media.map(function(entry,originalIndex){return {entry,originalIndex};})
+      .filter(function(m){return libraryMedia(m.entry.url);});
     if(!media.length)return;
     const section=document.createElement("section");section.className="library-viewer";
     const heading=document.createElement("h3");heading.textContent=item.title||"投稿のメディア";
     const body=document.createElement("div");body.className="library-viewer-media";
     const toolbar=document.createElement("div");toolbar.className="library-viewer-tools";
-    let cursor=Math.max(0,Math.min(index||0,media.length-1));
+    let cursor=Math.max(0,media.findIndex(function(m){return m.originalIndex===(index||0);}));
     async function render(){
       body.replaceChildren();
-      const entry=media[cursor];
+      const entry=media[cursor].entry;
       const source=libraryMedia(entry.url);
       if(entry.type==="image"){
         const img=document.createElement("img");img.src=source;img.alt="投稿内の画像";img.loading="lazy";
@@ -134,7 +135,7 @@
       save.hidden=entry.type!=="video";
       position.textContent=(cursor+1)+" / "+media.length;
       try{
-        const saved=await libraryRequest("/library/progress",{candidate_id:item.candidate_id,media_index:cursor});
+        const saved=await libraryRequest("/library/progress",{candidate_id:item.candidate_id,media_index:media[cursor].originalIndex});
         if(saved.verified!==true)throw new Error("not_saved");
       }catch(error){display("閲覧位置を保存できませんでした。","system");}
     }
@@ -146,7 +147,7 @@
     next.addEventListener("click",function(){cursor=(cursor+1)%media.length;render();});
     close.addEventListener("click",function(){section.remove();});
     const save=document.createElement("button");save.type="button";save.textContent="MP4保存";
-    save.addEventListener("click",function(){mediaSave(item,cursor,save);});
+    save.addEventListener("click",function(){mediaSave(item,media[cursor].originalIndex,save);});
     toolbar.append(prev,position,next,save,close);section.append(heading,body,toolbar);
     messages.appendChild(section);messages.scrollTop=messages.scrollHeight;
     await render();
