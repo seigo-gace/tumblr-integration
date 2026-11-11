@@ -175,7 +175,17 @@ class TumblrReadAdapter:
             return self._discover(target, payload)
         if action != "tumblr.list_posts":
             raise ValueError("read_action_not_connected")
-        if normalize_blog(target) != self.blog:
+        # Explicit page targets are bound to *this* verified owner only.
+        # Do not accept arbitrary remote blogs, offsets with leading zero,
+        # or invisible page-1-only success reports.
+        offset=0
+        if isinstance(target,str) and target.startswith("posts:"):
+            raw=target[6:]
+            if (not re.fullmatch(r"(0|[1-9][0-9]{0,13})",raw)
+                    or int(raw)%20):
+                raise ValueError("tumblr_posts_offset_invalid")
+            offset=int(raw)
+        elif normalize_blog(target)!=self.blog:
             raise ValueError("non_owner_blog")
         if isinstance(self.transport, OfficialTransport):
             self.transport.budget.reserve(2)
@@ -188,19 +198,24 @@ class TumblrReadAdapter:
             for blog in blogs
         ):
             raise ValueError("oauth_owner_not_verified")
-        path = "/v2/blog/" + quote(self.blog + ".tumblr.com", safe="") + "/posts?npf=true&limit=20"
+        path = ("/v2/blog/" + quote(self.blog + ".tumblr.com", safe="") +
+                "/posts?npf=true&limit=20&offset="+str(offset))
         response = self.transport.get(path, bearer)
         if not isinstance(response, dict) or response.get("meta", {}).get("status") != 200:
             raise ValueError("tumblr_posts_unverified")
         data = response.get("response")
         posts = data.get("posts") if isinstance(data, dict) else None
         blog_info = data.get("blog") if isinstance(data, dict) else None
-        if not isinstance(posts, list) or not isinstance(blog_info, dict) or normalize_blog(blog_info.get("name", "")) != self.blog:
+        if (not isinstance(posts,list) or len(posts)>20
+                or not isinstance(blog_info,dict)
+                or normalize_blog(blog_info.get("name",""))!=self.blog):
             raise ValueError("tumblr_posts_unverified")
-        rows = []
-        for item in posts[:20]:
-            if not isinstance(item, dict):
-                continue
+        raw_total=data.get("total_posts")
+        total=raw_total if type(raw_total) is int and raw_total>=0 else None
+        rows=[]
+        for item in posts:
+            if not isinstance(item,dict):
+                raise ValueError("tumblr_posts_unverified")
             raw_url = item.get("post_url")
             url = raw_url if isinstance(raw_url, str) and raw_url.startswith("https://") else ""
             name = item.get("summary") or item.get("title") or "(タイトルなし)"
@@ -212,7 +227,14 @@ class TumblrReadAdapter:
                 "thumbnail_url": thumbnail,
                 "url": url[:500],
             })
-        return {"verified": True, "rows": rows, "total": len(posts)}
+        # Count comes from the official API; unknown is not quietly
+        # misreported as the first page length. Next only when present.
+        has_next=(offset+len(posts)<total) if total is not None else len(posts)==20
+        return {"verified":True,"rows":rows,"total":total,
+                "page_offset":offset,"page_size":len(rows),
+                "next_target":"posts:"+str(offset+20) if has_next and posts else None,
+                "prev_target":"posts:"+str(max(0,offset-20)) if offset else None,
+                "owner_blog":self.blog}
 
 
     def _discover(self, tag, payload):
