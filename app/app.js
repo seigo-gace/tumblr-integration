@@ -16,12 +16,18 @@
       const state=await response.json();
       if(state.connected!==true){
         oauthStatus.textContent="Tumblr：未連携";
+        connect.textContent="Tumblr連携";
+        connect.title="本人のTumblrアカウントを連携";
         return;
       }
       if(state.can_publish!==true){
-        oauthStatus.textContent="Tumblr：閲覧連携中。投稿にはTumblr連携から投稿権限の承諾が必要です";
+        oauthStatus.textContent="Tumblr：閲覧連携中。投稿権限の本人承諾が必要です";
+        connect.textContent="投稿権限を追加";
+        connect.title="Tumblr公式の認可画面で投稿権限を承諾";
         return;
       }
+      connect.textContent="Tumblr再連携";
+      connect.title="Tumblrの認可を更新";
       const expires=Number(state.expires_at);
       const expiry=Number.isFinite(expires)&&expires>0;
       if(expiry&&expires<=Date.now()/1000){
