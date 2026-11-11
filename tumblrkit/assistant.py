@@ -295,7 +295,7 @@ class Assistant:
         except ProviderError as exc:
             return self._pack(exc.code, self._failure_text(exc.code) + omitted, False, recovery=True)
         if plan is None:
-            if goals and len(local)!=1:
+            if goals:
                 return self._goal_guidance(goals)
             return self._local(local, cleaned, omitted)
         if not isinstance(plan, dict):
@@ -317,7 +317,10 @@ class Assistant:
                 return response
             return self._pack("unclear", "目的をもう少し詳しく教えてください。実行していません。" + omitted,
                               False, recovery=True, provider=provider_name)
-        return self._propose(action, target, cleaned, omitted, question, provider_name, ai=True)
+        response=self._propose(action, target, cleaned, omitted, question, provider_name, ai=True)
+        if goals:
+            response["plan"]=self._goal_plan(goals)
+        return response
 
     def _ask(self, cleaned, goals=None):
         providers = _order(cleaned, self._available())
