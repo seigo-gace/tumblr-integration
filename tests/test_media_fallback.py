@@ -62,6 +62,24 @@ class MediaFallbackTests(unittest.TestCase):
         return MediaSave(self.store,self.media,downloader or MissingDirect(),
                          DummyConverter(),extractor or DummyFallback())
 
+    def test_discovery_detects_npf_video_without_direct_media_url(self):
+        from tumblrkit.discovery import DiscoveryEngine
+        post={"blog_name":"one","id_string":"123",
+              "post_url":"https://one.tumblr.com/post/123",
+              "type":"text","summary":"video embedded",
+              "content":[{"type":"video","poster":[{"url":"https://64.media.tumblr.com/poster.jpg"}]}]}
+        candidate=DiscoveryEngine._post(post,set())
+        self.assertEqual(candidate["type"],"video")
+        self.assertEqual(candidate["media_refs"][0]["type"],"image")
+
+    def test_legacy_tumblr_video_url_is_preserved_as_video(self):
+        from tumblrkit.tumblr_read import discovery_media_refs
+        post={"video_url":"https://64.media.tumblr.com/legacy.mp4",
+              "thumbnail_url":"https://64.media.tumblr.com/poster.jpg"}
+        self.assertEqual(discovery_media_refs(post),[
+            {"url":"https://64.media.tumblr.com/legacy.mp4","type":"video"},
+            {"url":"https://64.media.tumblr.com/poster.jpg","type":"image"}])
+
     def test_without_direct_url_uses_verified_post_gallery_method(self):
         self.add_post(False)
         extractor=DummyFallback()
