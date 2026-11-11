@@ -518,6 +518,19 @@ class Assistant:
                   "status": "connected", "columns": list(columns), "rows": safe_rows,
                   "total": len(rows), "truncated": len(rows) > 100}
         if action == "tumblr.discover":
+            stored_total=detail.get("stored_total")
+            stored_offset=detail.get("stored_offset")
+            if (type(stored_total) is int and stored_total>=0
+                    and type(stored_offset) is int and stored_offset>=0):
+                result["stored_total"]=stored_total
+                result["stored_offset"]=stored_offset
+                # Existing bounded view is a page, not the whole data set.
+                result["total"]=stored_total
+                result["truncated"]=False
+            for key in ("stored_next_target","stored_prev_target"):
+                link=detail.get(key)
+                if isinstance(link,str) and len(link)<=150 and link.startswith("saved:"):
+                    result[key]=link
             target = detail.get("next_target")
             if isinstance(target,str) and 0 < len(target) <= 100:
                 result["next_target"] = target
