@@ -53,6 +53,76 @@ class TumblrReadTests(unittest.TestCase):
         self.assertEqual(2, len(transport.calls))
         self.assertEqual("/v2/user/info", transport.calls[0])
 
+    def test_all_owner_posts_are_reachable_with_explicit_pages(self):
+        from urllib.parse import parse_qs,urlsplit
+        class Pages(StubTransport):
+            def get(self,path,bearer):
+                if path=="/v2/user/info":
+                    return super().get(path,bearer)
+                self.calls.append(path)
+                query=parse_qs(urlsplit(path).query)
+                offset=int(query["offset"][0])
+                posts=[{"summary":f"Post {i}","type":"text",
+                        "date":"2026-11-11",
+                        "post_url":f"https://myblog.tumblr.com/post/{i}"} for i in
+                       range(offset,min(offset+20,46))]
+                return {"meta":{"status":200},"response":{
+                    "blog":{"name":"myblog"},"posts":posts,"total_posts":46}}
+        transport=Pages()
+        assistant=Assistant(bridge=Bridge({"tumblr":TumblrReadAdapter(
+            "myblog",str(self.token),transport=transport)}),providers=[])
+        first=assistant.turn(selected_action="tumblr.list_posts",
+                             selected_target="myblog")
+        self.assertEqual(first["state"],"completed")
+        self.assertEqual(first["view"]["total"],46)
+        self.assertTrue(first["view"]["total_verified"])
+        self.assertEqual(len(first["view"]["rows"]),20)
+        self.assertEqual(first["view"]["next_target"],"posts:20")
+        second=assistant.turn(selected_action="tumblr.list_posts",
+                              selected_target=first["view"]["next_target"])
+        self.assertEqual(len(second["view"]["rows"]),20)
+        self.assertEqual(second["view"]["prev_target"],"posts:0")
+        third=assistant.turn(selected_action="tumblr.list_posts",
+                             selected_target=second["view"]["next_target"])
+        self.assertEqual(len(third["view"]["rows"]),6)
+        self.assertEqual(third["view"]["total"],46)
+        self.assertNotIn("next_target",third["view"])
+        self.assertEqual(len({row["url"] for page in (first,second,third)
+                              for row in page["view"]["rows"]}),46)
+        self.assertEqual(len(transport.calls),6)
+        self.assertTrue(all(path=="/v2/user/info" or
+                            path.startswith("/v2/blog/myblog.tumblr.com/posts?")
+                            for path in transport.calls))
+
+    def test_owner_posts_not_misreported_as_complete_when_total_missing(self):
+        class UnknownTotal(StubTransport):
+            def get(self,path,bearer):
+                if path=="/v2/user/info":
+                    return super().get(path,bearer)
+                self.calls.append(path)
+                return {"meta":{"status":200},"response":{
+                    "blog":{"name":"myblog"},"posts":[
+                        {"summary":str(i),"post_url":f"https://myblog.tumblr.com/post/{i}"}
+                        for i in range(20)]}}
+        assistant=Assistant(bridge=Bridge({"tumblr":TumblrReadAdapter(
+            "myblog",str(self.token),transport=UnknownTotal())}),providers=[])
+        result=assistant.turn(selected_action="tumblr.list_posts",
+                              selected_target="myblog")
+        self.assertEqual(result["state"],"completed")
+        self.assertIsNone(result["view"]["total"])
+        self.assertFalse(result["view"]["total_verified"])
+        self.assertEqual(result["view"]["next_target"],"posts:20")
+
+    def test_invalid_owner_post_page_or_out_of_owner_scope_never_calls_api(self):
+        transport=StubTransport()
+        adapter=TumblrReadAdapter("myblog",str(self.token),transport=transport)
+        for target in ("posts:-20","posts:21","posts:020","posts:abc",
+                       "posts:1000000000000000","another"):
+            with self.subTest(target=target):
+                with self.assertRaises(ValueError):
+                    adapter.perform("tumblr.list_posts",target,{})
+        self.assertEqual(transport.calls,[])
+
     def test_other_blog_and_unverified_owner_fail_closed(self):
         transport = StubTransport()
         reader = TumblrReadAdapter("myblog", str(self.token), transport=transport)
