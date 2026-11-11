@@ -256,10 +256,40 @@ class DiscoveryEngine:
             rows=[{"blog":p["blog"],"candidate_id":p["candidate_id"],"title":p["title"],"type":p["type"],"date":p["date"],
                    "thumbnail_url":p["thumbnail_url"],"url":p["url"]} for p in posts]
         next_target = mode if mode in ("following","followers") else source
-        return {"verified":True,"rows":rows,"total":len(rows),
+        result={"verified":True,"rows":rows,"total":len(rows),
                 "source":source,"cursor":checkpoint["cursor"],
                 "next_target":next_target,
                 "complete":checkpoint["complete"],"from_cache":from_cache}
+        if mode=="related":
+            # Related discovery is not a second /tagged alias. Rank only
+            # distinct co-occurring tags actually found in saved official
+            # posts. No inferred identities or automatic followup requests.
+            import json
+            from collections import Counter
+            counter=Counter()
+            for post in posts:
+                try:
+                    found=json.loads(post["tags_json"])
+                except (ValueError,TypeError):
+                    continue
+                if not isinstance(found,list):
+                    continue
+                distinct=set()
+                for tag in found:
+                    if not isinstance(tag,str):
+                        continue
+                    candidate=tag.strip()
+                    if (not candidate or len(candidate)>64 or TAG_INVALID.search(candidate)
+                            or candidate.casefold()==source[8:].casefold()):
+                        continue
+                    distinct.add(candidate)
+                counter.update(distinct)
+            result["related_tags"]=[
+                {"tag":tag,"count":count,"target":"tag:"+tag}
+                for tag,count in sorted(counter.items(),key=lambda item:(-item[1],item[0]))[:8]
+            ]
+            result["related_basis"]="observed_cooccurring_tags"
+        return result
 
     def recheck_candidate(self,candidate_id):
         """Explicit one-post inspection only; never periodic availability probing.
