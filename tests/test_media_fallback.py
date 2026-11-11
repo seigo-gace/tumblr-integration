@@ -104,6 +104,17 @@ class MediaFallbackTests(unittest.TestCase):
         self.assertEqual(result["method"],"gallery-dl")
         self.assertEqual(extractor.calls,[("https://one.tumblr.com/post/123","one","123")])
 
+    def test_invalid_video_source_must_not_bypass_url_guard(self):
+        self.add_post(False)
+        with self.store._open() as db:
+            db.execute("UPDATE discovery_posts SET media_json=? WHERE candidate_id=?",
+                       ('[{"type":"video","url":"https://attacker.invalid/source.mp4"}]',
+                        "one:123"))
+        extractor=DummyFallback()
+        with self.assertRaisesRegex(MediaError,"MEDIA_SELECTION_INVALID"):
+            self.worker(extractor).save("one:123",0,True)
+        self.assertEqual(extractor.calls,[])
+
     def test_video_metadata_fallback_rejects_ambiguous_selections(self):
         self.add_post(False)
         with self.store._open() as db:
