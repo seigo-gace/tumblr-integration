@@ -65,6 +65,14 @@ class DiscoveryEngine:
             return None
         thumbnail,media_type=media_thumbnail(item)
         media_refs=discovery_media_refs(item)
+        # NPF Tumblr posts frequently report type="text" even when the
+        # content blocks include playable video. Preserve the actual media
+        # nature so Media Save's post-level fallback can be reached.
+        blocks=item.get("content")
+        has_video=isinstance(blocks,list) and any(
+            isinstance(block,dict) and block.get("type")=="video" for block in blocks)
+        if has_video or item.get("type")=="video":
+            media_type="video"
         if not thumbnail and media_refs:
             thumbnail=media_refs[0]["url"]
         tags=item.get("tags")
