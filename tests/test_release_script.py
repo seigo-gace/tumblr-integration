@@ -75,6 +75,10 @@ class ReleaseScriptContract(unittest.TestCase):
             with self.assertRaisesRegex(release.ReleaseError,"AI_QUOTA_PRIVATE_FILE_REQUIRED"):
                 release.validated_live_ai(root,opt)
             os.chmod(quota,0o600)
+            os.chmod(private,0o755)
+            with self.assertRaisesRegex(release.ReleaseError,"AI_QUOTA_PRIVATE_FILE_REQUIRED"):
+                release.validated_live_ai(root,opt)
+            os.chmod(private,0o700)
             external=root/"outside.sqlite3"
             external.write_bytes(b"")
             os.chmod(external,0o600)
