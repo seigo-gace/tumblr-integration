@@ -49,12 +49,34 @@ class AnalyticsAdapter:
                 "LEFT JOIN library_state s ON s.candidate_id=p.candidate_id "
                 "WHERE " + where, params,
             ).fetchone()
+            # The engagement module shares this exact private SQLite file.
+            # A missing table means no confirmed activity has been recorded,
+            # not simulated engagement; reserved/sent/uncertain are excluded.
+            table=db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='engagement_receipts'").fetchone()
+            engagement=[]
+            for kind in ("engagement.like","engagement.reblog","engagement.follow"):
+                if not table:
+                    engagement.append(0)
+                    continue
+                statement=("SELECT COUNT(*) FROM engagement_receipts "
+                           "WHERE action=? AND state='verified'")
+                if cutoff is None:
+                    observed=db.execute(statement,(kind,)).fetchone()[0]
+                else:
+                    observed=db.execute(
+                        statement+" AND updated_at>=?",(kind,cutoff)).fetchone()[0]
+                engagement.append(observed)
         labels = (
             "確認済み候補数",
             "閲覧済み候補数",
             "お気に入り候補数",
             "あとで見る候補数",
             "動画分類の候補数",
+            "本アプリから確認済みのいいね操作数",
+            "本アプリから確認済みのリブログ操作数",
+            "本アプリから確認済みのフォロー操作数",
         )
         return {
             "verified": True,
@@ -62,8 +84,9 @@ class AnalyticsAdapter:
             "basis": "owner_private_discovery_library",
             "rows": [
                 {"label": label, "value": count, "period": period, "url": ""}
-                for label, count in zip(labels, row)
+                for label, count in zip(labels, (*row,*engagement))
             ],
+            "engagement_basis":"official_oauth_readback_receipts",
             "not_measured": [
                 "Tumblrフォロワー数", "Tumblr反応総数",
                 "Telegram参加転換率", "キャンペーン成果",
