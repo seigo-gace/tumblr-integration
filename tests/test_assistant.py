@@ -107,10 +107,16 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(result["plan"]["goals"],[
             "巡回","投稿","キャンペーン","紹介","集計","メディア"])
         self.assertEqual(result["plan"]["not_connected_goals"],["キャンペーン","紹介"])
-        self.assertEqual(result["plan"]["all_actions_count"],4)
-        self.assertEqual(len(result["plan"]["recommendations"]),4)
-        self.assertEqual(result["plan"]["recommendations"][3]["action"],
-                         "analytics.get_summary")
+        self.assertEqual(result["plan"]["all_actions_count"],7)
+        self.assertEqual(len(result["plan"]["recommendations"]),7)
+        self.assertEqual(
+            {item["action"] for item in result["plan"]["recommendations"]},
+            {"tumblr.discover","tumblr.list_posts","tumblr.publish_draft",
+             "engagement.like","engagement.reblog","engagement.follow",
+             "analytics.get_summary"})
+        self.assertTrue(all(
+            item["confirmation_required"] for item in
+            result["plan"]["recommendations"] if item["action"].startswith("engagement.")))
         self.assertTrue(all(item["basis"]=="既存Bridgeに登録された操作契約"
                             for item in result["plan"]["recommendations"]))
         self.assertEqual(adapter.calls,0)
