@@ -114,6 +114,26 @@ class LibraryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             reopened.progress("alpha:140",85)
 
+    def test_all_700_media_refs_and_resume_position_699_survive(self):
+        media=[{"url":f"https://64.media.tumblr.com/a-{i}.jpg","type":"image"}
+               for i in range(700)]
+        self.store.save_page("tag:complete",[],[{
+            "candidate_id":"alpha:700","blog":"alpha","post_id":"700",
+            "url":"https://alpha.tumblr.com/post/700","title":"all 700",
+            "type":"image","date":"","thumbnail_url":"","text_excerpt":"",
+            "tags":[],"note_count":0,"media_refs":media,
+        }],700,complete=True)
+        listed=self.library.list()
+        record=next(x for x in listed["items"] if x["candidate_id"]=="alpha:700")
+        self.assertEqual(len(record["media"]),700)
+        self.assertEqual(record["media"][-1]["url"],media[-1]["url"])
+        self.library.progress("alpha:700",699)
+        loaded=Library(DiscoveryStore(self.store.path)).resume_item()
+        self.assertEqual(loaded["last_media_index"],699)
+        self.assertEqual(len(loaded["media"]),700)
+        with self.assertRaises(ValueError):
+            self.library.progress("alpha:700",700)
+
     def test_invalid_media_position_never_mutates(self):
         for index in (-1,2,50,True,"0"):
             with self.assertRaises(ValueError):
