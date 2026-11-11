@@ -79,9 +79,10 @@ class DiscoveryEngineTests(unittest.TestCase):
         result=adapter.perform("tumblr.discover","blog:first",{})
         self.assertEqual(len(result["rows"]),10)
         self.assertFalse(result["complete"])
-        self.assertEqual(result["cursor"],1991)
+        self.assertEqual(result["cursor"],10)
         self.assertIn("/v2/blog/first.tumblr.com/posts?",stub.calls[1])
         self.assertIn("npf=true",stub.calls[1])
+        self.assertIn("offset=0",stub.calls[1])
         from tumblrkit.library import Library
         listing=Library(DiscoveryStore(self.root/"discovery.sqlite3")).list()
         self.assertEqual(listing["total"],10)
@@ -89,8 +90,50 @@ class DiscoveryEngineTests(unittest.TestCase):
         resumed=TumblrReadAdapter("owner",self.token,transport=stub)
         result=resumed.perform("tumblr.discover","blog:first",{})
         self.assertTrue(result["complete"])
-        self.assertIn("before=1991",stub.calls[2])
+        self.assertIn("offset=10",stub.calls[2])
         self.assertEqual(Library(DiscoveryStore(self.root/"discovery.sqlite3")).list()["total"],11)
+
+    def test_blog_offset_recovers_posts_with_identical_second_timestamps(self):
+        posts=lambda start: [{
+            "blog_name":"first","id_string":str(i),
+            "post_url":"https://first.tumblr.com/post/"+str(i),
+            "timestamp":1234567890,"summary":"same second"
+        } for i in range(start,start+10)]
+        adapter,stub=self.scanner([
+            envelope({"total_blogs":1,"blogs":[{"name":"first"}]}),
+            envelope({"blog":{"name":"first"},"posts":posts(100)}),
+            envelope({"blog":{"name":"first"},"posts":posts(110)}),
+            envelope({"blog":{"name":"first"},"posts":[]}),
+        ])
+        adapter.perform("tumblr.discover","following",{})
+        first=adapter.perform("tumblr.discover","blog:first",{})
+        self.assertEqual(first["cursor"],10)
+        self.assertFalse(first["complete"])
+        second=adapter.perform("tumblr.discover","blog:first",{})
+        self.assertEqual(second["cursor"],20)
+        self.assertEqual(len(DiscoveryStore(self.root/"discovery.sqlite3").read_candidates()),20)
+        self.assertIn("offset=10",stub.calls[2])
+        third=adapter.perform("tumblr.discover","blog:first",{})
+        self.assertTrue(third["complete"])
+        self.assertIn("offset=20",stub.calls[3])
+        self.assertEqual(len(DiscoveryStore(self.root/"discovery.sqlite3").read_candidates()),20)
+
+    def test_legacy_timestamp_checkpoint_is_preserved_not_reinterpreted(self):
+        store=DiscoveryStore(self.root/"discovery.sqlite3")
+        store.save_page("following:following",[{"name":"first","url":"https://first.tumblr.com"}],[],1,True)
+        store.save_page("blog:first",[],[],1762891200,False)
+        adapter,stub=self.scanner([
+            envelope({"blog":{"name":"first"},"posts":[]}),
+        ])
+        result=adapter.perform("tumblr.discover","blog:first",{})
+        self.assertTrue(result["complete"])
+        self.assertIn("before=1762891200",stub.calls[0])
+        self.assertNotIn("offset=1762891200",stub.calls[0])
+        # Explicit owner refresh resets the legacy cursor safely.
+        # A failed refresh keeps persisted checkpoint unchanged.
+        with self.assertRaises(AssertionError):
+            adapter.perform("tumblr.discover","refresh:blog:first",{})
+        self.assertEqual(store.checkpoint("blog:first")["cursor"],1762891200)
 
     def test_existing_assistant_action_reaches_selected_blog_posts_and_library(self):
         from tumblrkit.assistant import Assistant
