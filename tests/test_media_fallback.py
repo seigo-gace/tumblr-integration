@@ -93,6 +93,28 @@ class MediaFallbackTests(unittest.TestCase):
         self.assertEqual(worker.list()["jobs"][0]["source_post_id"],"123")
         self.assertTrue(worker.file(result["job_id"]).is_file())
 
+    def test_video_block_without_direct_source_uses_post_fallback(self):
+        self.add_post(False)
+        with self.store._open() as db:
+            db.execute("UPDATE discovery_posts SET media_json=? WHERE candidate_id=?",
+                       ('[{"type":"video","poster":"https://64.media.tumblr.com/poster.jpg"}]',
+                        "one:123"))
+        extractor=DummyFallback()
+        result=self.worker(extractor).save("one:123",0,True)
+        self.assertEqual(result["method"],"gallery-dl")
+        self.assertEqual(extractor.calls,[("https://one.tumblr.com/post/123","one","123")])
+
+    def test_video_metadata_fallback_rejects_ambiguous_selections(self):
+        self.add_post(False)
+        with self.store._open() as db:
+            db.execute("UPDATE discovery_posts SET media_json=? WHERE candidate_id=?",
+                       ('[{"type":"image","url":"https://64.media.tumblr.com/poster.jpg"},'
+                        '{"type":"video","poster":"unused"}]',"one:123"))
+        extractor=DummyFallback()
+        with self.assertRaisesRegex(MediaError,"MEDIA_SELECTION_INVALID"):
+            self.worker(extractor).save("one:123",0,True)
+        self.assertEqual(extractor.calls,[])
+
     def test_direct_not_available_uses_ytdlp_and_preserves_post_identity(self):
         self.add_post(True)
         extractor=DummyFallback("yt-dlp")
