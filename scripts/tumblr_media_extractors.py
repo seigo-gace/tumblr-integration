@@ -111,6 +111,8 @@ def install(app_data):
         # final environment prefix after atomic promotion.
         final=target
         os.rename(venv_dir,final)
+        os.chmod(final,0o700)
+        os.chmod(final/"bin",0o700)
         for name,module in (("gallery-dl","gallery_dl"),("yt-dlp","yt_dlp")):
             tool=final/"bin"/name
             tool.write_text("#!"+str(final/"bin"/"python")+"\nimport runpy\n"
