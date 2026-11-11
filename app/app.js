@@ -7,6 +7,31 @@
   const instruction=document.getElementById("instruction");
   const connection=document.getElementById("connection");
   const connect=document.getElementById("tumblr-connect");
+  // Local, authenticated status only. It never probes or refreshes Tumblr.
+  async function showOAuthStatus(){
+    connection.classList.remove("visually-hidden");
+    try{
+      const response=await fetch("/oauth/status",{credentials:"same-origin"});
+      if(!response.ok)throw new Error("oauth_status_unavailable");
+      const state=await response.json();
+      if(state.connected!==true){
+        connection.textContent="Tumblr：未連携";
+        return;
+      }
+      const expires=Number(state.expires_at);
+      const expiry=Number.isFinite(expires)&&expires>0;
+      if(expiry&&expires<=Date.now()/1000){
+        connection.textContent="Tumblr：保存済み認可の期限経過（更新・再認可が必要な場合があります）";
+      }else if(expiry&&expires<=Date.now()/1000+600){
+        connection.textContent="Tumblr：認可の更新時期（実APIの権限は未検証）";
+      }else{
+        connection.textContent="Tumblr：連携情報保存済み（実APIの権限は未検証）";
+      }
+    }catch(error){
+      connection.textContent="Tumblr：連携状態を確認できません";
+    }
+  }
+  showOAuthStatus();
   connect.addEventListener("click",async function(){
     connect.disabled=true;
     try{
