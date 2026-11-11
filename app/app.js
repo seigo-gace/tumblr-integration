@@ -851,7 +851,16 @@
             draftNotice("削除に失敗しました。下書きは保持されています。");
           });
         });
-        controls.append(load,remove);
+        const publish=document.createElement("button");
+        publish.type="button";
+        publish.textContent="Tumblrへ投稿";
+        publish.setAttribute("aria-label","この下書きの投稿内容を確認");
+        publish.addEventListener("click",function(){
+          publish.disabled=true;
+          post({selected_action:"tumblr.publish_draft",
+                selected_target:draft.id}).finally(function(){publish.disabled=false;});
+        });
+        controls.append(load,publish,remove);
         item.append(text,controls);
         draftList.appendChild(item);
       });
