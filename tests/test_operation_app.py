@@ -76,6 +76,17 @@ class OperationAppTests(unittest.TestCase):
         self.assertIn('selected_action:"tumblr.list_posts",selected_target:target',self.js)
         self.assertIn('view.total_verified===true',self.js)
 
+    def test_published_draft_post_edit_delete_uses_real_owner_list(self):
+        self.assertIn('draft.publish_state==="published"?"投稿後編集":"編集する"',self.js)
+        self.assertIn('saveDraft.textContent="修正案を保存して確認"',self.js)
+        self.assertIn('sourcePost+":"+saved.id',self.js)
+        self.assertIn('selected_action:"tumblr.edit_post"',self.js)
+        self.assertIn('selected_action:"tumblr.delete_post",selected_target:draft.id',self.js)
+        self.assertIn('draft.publish_state==="deleted"',self.js)
+        self.assertIn('draft.publish_state==="changing"',self.js)
+        self.assertIn('["tumblr.publish_draft","tumblr.edit_post","tumblr.delete_post"]',self.js)
+        self.assertNotIn('input.placeholder="投稿ID"',self.js)
+
     def test_discovery_saved_pages_never_hide_rows_beyond_first_hundred(self):
         self.assertIn('view.stored_total',self.js)
         self.assertIn('view.stored_offset',self.js)
