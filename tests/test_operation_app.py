@@ -42,6 +42,8 @@ class OperationAppTests(unittest.TestCase):
         self.assertIn('goals:goals,attachments:',self.js)
         self.assertIn('renderPlan(turn.plan)',self.js)
         self.assertIn('selected_action:item.action,selected_target:target',self.js)
+        self.assertIn('plan.recommendations.slice(visibleStart,visibleStart+3)',self.js)
+        self.assertIn('if(visibleStart+3<plan.recommendations.length)',self.js)
         self.assertIn('.goal[aria-pressed="true"]',self.css)
         self.assertLess(self.html.index('id="messages"'),self.html.index('id="goal-grid"'))
         self.assertLess(self.html.index('id="chat-form"'),self.html.index('id="goal-grid"'))
