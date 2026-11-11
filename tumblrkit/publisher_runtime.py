@@ -120,6 +120,8 @@ class PublisherAdapter:
         self.budget=budget
         self.reader=read_transport or OfficialTransport(self.budget)
         self.writer=write_transport or PostTransport()
+        from tumblrkit.post_lifecycle import PublishedPostLifecycle
+        self.lifecycle=PublishedPostLifecycle(self)
 
     def _claim(self, draft_id, digest):
         with closing(self.drafts._connect()) as db:
