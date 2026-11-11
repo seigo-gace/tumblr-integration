@@ -18,6 +18,10 @@
         oauthStatus.textContent="Tumblr：未連携";
         return;
       }
+      if(state.can_publish!==true){
+        oauthStatus.textContent="Tumblr：閲覧連携中。投稿にはTumblr連携から投稿権限の承諾が必要です";
+        return;
+      }
       const expires=Number(state.expires_at);
       const expiry=Number.isFinite(expires)&&expires>0;
       if(expiry&&expires<=Date.now()/1000){
