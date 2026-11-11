@@ -57,9 +57,46 @@ class DraftStore:
             raise ValueError("DRAFT_NOT_FOUND")
         return {"id":row[0],"text":row[1],"updated":row[2]}
 
+    @staticmethod
+    def _has_publish_receipt(db, ident):
+        table=db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='tumblr_publish_receipts'").fetchone()
+        if not table:
+            return False
+        return db.execute(
+            "SELECT 1 FROM tumblr_publish_receipts WHERE draft_id=?",
+            (ident,)).fetchone() is not None
+
+    def update(self, ident, text, expected_text):
+        """Edit same draft; optimistic CAS and immutable after publish reservation."""
+        if (not isinstance(ident,str) or len(ident)!=32
+                or any(c not in "0123456789abcdef" for c in ident)
+                or not isinstance(text,str) or not text.strip() or len(text)>2000
+                or not isinstance(expected_text,str) or len(expected_text)>2000):
+            raise ValueError("INVALID_DRAFT")
+        value=redact(text.strip())
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if self._has_publish_receipt(db,ident):
+                raise ValueError("DRAFT_PUBLISH_LOCKED")
+            row=db.execute("SELECT text FROM operation_drafts WHERE id=?",
+                           (ident,)).fetchone()
+            if row is None:
+                raise ValueError("DRAFT_NOT_FOUND")
+            if row[0]!=expected_text:
+                raise ValueError("DRAFT_EDIT_CONFLICT")
+            updated=int(time.time())
+            db.execute("UPDATE operation_drafts SET text=?,updated=? WHERE id=?",
+                       (value,updated,ident))
+        return {"id":ident,"text":value,"updated":updated}
+
     def delete(self, ident):
         if not isinstance(ident, str) or len(ident) != 32 or not all(c in "0123456789abcdef" for c in ident):
             raise ValueError("INVALID_DRAFT")
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if self._has_publish_receipt(db,ident):
+                raise ValueError("DRAFT_PUBLISH_LOCKED")
             result = db.execute("DELETE FROM operation_drafts WHERE id=?", (ident,))
         return result.rowcount > 0
