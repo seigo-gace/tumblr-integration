@@ -174,14 +174,43 @@ def wait_port(port, opened, seconds=12):
     return False
 
 
-def start(port, release, token, root):
+def validated_live_ai(root, environ=None):
+    """Opt-in only with existing owner-private keys and persistent quota DB.
+
+    Never read or log provider values. An absent opt-in preserves old behavior.
+    """
+    import stat
+    env = os.environ if environ is None else environ
+    if env.get("TUMBLR_AI_LIVE_ENABLED") != "1":
+        return False
+    if not any(env.get(name) for name in (
+        "TUMBLR_GEMINI_API_KEY",
+        "TUMBLR_GROQ_API_KEY",
+        "TUMBLR_OPENROUTER_API_KEY",
+    )):
+        raise ReleaseError("AI_PROVIDER_KEY_NOT_CONFIGURED")
+    raw = env.get("TUMBLR_AI_QUOTA_DB", "")
+    if not raw or not os.path.isabs(raw):
+        raise ReleaseError("AI_QUOTA_PERSISTENT_PATH_REQUIRED")
+    path = Path(raw)
+    permanent = root / "dist" / "data"
+    if (path.is_symlink() or not path.is_file()
+            or path.resolve().parent != permanent.resolve()
+            or path.stat().st_uid != os.getuid()
+            or not stat.S_ISREG(path.stat().st_mode)
+            or path.stat().st_mode & 0o077):
+        raise ReleaseError("AI_QUOTA_PRIVATE_FILE_REQUIRED")
+    return True
+
+
+def start(port, release, token, root, live_ai=False):
     logdir = root / "dist" / "private-logs"
     logdir.mkdir(parents=True, exist_ok=True, mode=0o700)
     logfile = logdir / ("tumblr-" + str(port) + ".log")
     fd = os.open(logfile, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     env = dict(os.environ)
     env["TUMBLR_APP_ACCESS_TOKEN"] = token
-    env["TUMBLR_AI_LIVE_ENABLED"] = "0"
+    env["TUMBLR_AI_LIVE_ENABLED"] = "1" if live_ai else "0"
     with os.fdopen(fd, "ab") as log:
         process = subprocess.Popen(
             [sys.executable, "-B", "-m", "tumblrkit.appserve", "serve",
@@ -237,7 +266,10 @@ def main():
         raise ReleaseError("EXISTING_PRODUCTION_NOT_RUNNING")
     if wait_port(STAGING_PORT, True, 1):
         raise ReleaseError("STAGING_PORT_IN_USE")
-    staged = start(STAGING_PORT, stage_release, token, root)
+    # Fail before touching the old live process if the owner explicitly
+    # requested live AI without approved private configuration.
+    ai_live = validated_live_ai(root)
+    staged = start(STAGING_PORT, stage_release, token, root, live_ai=False)
     try:
         if not wait_port(STAGING_PORT, True):
             raise ReleaseError("STAGING_NOT_RUNNING")
@@ -256,7 +288,7 @@ def main():
     os.kill(old_pid, signal.SIGTERM)
     if not wait_port(PRODUCTION_PORT, False):
         raise ReleaseError("PRODUCTION_PORT_NOT_RELEASED")
-    active = start(PRODUCTION_PORT, release, token, root)
+    active = start(PRODUCTION_PORT, release, token, root, live_ai=ai_live)
     try:
         if not wait_port(PRODUCTION_PORT, True):
             raise ReleaseError("PRODUCTION_NOT_RUNNING")
@@ -273,7 +305,7 @@ def main():
             previous_commit = rollback_release(root / "dist")
             if not wait_port(PRODUCTION_PORT, False, 5):
                 raise ReleaseError("ROLLBACK_PORT_BUSY")
-            restored = start(PRODUCTION_PORT, root / "dist" / "current", token, root)
+            restored = start(PRODUCTION_PORT, root / "dist" / "current", token, root, live_ai=ai_live)
             if not wait_port(PRODUCTION_PORT, True):
                 raise ReleaseError("ROLLBACK_NOT_RUNNING")
             status, data = request(PRODUCTION_PORT, "/healthz")
