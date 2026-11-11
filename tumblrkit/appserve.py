@@ -45,6 +45,19 @@ LOGIN_CSRF_TTL = 10 * 60
 LOGIN_PAGE = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><title>Tumblr操作｜ログイン</title><style>body{font-family:system-ui,sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;background:#10121a;color:#f5f6fa;padding:20px}main{width:min(100%,420px);border:1px solid #3a4052;border-radius:18px;background:#1b1e29;padding:28px}h1{font-size:1.45rem}p{color:#b3bbcf;line-height:1.6}label{display:block;margin:20px 0 8px}input{width:100%;box-sizing:border-box;padding:13px;background:#10121a;color:white;border:1px solid #576eac;border-radius:10px;font:inherit}button{width:100%;margin-top:18px;padding:13px;background:#8caaff;color:#10121a;border:0;border-radius:10px;font:inherit;font-weight:700}small{display:block;margin-top:16px;color:#b3bbcf}</style></head><body><main><h1>Tumblr 操作センター</h1><p>Master専用の操作画面です。アクセス用の秘密キーを入力してください。</p><form method="post" action="/session"><label for="token">アクセスキー</label><input id="token" name="token" type="password" autocomplete="off" required minlength="8" maxlength="256"><button type="submit">ログイン</button></form><small>ログイン情報をブラウザの保存領域には記録しません。12時間でセッションが失効します。</small></main></body></html>"""
 
 
+def _owner_tumblr_adapter(owner_oauth,blog,release):
+    """Single reusable Owner account boundary for read and confirmed publish."""
+    reader=TumblrReadAdapter(
+        blog,owner_oauth.store.access,
+        token_provider=owner_oauth.refresh_if_needed)
+    from tumblrkit.publisher_runtime import PublisherAdapter
+    draft_path=Path(release).resolve().parent.parent / "data" / "drafts.sqlite3"
+    reader.publisher=PublisherAdapter(
+        blog,DraftStore(draft_path),owner_oauth.refresh_if_needed,
+        read_transport=reader.transport,budget=reader.transport.budget)
+    return reader
+
+
 class ServeError(SystemExit):
     pass
 
@@ -334,9 +347,8 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 linked = self.server.owner_oauth.callback(parts.query)
                 with self.server.account_lock:
-                    self.server.assistant.bridge.adapters["tumblr"] = TumblrReadAdapter(
-                        linked["blog"], self.server.owner_oauth.store.access,
-                        token_provider=self.server.owner_oauth.refresh_if_needed)
+                    self.server.assistant.bridge.adapters["tumblr"] = _owner_tumblr_adapter(
+                        self.server.owner_oauth,linked["blog"],self.server.release)
             except (ValueError, PermissionError, OSError, TypeError):
                 self._send(400, "Tumblr認可に失敗しました。再ログイン後に連携をやり直してください。", "text/plain; charset=utf-8")
                 return
@@ -493,15 +505,13 @@ class _Handler(BaseHTTPRequestHandler):
                     blog = register_owner_blog(self.server.oauth_folder, payload["blog"])
                     if self.server.owner_oauth is None:
                         self.server.owner_oauth = OwnerOAuth(self.server.oauth_folder, blog)
-                        self.server.assistant.bridge.adapters["tumblr"] = TumblrReadAdapter(
-                            blog, self.server.owner_oauth.store.access,
-                            token_provider=self.server.owner_oauth.refresh_if_needed)
+                        self.server.assistant.bridge.adapters["tumblr"] = _owner_tumblr_adapter(
+                            self.server.owner_oauth,blog,self.server.release)
                     elif self.server.owner_oauth.blog != blog:
                         # Changed unconnected blog; use the same existing account adapter boundary.
                         self.server.owner_oauth = OwnerOAuth(self.server.oauth_folder, blog)
-                        self.server.assistant.bridge.adapters["tumblr"] = TumblrReadAdapter(
-                            blog, self.server.owner_oauth.store.access,
-                            token_provider=self.server.owner_oauth.refresh_if_needed)
+                        self.server.assistant.bridge.adapters["tumblr"] = _owner_tumblr_adapter(
+                            self.server.owner_oauth,blog,self.server.release)
             except (ValueError, OSError, TypeError, UnicodeError, json.JSONDecodeError):
                 self._json(400, {"error": "oauth_blog_setup_failed"})
                 return
@@ -849,10 +859,8 @@ class AppServer:
                 except (ValueError, OSError, TypeError):
                     selected_blog = ""
             if selected_blog:
-                tumblr_reader = TumblrReadAdapter(
-                    selected_blog, self.owner_oauth.store.access,
-                    token_provider=self.owner_oauth.refresh_if_needed,
-                )
+                tumblr_reader = _owner_tumblr_adapter(
+                    self.owner_oauth,selected_blog,self.release)
             else:
                 tumblr_reader = adapter_from_env()
             from tumblrkit.analytics_runtime import AnalyticsAdapter
