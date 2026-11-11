@@ -321,7 +321,7 @@ class DiscoveryEngineTests(unittest.TestCase):
             "candidate_id":f"one:{i}","blog":"one","post_id":str(i),
             "url":f"https://one.tumblr.com/post/{i}","title":"candidate",
             "type":"text","date":"","thumbnail_url":"","text_excerpt":"",
-            "tags":["focus","late"] if i<25 else ["focus","regular"],
+            "tags":["focus","late"] if i<10 else ["focus","regular"],
             "note_count":0,"media_refs":[],
         } for i in range(125)]
         store.save_page("related:focus",
@@ -334,11 +334,14 @@ class DiscoveryEngineTests(unittest.TestCase):
         self.assertEqual(len(first["rows"]),100)
         self.assertEqual(len(last["rows"]),25)
         expected=[
-            {"tag":"regular","count":100,"target":"tag:regular"},
-            {"tag":"late","count":25,"target":"tag:late"},
+            {"tag":"regular","count":115,"target":"tag:regular"},
+            {"tag":"late","count":10,"target":"tag:late"},
         ]
         self.assertEqual(first["related_tags"],expected)
         self.assertEqual(last["related_tags"],expected)
+        from tumblrkit.assistant import Assistant
+        self.assertEqual(
+            Assistant._result_view("tumblr.discover",first)["related_tags"],expected)
         self.assertEqual(stub.calls,[])
         store.exclude_blog("one")
         excluded=adapter.perform("tumblr.discover","saved:0:related:focus",{})
