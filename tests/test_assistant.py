@@ -15,7 +15,11 @@ TOKEN = "test-access-token-1"
 
 class RecordingAdapter:
     def __init__(self):
+        from types import SimpleNamespace
         self.calls = 0
+        self.publisher=SimpleNamespace(drafts=SimpleNamespace(
+            get=lambda target: {"text":"公開前に確認する固定下書き文"}
+        ))
     def perform(self, action, target, payload):
         self.calls += 1
         return {"verified": True, "provider_id": "fake"}
@@ -150,15 +154,13 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual("not_connected", result["state"])
         self.assertIn("実行していません", result["text"])
 
-    def test_publish_needs_confirmation_and_confirm_stays_unconnected(self):
+    def test_unconnected_publish_refuses_false_confirmation(self):
         assistant = Assistant(providers=[])
         preview = assistant.turn("下書きを公開して 対象 recruit-blog")
-        self.assertEqual("confirmation_required", preview["state"])
+        self.assertEqual("not_connected", preview["state"])
         self.assertFalse(preview["executed"])
-        self.assertIn("まだ実行していません", preview["text"])
-        confirmed = assistant.turn(confirm=True, request_id=preview["request_id"])
-        self.assertEqual("not_connected", confirmed["state"])
-        self.assertFalse(confirmed["executed"])
+        self.assertIn("未連携", preview["text"])
+        self.assertIsNone(preview["request_id"])
 
     def test_unknown_tool_and_delete_are_not_called(self):
         adapter = RecordingAdapter()
