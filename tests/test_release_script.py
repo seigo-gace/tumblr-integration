@@ -136,7 +136,7 @@ class ReleaseScriptContract(unittest.TestCase):
                 parent=self
                 class Part:
                     def read_bytes(self):
-                        return "\\0".join(parent.argv).encode()+b"\\0"
+                        return "\0".join(parent.argv).encode()+b"\0"
                     def resolve(self):
                         return parent.root
                 return Part()
