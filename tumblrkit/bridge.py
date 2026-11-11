@@ -8,7 +8,7 @@ from typing import Protocol, Any
 
 ALLOWED = frozenset({
     "tumblr.discover", "tumblr.list_posts", "tumblr.publish_draft",
-    "tumblr.edit_post", "tumblr.delete_post",
+    "tumblr.edit_post", "tumblr.delete_post", "tumblr.reconcile_post",
     "telegram.check_membership", "telegram.publish_announcement",
     "analytics.get_summary",
     "engagement.like", "engagement.reblog", "engagement.follow",
@@ -76,6 +76,7 @@ class Bridge:
                 "tumblr_post_not_verified",
                 "tumblr_post_already_deleted",
                 "tumblr_post_reconcile_required",
+                "tumblr_post_reconcile_missing",
                 "tumblr_post_revision_missing",
                 "tumblr_post_revision_invalid",
                 "tumblr_post_approval_stale",
