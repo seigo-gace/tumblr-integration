@@ -87,8 +87,10 @@
     }catch(error){display("メディア保存履歴を取得できませんでした。","system");}
   }
   async function mediaSave(item,index,button){
-    const selected=item.media[index];
-    if(!selected||selected.type!=="video"||!libraryMedia(selected.url))return;
+    const selected=(item.media||[])[index];
+    const direct=selected&&selected.type==="video"&&libraryMedia(selected.url);
+    const postFallback=index===0&&item.type==="video"&&libraryLink(item.url);
+    if(!direct&&!postFallback)return;
     if(!window.confirm("この動画の保存について、あなたが権利を持つか、権利者の許諾と利用規約上の保存許可を確認済みですか？ 未確認ならキャンセルしてください。Tumblr本番の投稿操作はしません。"))return;
     button.disabled=true;
     const old=button.textContent;
@@ -234,6 +236,13 @@
       open.disabled=!(item.media||[]).length||item.state!=="visible";
       open.addEventListener("click",function(){libraryView(item,item.last_media_index);});
       actions.appendChild(open);
+      if(item.state==="visible"&&item.type==="video"&&!((item.media||[]).some(function(m){return m.type==="video"&&libraryMedia(m.url);}))){
+        const fallback=document.createElement("button");
+        fallback.type="button";fallback.textContent="MP4保存";
+        fallback.title="直接動画URLがない投稿から許可済み取得経路を確認";
+        fallback.addEventListener("click",function(){mediaSave(item,0,fallback);});
+        actions.appendChild(fallback);
+      }
       const source=libraryLink(item.url);
       if(source){const a=document.createElement("a");a.href=source;a.target="_blank";a.rel="noopener noreferrer";a.textContent="出典";actions.appendChild(a);}
       card.appendChild(actions);
