@@ -72,7 +72,7 @@ class OwnerAccountTests(unittest.TestCase):
     def test_authorization_owner_and_refresh_lifecycle(self):
         url = self.oauth.start()
         params = parse_qs(urlsplit(url).query)
-        self.assertEqual(params["scope"], ["basic offline_access"])
+        self.assertEqual(params["scope"], ["basic write offline_access"])
         self.assertEqual(params["redirect_uri"], ["https://tumblr.hentaigay.org/oauth/callback"])
         self.assertNotIn("a-valid-client-secret", url)
         result = self.oauth.callback("state=" + params["state"][0] + "&code=valid-code")
@@ -90,6 +90,41 @@ class OwnerAccountTests(unittest.TestCase):
             self.assertEqual((self.root / name).stat().st_mode & 0o077, 0)
         with self.assertRaises(ValueError):
             self.oauth.callback("state=" + params["state"][0] + "&code=again")
+
+    def test_write_requires_explicit_reauthorization_and_survives_refresh(self):
+        # Legacy OAuth credential (before write consent) can still read, but
+        # cannot create a post even when the access token exists.
+        from tumblrkit.oauth import AccountTokens
+        self.oauth.store.write(AccountTokens(
+            "legacy-access-token", "bearer", "legacy-refresh-token", 3600),
+            "recruitment")
+        self.assertFalse(self.oauth.status()["can_publish"])
+        with self.assertRaisesRegex(ValueError,"tumblr_write_consent_required"):
+            self.oauth.publish_access_token()
+        params=parse_qs(urlsplit(self.oauth.start()).query)
+        self.assertIn("write",params["scope"][0].split())
+        self.oauth.callback("state="+params["state"][0]+"&code=grant-code")
+        self.assertTrue(self.oauth.status()["can_publish"])
+        self.assertEqual(self.oauth.publish_access_token(),"initial-access-token-123")
+        record=self.oauth.store.read()
+        record["expires_at"]=int(time.time())-1
+        self.oauth.store._atomic(self.oauth.store.tokens,json.dumps(record))
+        self.assertEqual(self.oauth.publish_access_token(),"new-access-token-123")
+        self.assertTrue(self.oauth.status()["can_publish"])
+
+    def test_provider_narrowed_scope_does_not_gain_write_privilege(self):
+        class Narrow(FakeTransport):
+            def post_form(self,url,data):
+                response=super().post_form(url,data)
+                if data["grant_type"]=="authorization_code":
+                    return {**response,"scope":"basic offline_access"}
+                return response
+        oauth=OwnerOAuth(self.root,"recruitment",Narrow())
+        params=parse_qs(urlsplit(oauth.start()).query)
+        oauth.callback("state="+params["state"][0]+"&code=grant-code")
+        self.assertFalse(oauth.status()["can_publish"])
+        with self.assertRaisesRegex(ValueError,"tumblr_write_consent_required"):
+            oauth.publish_access_token()
 
     def test_wrong_blog_never_persists(self):
         self.transport.blogs = ("personal-private",)
