@@ -11,11 +11,10 @@ import sqlite3
 import time
 from contextlib import closing
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 from tumblrkit.drafts import DraftStore
 from tumblrkit.tumblr_read import API, OfficialTransport, normalize_blog
-from tumblrkit.api_safety import TumblrReadBudget
 
 POST_ID = re.compile(r"[0-9]{1,25}\Z")
 PUBLISH_SCHEMA = """
@@ -29,8 +28,13 @@ CREATE TABLE IF NOT EXISTS tumblr_publish_receipts(
 """
 
 
+class RejectRedirects(HTTPRedirectHandler):
+    def redirect_request(self,*args,**kwargs):
+        raise ValueError("tumblr_publish_redirect_refused")
+
+
 class PostTransport:
-    """One bounded official NPF POST, no redirects to arbitrary destinations."""
+    """One bounded official NPF POST; never follow a Bearer-bearing redirect."""
     def post_json(self, path, bearer, body, budget):
         if not re.fullmatch(r"/v2/blog/[a-z0-9-]+\.tumblr\.com/posts", path):
             raise ValueError("tumblr_publish_path_invalid")
@@ -41,7 +45,7 @@ class PostTransport:
                      "Content-Type":"application/json",
                      "Accept":"application/json"},method="POST")
         try:
-            with urlopen(request,timeout=15) as response:
+            with build_opener(RejectRedirects()).open(request,timeout=15) as response:
                 status=response.status
                 raw=response.read(1024*1024+1)
         except HTTPError as exc:
@@ -70,8 +74,9 @@ class PublisherAdapter:
         self.blog=normalize_blog(owner_blog)
         self.drafts=draft_store
         self.token_provider=token_provider
-        self.budget=budget or TumblrReadBudget(
-            self.drafts.path.parent/"tumblr-api-budget.sqlite3")
+        if budget is None:
+            raise ValueError("tumblr_shared_api_budget_required")
+        self.budget=budget
         self.reader=read_transport or OfficialTransport(self.budget)
         self.writer=write_transport or PostTransport()
 
