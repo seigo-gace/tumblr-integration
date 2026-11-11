@@ -85,6 +85,32 @@ class ReleaseScriptContract(unittest.TestCase):
             with self.assertRaisesRegex(release.ReleaseError,"AI_QUOTA_PRIVATE_FILE_REQUIRED"):
                 release.validated_live_ai(root,{**opt,"TUMBLR_AI_QUOTA_DB":str(external)})
 
+    def test_explicit_stopped_process_recovery_guard(self):
+        import importlib.util
+        import tempfile
+        from unittest.mock import patch
+        spec=importlib.util.spec_from_file_location("private_tumblr_release_recovery",SCRIPT)
+        release=importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(release)
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            with patch.object(Path,"iterdir",return_value=[]), patch.object(
+                release,"wait_port",return_value=False
+            ) as port:
+                with self.assertRaisesRegex(release.ReleaseError,"OWNER_PROCESS_NOT_UNIQUE"):
+                    release.find_old(root)
+                self.assertIsNone(release.find_old(root,allow_stopped=True))
+                port.assert_called_with(release.PRODUCTION_PORT,True,1)
+            with patch.object(Path,"iterdir",return_value=[]), patch.object(
+                release,"wait_port",return_value=True
+            ):
+                with self.assertRaisesRegex(release.ReleaseError,"UNKNOWN_PRODUCTION_LISTENER"):
+                    release.find_old(root,allow_stopped=True)
+        code=SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('parser.add_argument("--recover-stopped", action="store_true"',code)
+        self.assertIn("old_pid = find_old(root, allow_stopped=args.recover_stopped)",code)
+        self.assertIn("if old_pid is not None:",code)
+
     def test_staging_verifies_before_live_process_termination(self):
         code = SCRIPT.read_text(encoding="utf-8")
         self.assertLess(code.index("verify(STAGING_PORT"), code.index("os.kill(old_pid"))
