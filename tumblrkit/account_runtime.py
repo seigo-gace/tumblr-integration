@@ -227,10 +227,15 @@ class OwnerOAuth:
             result = self.transport.post_form(TOKEN, {
                 "grant_type": "refresh_token", "refresh_token": record["refresh_token"],
                 "client_id": key, "client_secret": secret})
+            if not isinstance(result, dict):
+                raise ValueError("oauth_refresh_invalid")
             token = result.get("access_token")
             refresh = result.get("refresh_token")
             lifetime = result.get("expires_in")
-            if not isinstance(token, str) or not 12 <= len(token) <= 4096 or not isinstance(lifetime, int) or lifetime <= 0:
+            kind = result.get("token_type")
+            if (not isinstance(kind, str) or kind.lower() != "bearer"
+                    or not isinstance(token, str) or not 12 <= len(token) <= 4096
+                    or type(lifetime) is not int or lifetime <= 0):
                 raise ValueError("oauth_refresh_invalid")
             if not isinstance(refresh, str) or not 12 <= len(refresh) <= 4096:
                 raise ValueError("oauth_refresh_invalid")
