@@ -294,7 +294,13 @@ class MediaSave:
             # Only allow a single fallback target; never promote image posts.
             if index!=0 or post_type not in ("video","video/mp4"):
                 raise MediaError("MEDIA_SELECTION_INVALID")
-            if any(isinstance(item,dict) and item.get("type")=="video" for item in media):
+            # A verified video post may contain a video block with poster or
+            # provider metadata but no usable direct source. Let the bounded
+            # post extractor attempt that exact post; never select an image.
+            videos=[i for i,item in enumerate(media)
+                    if isinstance(item,dict) and item.get("type")=="video"]
+            if videos and (videos!=[0] or not isinstance(selected,dict)
+                           or selected.get("type")!="video"):
                 raise MediaError("MEDIA_SELECTION_INVALID")
             return post_id,post_url,post_url,blog,False
         except (ValueError,TypeError,KeyError,IndexError,AttributeError):
