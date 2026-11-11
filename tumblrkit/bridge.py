@@ -63,6 +63,7 @@ class Bridge:
                 "oauth_refresh_unavailable","oauth_token_permissions",
                 "tumblr_unavailable",
                 "tumblr_publish_reconcile_required",
+                "tumblr_publish_draft_changed",
                 "tumblr_publish_uncertain",
                 "tumblr_publish_readback_unverified",
                 "tumblr_publish_rejected",
