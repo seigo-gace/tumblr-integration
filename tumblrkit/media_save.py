@@ -312,6 +312,10 @@ class MediaSave:
                            or selected.get("type")!="video"):
                 raise MediaError("MEDIA_SELECTION_INVALID")
             return post_id,post_url,post_url,blog,False
+        except MediaError:
+            # Preserve exact selection/index/source errors. MediaError also
+            # subclasses ValueError, so broad rewrapping previously hid them.
+            raise
         except (ValueError,TypeError,KeyError,IndexError,AttributeError):
             raise MediaError("MEDIA_SELECTION_INVALID") from None
 
