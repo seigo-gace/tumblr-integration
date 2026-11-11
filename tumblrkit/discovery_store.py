@@ -206,6 +206,19 @@ class DiscoveryStore:
                                 " ORDER BY last_seen DESC LIMIT ?",(limit,)).fetchall()
         return [{"name":name,"url":url,"source":src} for name,url,src in rows]
 
+    def is_selected_blog(self,name):
+        """Check all durable following/follower links, not only UI page 1."""
+        from tumblrkit.tumblr_read import normalize_blog
+        name=normalize_blog(name)
+        with closing(self._open()) as db:
+            row=db.execute(
+                "SELECT EXISTS(SELECT 1 FROM discovery_blogs b "
+                "JOIN discovery_blog_sources s ON s.name=b.name "
+                "WHERE b.name=? AND b.blocked=0 "
+                "AND s.source IN ('following:following','followers:followers'))",
+                (name,)).fetchone()
+        return bool(row[0])
+
     def candidate(self,candidate_id):
         if not isinstance(candidate_id,str) or len(candidate_id)>100:
             raise ValueError("discovery_candidate_id_invalid")
