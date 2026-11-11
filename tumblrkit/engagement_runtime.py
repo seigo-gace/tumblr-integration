@@ -136,9 +136,14 @@ class EngagementAdapter:
     def _verify(self, action, candidate, post_id, bearer):
         blog=candidate["blog"]
         if action=="engagement.follow":
-            info=self._read("/v2/blog/"+blog+".tumblr.com/info",bearer)
-            item=info.get("blog") if isinstance(info,dict) else None
-            if not isinstance(item,dict) or item.get("name")!=blog or item.get("followed") is not True:
+            # Tumblr's /blog/info optional followed field is unreliable and
+            # may be omitted. Verify from the authenticated user's *actual*
+            # following list instead; a new follow should be among newest 20.
+            info=self._read("/v2/user/following?limit=20&offset=0",bearer)
+            users=info.get("blogs") if isinstance(info,dict) else None
+            if (not isinstance(users,list) or not any(
+                    isinstance(item,dict) and item.get("name")==blog
+                    for item in users)):
                 raise ValueError("engagement_readback_unverified")
         elif action=="engagement.like":
             found=self._read("/v2/blog/"+blog+".tumblr.com/posts/"+
