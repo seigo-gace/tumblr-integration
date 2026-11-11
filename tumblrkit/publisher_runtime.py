@@ -130,7 +130,10 @@ class PublisherAdapter:
         post=raw["response"]
         ident=str(post.get("id_string") or post.get("id") or "")
         blocks=post.get("content")
-        if (ident!=post_id or post.get("blog_name")!=self.blog
+        owner=post.get("blog_name")
+        if not owner and isinstance(post.get("blog"),dict):
+            owner=post["blog"].get("name")
+        if (ident!=post_id or owner!=self.blog
                 or post.get("state")!="published"
                 or not isinstance(blocks,list)
                 or not any(isinstance(block,dict) and block.get("type")=="text"
@@ -180,7 +183,8 @@ class PublisherAdapter:
                         db.commit()
                 raise
             post=response.get("response") if isinstance(response,dict) else None
-            post_id=post.get("id") if isinstance(post,dict) else None
+            raw_id=post.get("id") if isinstance(post,dict) else None
+            post_id=str(raw_id) if isinstance(raw_id,(str,int)) and not isinstance(raw_id,bool) else None
             if (not isinstance(response,dict)
                     or response.get("meta",{}).get("status")!=201
                     or not isinstance(post_id,str) or not POST_ID.fullmatch(post_id)):
