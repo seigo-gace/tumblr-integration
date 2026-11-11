@@ -321,7 +321,7 @@ class DiscoveryEngine:
                       and tag.casefold()!=source[8:].casefold())
             result["related_tags"]=[
                 {"tag":tag,"count":count,"target":"tag:"+tag}
-                for tag,count in sorted(measured,key=lambda item:(-item[1],item[0]))[:8]
+                for tag,count in sorted(measured,key=lambda item:(-item[1],item[0]))
             ]
             result["related_basis"]="observed_cooccurring_tags"
         return result
