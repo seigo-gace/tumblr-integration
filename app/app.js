@@ -614,8 +614,32 @@
         section.appendChild(button);
       });
     }
-    if(view.truncated){
-      const note=document.createElement("p");note.textContent="先頭100件を表示しています。";section.appendChild(note);
+    if(view.action==="tumblr.discover"&&
+       Number.isInteger(view.stored_total)&&Number.isInteger(view.stored_offset)){
+      const progress=document.createElement("p");
+      progress.textContent="保存済み候補 "+(view.stored_total?view.stored_offset+1:0)+"～"+
+        Math.min(view.stored_offset+view.rows.length,view.stored_total)+
+        " / "+view.stored_total+"件";
+      section.appendChild(progress);
+      const pager=document.createElement("div");
+      pager.className="draft-actions";
+      [["stored_prev_target","保存済みの前100件"],
+       ["stored_next_target","保存済みの次100件"]].forEach(function(entry){
+        const target=view[entry[0]];
+        if(typeof target!=="string"||!/^saved:[0-9]+:(following:following|followers:followers|tag:|related:|blog:)/.test(target))return;
+        const button=document.createElement("button");
+        button.type="button";button.textContent=entry[1];
+        button.addEventListener("click",function(){
+          button.disabled=true;
+          post({selected_action:"tumblr.discover",selected_target:target})
+            .finally(function(){button.disabled=false;});
+        });
+        pager.appendChild(button);
+      });
+      section.appendChild(pager);
+    }else if(view.truncated){
+      const note=document.createElement("p");
+      note.textContent="結果が多いため一部を表示しています。";section.appendChild(note);
     }
     if(view.action==="tumblr.discover"&&typeof view.next_target==="string"){
       if(view.from_cache){
