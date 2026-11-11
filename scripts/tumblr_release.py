@@ -283,13 +283,16 @@ def main():
         raise ReleaseError("UNEXPECTED_BRANCH")
     if git("status", "--porcelain"):
         raise ReleaseError("DIRTY_CHECKOUT")
-    old_pid = find_old(root, allow_stopped=args.recover_stopped)
+    # Update the pinned, clean checkout before checking owner processes.
+    # Otherwise a bug fixed in this script cannot be deployed: the stale
+    # preflight exits before it can fast-forward to its own correction.
     git("fetch", "--no-tags", "origin", "refs/heads/" + TARGET_BRANCH)
     if git("rev-parse", "FETCH_HEAD") != args.target_sha:
         raise ReleaseError("SOURCE_SHA_CHANGED")
     git("merge", "--ff-only", "FETCH_HEAD")
     if git("rev-parse", "HEAD") != args.target_sha:
         raise ReleaseError("SOURCE_SHA_MISMATCH")
+    old_pid = find_old(root, allow_stopped=args.recover_stopped)
     stage_root = root / "dist-staging"
     stage_release = build_release(root / "app", stage_root, args.target_sha)
     release = root / "dist" / "current"
