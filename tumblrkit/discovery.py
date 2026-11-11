@@ -317,29 +317,13 @@ class DiscoveryEngine:
             # Related discovery is not a second /tagged alias. Rank only
             # distinct co-occurring tags actually found in saved official
             # posts. No inferred identities or automatic followup requests.
-            import json
-            from collections import Counter
-            counter=Counter()
-            for post in posts:
-                try:
-                    found=json.loads(post["tags_json"])
-                except (ValueError,TypeError):
-                    continue
-                if not isinstance(found,list):
-                    continue
-                distinct=set()
-                for tag in found:
-                    if not isinstance(tag,str):
-                        continue
-                    candidate=tag.strip()
-                    if (not candidate or len(candidate)>64 or TAG_INVALID.search(candidate)
-                            or candidate.casefold()==source[8:].casefold()):
-                        continue
-                    distinct.add(candidate)
-                counter.update(distinct)
+            counts=self.store.tag_frequencies(source)
+            measured=((tag,count) for tag,count in counts.items()
+                      if len(tag)<=64 and not TAG_INVALID.search(tag)
+                      and tag.casefold()!=source[8:].casefold())
             result["related_tags"]=[
                 {"tag":tag,"count":count,"target":"tag:"+tag}
-                for tag,count in sorted(counter.items(),key=lambda item:(-item[1],item[0]))[:8]
+                for tag,count in sorted(measured,key=lambda item:(-item[1],item[0]))[:8]
             ]
             result["related_basis"]="observed_cooccurring_tags"
         return result
