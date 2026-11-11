@@ -63,6 +63,85 @@ class AssistantTests(unittest.TestCase):
         self.assertTrue(view["truncated"])
         self.assertEqual(["label", "value", "period", "url"], view["columns"])
 
+    def test_six_goals_not_flattened_into_single_action_or_omitted(self):
+        adapter=RecordingAdapter()
+        assistant=Assistant(bridge=Bridge({"tumblr":adapter}),providers=[])
+        result=assistant.turn(goals=[
+            "巡回","投稿","キャンペーン","紹介","集計","メディア"])
+        self.assertEqual(result["state"],"guidance")
+        self.assertFalse(result["executed"])
+        self.assertEqual(result["plan"]["goals"],[
+            "巡回","投稿","キャンペーン","紹介","集計","メディア"])
+        self.assertEqual(result["plan"]["not_connected_goals"],["キャンペーン","紹介"])
+        self.assertEqual(result["plan"]["all_actions_count"],4)
+        self.assertEqual(len(result["plan"]["recommendations"]),3)
+        self.assertTrue(all(item["basis"]=="既存Bridgeに登録された操作契約"
+                            for item in result["plan"]["recommendations"]))
+        self.assertEqual(adapter.calls,0)
+
+    def test_goal_text_with_no_provider_must_plan_before_execution(self):
+        adapter=RecordingAdapter()
+        assistant=Assistant(bridge=Bridge({"tumblr":adapter}),providers=[])
+        result=assistant.turn("検索して 対象: tag:travel",goals=["巡回","集計"])
+        self.assertEqual(result["state"],"guidance")
+        self.assertFalse(result["executed"])
+        self.assertEqual(result["plan"]["goals"],["巡回","集計"])
+        self.assertEqual(adapter.calls,0)
+        selected=assistant.turn(selected_action="tumblr.discover",
+                                selected_target="tag:travel")
+        self.assertEqual(selected["state"],"completed")
+        self.assertEqual(adapter.calls,1)
+
+    def test_owner_selected_actions_enforce_confirmation_and_allowlist(self):
+        adapter=RecordingAdapter()
+        assistant=Assistant(bridge=Bridge({"tumblr":adapter}),providers=[])
+        invalid=assistant.turn(selected_action="tumblr.delete_blog",selected_target="demo")
+        self.assertEqual(invalid["state"],"invalid_tool")
+        self.assertEqual(adapter.calls,0)
+        proposed=assistant.turn(selected_action="tumblr.publish_draft",
+                                selected_target="myblog")
+        self.assertEqual(proposed["state"],"confirmation_required")
+        self.assertEqual(adapter.calls,0)
+        result=assistant.turn(confirm=True,request_id=proposed["request_id"])
+        self.assertEqual(result["state"],"completed")
+        self.assertEqual(adapter.calls,1)
+
+    def test_unconfigured_goals_do_not_claim_an_action_is_implemented(self):
+        assistant=Assistant(providers=[])
+        result=assistant.turn(goals=["キャンペーン","紹介"])
+        self.assertEqual(result["plan"]["recommendations"],[])
+        self.assertEqual(result["plan"]["not_connected_goals"],
+                         ["キャンペーン","紹介"])
+        self.assertFalse(result["executed"])
+
+    def test_invalid_goal_data_is_rejected_without_dispatch(self):
+        adapter=RecordingAdapter()
+        assistant=Assistant(bridge=Bridge({"tumblr":adapter}),providers=[])
+        for goals in (["巡回","巡回"],["made_up"],"巡回",[1],["投稿"]*7):
+            with self.subTest(goals=goals):
+                result=assistant.turn(goals=goals)
+                self.assertEqual(result["state"],"invalid_goals")
+        self.assertEqual(adapter.calls,0)
+
+    def test_http_structured_goals_go_to_authenticated_assistant(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            release=build_release(ROOT/"app",Path(folder),SHA)
+            adapter=RecordingAdapter()
+            with AppServer(release,TOKEN,assistant=Assistant(
+                    bridge=Bridge({"tumblr":adapter}),providers=[])) as server:
+                url=f"http://127.0.0.1:{server.port}/assistant"
+                status,response=post(url,TOKEN,{"message":"","goals":["巡回","集計"]})
+                self.assertEqual(status,200)
+                self.assertEqual(response["plan"]["goals"],["巡回","集計"])
+                self.assertFalse(response["executed"])
+                self.assertEqual(adapter.calls,0)
+                status,response=post(url,TOKEN,{"selected_action":"tumblr.discover",
+                                                  "selected_target":"tag:travel"})
+                self.assertEqual(status,200)
+                self.assertEqual(response["state"],"completed")
+                self.assertEqual(adapter.calls,1)
+
     def test_chat_does_not_require_a_module_and_does_not_execute(self):
         result = Assistant(providers=[]).turn("募集の状況を分析して 対象 campaign-1")
         self.assertFalse(result["executed"])
