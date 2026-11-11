@@ -946,6 +946,7 @@
   const saveDraft=document.getElementById("save-draft");
   const showDrafts=document.getElementById("show-drafts");
   let draftBusy=false;
+  let draftOffset=0;
   let editingDraftId=null;
   let editingOriginalText="";
   function resetDraftEdit(){
@@ -971,10 +972,12 @@
     if(draftBusy) return Promise.resolve();
     draftBusy=true;
     showDrafts.disabled=true;
-    return draftRequest("/drafts","GET").then(function(data){
+    return draftRequest("/drafts?offset="+draftOffset+"&limit=100","GET").then(function(data){
       draftList.replaceChildren();
       const drafts=Array.isArray(data.drafts)?data.drafts:[];
-      if(!drafts.length){draftNotice("保存した下書きはありません。");return;}
+      if(!Number.isInteger(data.total)||data.offset!==draftOffset||
+         typeof data.has_next!=="boolean")throw new Error("draft_page_unverified");
+      if(!drafts.length&&draftOffset===0){draftNotice("保存した下書きはありません。");return;}
       drafts.forEach(function(draft){
         const item=document.createElement("div");
         item.className="draft-item";
@@ -1025,6 +1028,23 @@
         item.append(text,controls);
         draftList.appendChild(item);
       });
+      const pagination=document.createElement("div");
+      pagination.className="draft-actions";
+      const previous=document.createElement("button");
+      previous.type="button";previous.textContent="前の100件";
+      previous.disabled=draftOffset===0;
+      previous.addEventListener("click",function(){
+        draftOffset=Math.max(0,draftOffset-100);refreshDrafts();
+      });
+      const count=document.createElement("span");
+      count.textContent=(drafts.length?draftOffset+1:0)+"～"+
+        (draftOffset+drafts.length)+" / "+data.total+"件";
+      const next=document.createElement("button");
+      next.type="button";next.textContent="次の100件";
+      next.disabled=!data.has_next;
+      next.addEventListener("click",function(){draftOffset+=100;refreshDrafts();});
+      pagination.append(previous,count,next);
+      draftList.appendChild(pagination);
     },function(){
       draftNotice("下書き一覧を取得できません。未認証、または保存先に接続できません。");
     }).finally(function(){draftBusy=false;showDrafts.disabled=false;});
@@ -1039,6 +1059,7 @@
     const method=wasEditing?"PUT":"POST";
     const payload=wasEditing?{text:value,expected_text:editingOriginalText}:{text:value};
     draftRequest(path,method,payload).then(function(){
+      if(!wasEditing)draftOffset=0;
       resetDraftEdit();
       display(wasEditing
         ?"元の下書きを更新しました。Tumblrへは送信していません。"
@@ -1049,7 +1070,7 @@
         +"元の本文・入力は変更していません。","system");
     }).finally(function(){saveDraft.disabled=false;});
   });
-  showDrafts.addEventListener("click",refreshDrafts);
+  showDrafts.addEventListener("click",function(){refreshDrafts();});
   instruction.addEventListener("keydown",function(event){
     if(event.key==="Enter"&&(event.ctrlKey||event.metaKey)){
       event.preventDefault();
