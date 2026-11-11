@@ -35,6 +35,10 @@ class Reader:
     def get(self,path,bearer):
         assert bearer=="valid-owner-token"
         self.calls.append(path)
+        if "/user/following?" in path:
+            return {"meta":{"status":200},"response":{
+                "total_blogs":1 if self.followed else 0,
+                "blogs":[{"name":"source"}] if self.followed else []}}
         if "/info" in path:
             return {"meta":{"status":200},"response":{"blog":{
                 "name":"source","followed":self.followed}}}
