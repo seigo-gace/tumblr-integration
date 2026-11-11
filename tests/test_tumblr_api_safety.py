@@ -71,6 +71,18 @@ class BudgetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "tumblr_budget_cooldown"):
             self.budget().reserve()
 
+    def test_http_401_and_403_are_distinct_without_token_leakage(self):
+        from urllib.error import HTTPError
+        from tumblrkit.tumblr_read import OfficialTransport
+        for status,code in ((401,"tumblr_auth_expired"),(403,"tumblr_permission_denied")):
+            with self.subTest(status=status):
+                transport=OfficialTransport(self.budget())
+                with patch("tumblrkit.tumblr_read.urlopen",
+                           side_effect=HTTPError("https://api.tumblr.com/v2/user/info",
+                                                 status,"sensitive-body",{},None)):
+                    with self.assertRaisesRegex(ValueError,"^"+code+"$"):
+                        transport.get("/v2/user/info","sample-nonreal-bearer")
+
     def test_real_adapter_blocks_before_any_network_call(self):
         token = self.folder / "access-token"
         token.write_text("testing-access-token-not-real")
