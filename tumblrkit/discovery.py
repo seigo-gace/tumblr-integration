@@ -131,8 +131,7 @@ class DiscoveryEngine:
         if mode=="blog":
             # The owner must have explicitly discovered this blog in a
             # following/followers source, not typed an arbitrary target.
-            linked=self.store.read_blogs(limit=100)
-            if term not in {item["name"] for item in linked}:
+            if not self.store.is_selected_blog(term):
                 raise ValueError("discovery_blog_not_selected")
         if mode=="following":
             if offset>100000: raise ValueError("discovery_cursor_invalid")
