@@ -472,6 +472,21 @@
                   }
                 });
                 td.appendChild(exclude);
+                if(record.type==="blog"){
+                  const inspect=document.createElement("button");
+                  inspect.type="button";
+                  inspect.className="discovery-exclude";
+                  inspect.textContent="投稿を見る";
+                  inspect.setAttribute("aria-label",record.blog+"の投稿候補を取得");
+                  inspect.addEventListener("click",function(){
+                    if(!window.confirm(record.blog+"の公開投稿候補を公式APIから1ページ取得しますか？"))return;
+                    inspect.disabled=true;
+                    const text="検索して 対象: blog:"+record.blog;
+                    lastText=text;display(text,"user");
+                    post({message:text}).finally(function(){inspect.disabled=false;});
+                  });
+                  td.appendChild(inspect);
+                }
                 if(typeof record.candidate_id==="string"&&
                    /^[a-z0-9][a-z0-9-]{0,62}:[0-9]{1,25}$/.test(record.candidate_id)){
                   const check=document.createElement("button");
