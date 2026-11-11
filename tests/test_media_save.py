@@ -76,6 +76,32 @@ class MediaSaveTests(unittest.TestCase):
         self.assertIn(b"ftyp",dest.read_bytes()[:32])
         self.assertEqual(Transcoder()._probe(dest)["video"],"h264")
 
+    def test_all_135_saved_job_receipts_are_reachable_by_history_pages(self):
+        from contextlib import closing
+        with closing(self.worker._open()) as db:
+            for n in range(135):
+                db.execute("INSERT INTO media_save_jobs "
+                    "(id,candidate_id,source_url,source_post_id,media_index,"
+                    "state,created_at,updated_at) VALUES(?,?,?,?,?,'failed',?,?)",
+                    (f"{n:032x}","source:123",
+                     f"https://64.media.tumblr.com/history-{n}.mp4",
+                     "123",n,n//2,n//2))
+        first=self.worker.list(offset=0,limit=100)
+        self.assertTrue(first["verified"])
+        self.assertEqual(first["total"],135)
+        self.assertTrue(first["has_next"])
+        self.assertEqual(len(first["jobs"]),100)
+        second=self.worker.list(offset=100,limit=100)
+        self.assertEqual(second["total"],135)
+        self.assertFalse(second["has_next"])
+        self.assertEqual(len(second["jobs"]),35)
+        self.assertEqual(len({job["id"] for job in first["jobs"]+second["jobs"]}),135)
+        self.assertEqual(self.worker.list(offset=100001)["jobs"],[])
+        for offset,limit in ((-1,100),(1.0,100),(0,0),(0,101)):
+            with self.subTest(offset=offset,limit=limit):
+                with self.assertRaises(MediaError):
+                    self.worker.list(offset=offset,limit=limit)
+
     def test_saved_mp4_and_source_attribution_private(self):
         with self.assertRaisesRegex(MediaError,"MEDIA_RIGHTS_CONFIRMATION_REQUIRED"):
             self.worker.save("source:123",0)
