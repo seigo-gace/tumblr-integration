@@ -141,8 +141,16 @@ class DiscoveryEngine:
             path="/v2/blog/"+self.blog+".tumblr.com/followers?"+urlencode({
                 "limit":SOURCE_LIMIT,"offset":offset})
         elif mode=="blog":
+            # Blog posts officially support integer offset. A timestamp-based
+            # cursor could drop posts that share the same publication second.
+            # Preserve old persisted timestamp checkpoints until an explicit
+            # refresh, rather than silently treating seconds as an offset.
+            legacy_cursor=offset>100000
             args={"limit":SOURCE_LIMIT,"npf":"true"}
-            if offset>0: args["before"]=offset
+            if legacy_cursor:
+                args["before"]=offset
+            else:
+                args["offset"]=offset
             path="/v2/blog/"+term+".tumblr.com/posts?"+urlencode(args)
         else:
             args={"tag":term,"limit":SOURCE_LIMIT,"filter":"text"}
@@ -208,6 +216,18 @@ class DiscoveryEngine:
                     continue
                 timestamps.append(when)
             before=min(timestamps) if timestamps else 0
+            if mode=="blog" and not legacy_cursor:
+                # For /blog/posts, offset is an officially supported cursor and
+                # does not skip same-second posts. A verified empty page ends it.
+                # Check the response length, not filtered candidate count.
+                next_cursor=offset+len(payload)
+                complete=len(payload)<SOURCE_LIMIT
+                self.store.save_page(source,
+                                     [{"name":p["blog"],"url":"https://"+p["blog"]+".tumblr.com"}
+                                      for p in unique.values()],list(unique.values()),
+                                     next_cursor,complete=complete,
+                                     watermark=str(max(timestamps)) if timestamps else checkpoint["watermark"])
+                return self._result(source,mode,self.store.checkpoint(source))
             if len(payload)>=SOURCE_LIMIT:
                 # The 'before' cursor is seconds-based and exclusive.
                 # A full page with a tied oldest timestamp may have unseen
