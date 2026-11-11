@@ -40,7 +40,8 @@ class DiscoveryTests(unittest.TestCase):
             "discover-1","tumblr.discover","日本語 タグ"))
         self.assertEqual(result.state,"completed")
         self.assertTrue(result.detail["verified"])
-        self.assertEqual(len(result.detail["rows"]),1)
+        self.assertEqual(len(result.detail["rows"]),2)
+        self.assertEqual(result.detail["rows"][1]["url"],"https://one.tumblr.com/post/124")
         self.assertEqual(len(transport.calls),1)
         self.assertEqual(urlsplit(transport.calls[0]).path,"/v2/tagged")
         query=parse_qs(urlsplit(transport.calls[0]).query)
@@ -55,7 +56,8 @@ class DiscoveryTests(unittest.TestCase):
         self.assertTrue(result["executed"])
         self.assertEqual(result["view"]["action"],"tumblr.discover")
         self.assertEqual(result["view"]["columns"],["title","type","date","thumbnail_url","url"])
-        self.assertEqual(len(result["view"]["rows"]),1)
+        self.assertEqual(len(result["view"]["rows"]),2)
+        self.assertEqual(result["view"]["rows"][1]["url"],"https://one.tumblr.com/post/124")
         self.assertEqual(parse_qs(urlsplit(transport.calls[0]).query)["tag"],["日本語 タグ"])
 
     def test_invalid_tag_does_not_call_network(self):
