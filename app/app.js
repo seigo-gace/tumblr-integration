@@ -831,6 +831,8 @@
       "tumblr.discover":"公開候補を検索",
       "tumblr.list_posts":"投稿一覧を確認",
       "tumblr.publish_draft":"下書きの公開を確認",
+      "tumblr.edit_post":"公開済み投稿の編集",
+      "tumblr.delete_post":"公開済み投稿の削除",
       "engagement.like":"指定投稿にいいね",
       "engagement.reblog":"指定投稿をリブログ",
       "engagement.follow":"指定ブログをフォロー",
@@ -865,6 +867,15 @@
       const label=document.createElement("span");
       label.textContent=labels[item.action]+"（"+String(item.goal||"目的")+"）";
       wrapper.appendChild(label);
+      if(["tumblr.publish_draft","tumblr.edit_post","tumblr.delete_post"].includes(item.action)){
+        const browse=document.createElement("button");
+        browse.type="button";
+        browse.textContent="保存した投稿・下書きを選択";
+        browse.addEventListener("click",function(){refreshDrafts();});
+        wrapper.appendChild(browse);
+        actions.appendChild(wrapper);
+        return;
+      }
       const input=document.createElement("input");
       input.type="text";
       input.maxLength=64;
@@ -976,9 +987,11 @@
   let draftOffset=0;
   let editingDraftId=null;
   let editingOriginalText="";
+  let editingPublishedSourceId=null;
   function resetDraftEdit(){
     editingDraftId=null;
     editingOriginalText="";
+    editingPublishedSourceId=null;
     saveDraft.textContent="入力を保存";
   }
   function draftNotice(text){
@@ -1009,22 +1022,34 @@
         const item=document.createElement("div");
         item.className="draft-item";
         const text=document.createElement("p");
-        text.textContent=draft.text;
+        text.textContent=draft.publish_state==="published"||draft.publish_state==="deleted"
+          ?(draft.current_text||draft.text):draft.text;
         const controls=document.createElement("div");
         controls.className="draft-actions";
         const load=document.createElement("button");
         load.type="button";
-        load.textContent="編集する";
+        load.textContent=draft.publish_state==="published"?"投稿後編集":"編集する";
+        load.disabled=draft.publish_state==="deleted"||draft.publish_state==="changing";
         load.addEventListener("click",function(){
-          instruction.value=draft.text;
-          if(draft.locked===true){
+          if(draft.publish_state==="published"){
             resetDraftEdit();
-            display("投稿処理の履歴があるため、この本文は変更できません。","system");
+            editingPublishedSourceId=draft.id;
+            instruction.value=draft.current_text||draft.text;
+            saveDraft.textContent="修正案を保存して確認";
+            display("公開済み投稿の修正案を入力してください。"
+              +"保存後、編集前後の全文を確認してからTumblrに反映します。","system");
           }else{
-            editingDraftId=draft.id;
-            editingOriginalText=draft.text;
-            saveDraft.textContent="変更を保存";
-            display("元の下書きIDを保持して編集します。まだTumblrへ送信していません。","system");
+            instruction.value=draft.text;
+            if(draft.locked===true){
+              resetDraftEdit();
+              display("投稿処理の履歴があるため、この本文は変更できません。","system");
+            }else{
+              resetDraftEdit();
+              editingDraftId=draft.id;
+              editingOriginalText=draft.text;
+              saveDraft.textContent="変更を保存";
+              display("元の下書きIDを保持して編集します。まだTumblrへ送信していません。","system");
+            }
           }
           instruction.focus();
         });
@@ -1046,12 +1071,36 @@
         publish.type="button";
         publish.textContent="Tumblrへ投稿";
         publish.setAttribute("aria-label","この下書きの投稿内容を確認");
+        publish.disabled=draft.locked===true;
+        publish.title=draft.locked===true?"この下書きには投稿処理履歴があります":"投稿本文の確認へ";
         publish.addEventListener("click",function(){
           publish.disabled=true;
           post({selected_action:"tumblr.publish_draft",
                 selected_target:draft.id}).finally(function(){publish.disabled=false;});
         });
         controls.append(load,publish,remove);
+        if(draft.publish_state==="published"&&draft.provider_post_id){
+          const deletePost=document.createElement("button");
+          deletePost.type="button";
+          deletePost.textContent="Tumblr投稿を削除";
+          deletePost.setAttribute("aria-label","公開済みTumblr投稿の削除内容を確認");
+          deletePost.addEventListener("click",function(){
+            deletePost.disabled=true;
+            post({selected_action:"tumblr.delete_post",selected_target:draft.id})
+              .finally(function(){deletePost.disabled=false;});
+          });
+          controls.appendChild(deletePost);
+        }
+        if(draft.publish_state==="deleted"){
+          const state=document.createElement("span");
+          state.textContent="Tumblr側で削除確認済み";
+          controls.appendChild(state);
+        }
+        if(draft.publish_state==="changing"){
+          const state=document.createElement("span");
+          state.textContent="前回の変更結果を照合するまで再送しません";
+          controls.appendChild(state);
+        }
         item.append(text,controls);
         draftList.appendChild(item);
       });
@@ -1082,12 +1131,22 @@
     if(draftBusy)return;
     saveDraft.disabled=true;
     const wasEditing=Boolean(editingDraftId);
+    const sourcePost=editingPublishedSourceId;
     const path=wasEditing?"/drafts/"+encodeURIComponent(editingDraftId):"/drafts";
     const method=wasEditing?"PUT":"POST";
     const payload=wasEditing?{text:value,expected_text:editingOriginalText}:{text:value};
-    draftRequest(path,method,payload).then(function(){
+    draftRequest(path,method,payload).then(function(saved){
       if(!wasEditing)draftOffset=0;
       resetDraftEdit();
+      if(sourcePost){
+        if(!saved||typeof saved.id!=="string"){
+          display("修正案を保存できたか確認できません。Tumblrへは送信しません。","system");
+          return refreshDrafts();
+        }
+        display("修正案を保存しました。現在の公開投稿との差分を確認してください。","system");
+        return post({selected_action:"tumblr.edit_post",
+                     selected_target:sourcePost+":"+saved.id}).then(refreshDrafts);
+      }
       display(wasEditing
         ?"元の下書きを更新しました。Tumblrへは送信していません。"
         :"新しい下書きを保存しました。Tumblrへは送信していません。","system");
