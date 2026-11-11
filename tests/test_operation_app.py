@@ -84,6 +84,8 @@ class OperationAppTests(unittest.TestCase):
         self.assertIn('selected_action:"tumblr.delete_post",selected_target:draft.id',self.js)
         self.assertIn('draft.publish_state==="deleted"',self.js)
         self.assertIn('draft.publish_state==="changing"',self.js)
+        self.assertIn('selected_action:"tumblr.reconcile_post"',self.js)
+        self.assertIn('reconcile.textContent="投稿結果を再照合"',self.js)
         self.assertIn('["tumblr.publish_draft","tumblr.edit_post","tumblr.delete_post"]',self.js)
         self.assertNotIn('input.placeholder="投稿ID"',self.js)
 
