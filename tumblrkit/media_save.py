@@ -283,6 +283,11 @@ class MediaSave:
             media=json.loads(raw)
             if not isinstance(media,list):
                 raise MediaError("MEDIA_SELECTION_INVALID")
+            # A video post without any direct media may use its single
+            # verified-post extractor fallback at index zero. Every other
+            # index must exist in the *actual* stored list, not an invented cap.
+            if index>=len(media) and (index!=0 or media):
+                raise MediaError("MEDIA_INDEX_INVALID")
             selected=media[index] if index<len(media) else None
             if selected is not None and selected.get("type")=="video":
                 accepted=_safe_media(selected)
