@@ -31,6 +31,18 @@ SECRET = re.compile(r"(?i)(bearer\s+[A-Za-z0-9._~+/=-]{8,}|api[_-]?key\s*[:=]\s*
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 TELEGRAM = re.compile(r"(?i)\b(tg://\S+|@[A-Za-z0-9_]{5,})")
 TARGET = re.compile(r"対象(?:[:：]\s*|\s+)([^\r\n]{1,64})")
+GOALS = frozenset(("巡回", "投稿", "キャンペーン", "紹介", "集計", "メディア"))
+# These are the *currently wired* dispatch actions only. Future catalog IDs
+# must be imported from the exact original 79-ID artifact, not invented here.
+GOAL_ACTIONS = {
+    "巡回": ("tumblr.discover", "tumblr.list_posts"),
+    "投稿": ("tumblr.list_posts", "tumblr.publish_draft"),
+    "キャンペーン": (),
+    "紹介": (),
+    "集計": ("analytics.get_summary",),
+    "メディア": ("tumblr.discover",),
+}
+
 
 
 class ProviderError(Exception):
@@ -246,7 +258,8 @@ class Assistant:
             return list(self.providers)
         return providers_from_env(os.environ, self.transport)
 
-    def turn(self, message="", confirm=False, request_id=None, draft=False, abort=False):
+    def turn(self, message="", confirm=False, request_id=None, draft=False, abort=False,
+             goals=None, selected_action=None, selected_target=None):
         if abort:
             self.pending.clear()
             return self._pack("aborted", "中断しました。実行していません。", False)
@@ -256,19 +269,34 @@ class Assistant:
             return self._pack("draft_saved", "下書きとして残しました。外部へは送っていません。", False)
         if confirm:
             return self._confirm(request_id)
+        if goals is None:
+            goals=[]
+        if (not isinstance(goals,list) or len(goals)>len(GOALS)
+                or any(not isinstance(goal,str) or goal not in GOALS for goal in goals)
+                or len(set(goals))!=len(goals)):
+            return self._pack("invalid_goals", "目的の選択が不正です。実行していません。", False, recovery=True)
+        if selected_action is not None:
+            if (not isinstance(selected_action,str) or selected_action not in ALLOWED
+                    or not isinstance(selected_target,str) or not 0<len(selected_target)<=64):
+                return self._pack("invalid_tool","未登録の操作または不正な対象を拒否しました。実行していません。",False,recovery=True)
+            return self._propose(selected_action,selected_target,"","", "", "owner_selected",ai=False)
         text = (message or "").strip()
-        if not text:
+        if not text and not goals:
             return self._pack("unclear", "やりたいことを一文で書いてください。実行していません。", False, recovery=True)
+        if not text and goals:
+            return self._goal_guidance(goals)
         cleaned = redact(text)
         omitted = "秘密らしき文字列はAIへ送っていません。" if cleaned != text else ""
         local = match_index(cleaned)
         if local == ["unlisted"]:
             return self._pack("refused_unlisted", "その操作は登録された道具に無いため実行していません。" + omitted, False, recovery=True)
         try:
-            plan, provider_name = self._ask(cleaned)
+            plan, provider_name = self._ask(cleaned,goals)
         except ProviderError as exc:
             return self._pack(exc.code, self._failure_text(exc.code) + omitted, False, recovery=True)
         if plan is None:
+            if goals and len(local)!=1:
+                return self._goal_guidance(goals)
             return self._local(local, cleaned, omitted)
         if not isinstance(plan, dict):
             return self._pack("invalid_response", "AI応答形式が不正なため実行していません。" + omitted, False, recovery=True)
@@ -282,13 +310,16 @@ class Assistant:
         if not action:
             if reply or question:
                 answer = reply + ("\n" if reply and question else "") + question + omitted
-                return self._pack("guidance", answer, False,
+                response=self._pack("guidance", answer, False,
                                   recovery=bool(question), provider=provider_name)
+                if goals:
+                    response["plan"]=self._goal_plan(goals)
+                return response
             return self._pack("unclear", "目的をもう少し詳しく教えてください。実行していません。" + omitted,
                               False, recovery=True, provider=provider_name)
         return self._propose(action, target, cleaned, omitted, question, provider_name, ai=True)
 
-    def _ask(self, cleaned):
+    def _ask(self, cleaned, goals=None):
         providers = _order(cleaned, self._available())
         if not providers:
             return None, "none"
@@ -298,7 +329,10 @@ class Assistant:
             "操作しない相談・企画・説明はactionを空にしてreplyで案内する。"
             "不足情報はquestionで一つずつ確認する。接続・公開済みと推測で主張しない。"
             "実操作の提案は登録済アクションのみ。許可された操作: "
-            + ",".join(sorted(ALLOWED)) + "。利用者の文: " + cleaned
+            + ",".join(sorted(ALLOWED))
+            + "。選択目的: " + "・".join(goals or [])
+            + "。複数の目的は必ず考慮するが、未接続操作は実行済みと主張しない。"
+            + "。利用者の文: " + cleaned
         )
         primary = providers[0]
         fallback = next((item for item in providers[1:] if item.name == "openrouter" and not item.paid), None)
@@ -313,6 +347,40 @@ class Assistant:
             except ProviderError:
                 raise exc
             return plan, fallback.name
+
+    def _goal_plan(self, goals):
+        """Display only real dispatch contracts; never silently omit a goal."""
+        actions=[]
+        unavailable=[]
+        seen=set()
+        for goal in goals:
+            candidates=GOAL_ACTIONS[goal]
+            if not candidates:
+                unavailable.append(goal)
+            for action in candidates:
+                if action in ALLOWED and action not in seen:
+                    seen.add(action)
+                    domain=action.split(".",1)[0]
+                    actions.append({
+                        "action":action,"goal":goal,
+                        "basis":"既存Bridgeに登録された操作契約",
+                        "connected":domain in self.bridge.adapters,
+                        "requires_target":True,
+                        "confirmation_required":action in CONFIRM,
+                    })
+        return {"goals":list(goals),"recommendations":actions[:3],
+                "not_connected_goals":unavailable,
+                "all_actions_count":len(actions),"evidence":"existing_bridge_registry",
+                "executed":False}
+
+    def _goal_guidance(self, goals):
+        response=self._pack(
+            "guidance",
+            "目的を確認しました。実行する操作と対象を選んでください。"
+            "候補は現在の接続契約に基づきます。未接続の目的を完了扱いにしません。",
+            False,recovery=True)
+        response["plan"]=self._goal_plan(goals)
+        return response
 
     def _local(self, local, cleaned, omitted, question=""):
         if len(local) != 1:
