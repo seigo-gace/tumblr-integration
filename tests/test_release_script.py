@@ -147,6 +147,15 @@ class ReleaseScriptContract(unittest.TestCase):
         ]):
             self.assertEqual(release.find_old(Path("/tmp/tumblr-checkout")),101)
 
+    def test_clean_pinned_source_update_precedes_process_selection(self):
+        code = SCRIPT.read_text(encoding="utf-8")
+        self.assertLess(
+            code.index('git("merge", "--ff-only", "FETCH_HEAD")'),
+            code.index("old_pid = find_old(root, allow_stopped=args.recover_stopped)"))
+        self.assertLess(
+            code.index('if git("status", "--porcelain")'),
+            code.index('git("merge", "--ff-only", "FETCH_HEAD")'))
+
     def test_staging_verifies_before_live_process_termination(self):
         code = SCRIPT.read_text(encoding="utf-8")
         self.assertLess(code.index("verify(STAGING_PORT"), code.index("os.kill(old_pid"))
