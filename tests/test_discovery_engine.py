@@ -92,6 +92,30 @@ class DiscoveryEngineTests(unittest.TestCase):
         self.assertIn("before=1991",stub.calls[2])
         self.assertEqual(Library(DiscoveryStore(self.root/"discovery.sqlite3")).list()["total"],11)
 
+    def test_existing_assistant_action_reaches_selected_blog_posts_and_library(self):
+        from tumblrkit.assistant import Assistant
+        from tumblrkit.bridge import Bridge
+        adapter,stub=self.scanner([
+            envelope({"total_blogs":1,"blogs":[{"name":"first"}]}),
+            envelope({"blog":{"name":"first"},"posts":[{
+                "blog_name":"first","id_string":"500",
+                "post_url":"https://first.tumblr.com/post/500",
+                "summary":"candidate","timestamp":1000,
+                "content":[{"type":"video","media":[{"url":"https://64.media.tumblr.com/v.mp4"}]}],
+            }]}),
+        ])
+        assistant=Assistant(bridge=Bridge({"tumblr":adapter}),providers=[])
+        first=assistant.turn("検索して 対象: following")
+        self.assertEqual(first["state"],"completed")
+        result=assistant.turn("検索して 対象: blog:first")
+        self.assertEqual(result["state"],"completed")
+        self.assertEqual(result["view"]["rows"][0]["title"],"candidate")
+        from tumblrkit.library import Library
+        records=Library(DiscoveryStore(self.root/"discovery.sqlite3")).list()
+        self.assertEqual(records["total"],1)
+        self.assertEqual(records["items"][0]["media"][0]["type"],"video")
+        self.assertEqual(len(stub.calls),2)
+
     def test_unselected_or_excluded_blog_does_not_fetch_any_posts(self):
         adapter,stub=self.scanner([envelope({"total_blogs":1,"blogs":[{"name":"first"}]})])
         adapter.perform("tumblr.discover","following",{})
