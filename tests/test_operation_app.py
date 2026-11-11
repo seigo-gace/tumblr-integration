@@ -53,6 +53,13 @@ class OperationAppTests(unittest.TestCase):
         self.assertNotIn('フォロー・タグ・公開候補を確認',self.html)
         self.assertEqual(self.html.count('class="goal"'),6)
 
+    def test_owner_post_list_has_genuine_next_previous_page_controls(self):
+        self.assertIn('view.action==="tumblr.list_posts"',self.js)
+        self.assertIn('"next_target","次の投稿20件"',self.js)
+        self.assertIn('"prev_target","前の投稿20件"',self.js)
+        self.assertIn('selected_action:"tumblr.list_posts",selected_target:target',self.js)
+        self.assertIn('view.total_verified===true',self.js)
+
     def test_discovery_saved_pages_never_hide_rows_beyond_first_hundred(self):
         self.assertIn('view.stored_total',self.js)
         self.assertIn('view.stored_offset',self.js)
