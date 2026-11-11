@@ -167,10 +167,8 @@ class DiscoveryEngine:
             if not self.store.is_selected_blog(term):
                 raise ValueError("discovery_blog_not_selected")
         if mode=="following":
-            if offset>100000: raise ValueError("discovery_cursor_invalid")
             path="/v2/user/following?"+urlencode({"limit":SOURCE_LIMIT,"offset":offset})
         elif mode=="followers":
-            if offset>100000: raise ValueError("discovery_cursor_invalid")
             path="/v2/blog/"+self.blog+".tumblr.com/followers?"+urlencode({
                 "limit":SOURCE_LIMIT,"offset":offset})
         elif mode=="blog":
