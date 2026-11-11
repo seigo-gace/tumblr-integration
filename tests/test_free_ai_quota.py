@@ -63,6 +63,19 @@ class DurableFreeQuotaTests(unittest.TestCase):
         })
         self.assert_code(lambda: gate.reserve("groq"), "quota_unavailable")
 
+    def test_all_three_live_providers_share_the_same_durable_quota(self):
+        from tumblrkit.assistant import providers_from_env
+        env={
+            "TUMBLR_AI_LIVE_ENABLED":"1",
+            "TUMBLR_AI_QUOTA_DB":self.db,
+            "TUMBLR_GEMINI_API_KEY":"example-gemini",
+            "TUMBLR_GROQ_API_KEY":"example-groq",
+            "TUMBLR_OPENROUTER_API_KEY":"example-openrouter",
+        }
+        providers=providers_from_env(env)
+        self.assertEqual({p.name for p in providers},{"gemini","groq","openrouter"})
+        self.assertTrue(all(p.quota is providers[0].quota for p in providers))
+
     def test_429_does_not_try_another_provider(self):
         primary = ScriptedProvider("groq", error="rate_limited")
         fallback = ScriptedProvider("openrouter", {"reply": "would consume more"}, paid=False)
