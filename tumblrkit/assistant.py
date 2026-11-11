@@ -277,8 +277,12 @@ class Assistant:
                 or len(set(goals))!=len(goals)):
             return self._pack("invalid_goals", "目的の選択が不正です。実行していません。", False, recovery=True)
         if selected_action is not None:
+            saved_discovery=(selected_action=="tumblr.discover" and
+                             isinstance(selected_target,str) and
+                             selected_target.startswith("saved:"))
+            maximum=150 if saved_discovery else 64
             if (not isinstance(selected_action,str) or selected_action not in ALLOWED
-                    or not isinstance(selected_target,str) or not 0<len(selected_target)<=64):
+                    or not isinstance(selected_target,str) or not 0<len(selected_target)<=maximum):
                 return self._pack("invalid_tool","未登録の操作または不正な対象を拒否しました。実行していません。",False,recovery=True)
             return self._propose(selected_action,selected_target,"","", "", "owner_selected",ai=False)
         text = (message or "").strip()
