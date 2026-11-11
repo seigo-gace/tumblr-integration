@@ -855,7 +855,13 @@ class AppServer:
                 )
             else:
                 tumblr_reader = adapter_from_env()
-            self.assistant = Assistant(bridge=Bridge({"tumblr": tumblr_reader} if tumblr_reader else {}))
+            from tumblrkit.analytics_runtime import AnalyticsAdapter
+            analytics=AnalyticsAdapter(DiscoveryStore(
+                self.oauth_folder / "discovery.sqlite3"))
+            adapters={"analytics": analytics}
+            if tumblr_reader:
+                adapters["tumblr"]=tumblr_reader
+            self.assistant = Assistant(bridge=Bridge(adapters))
         self.ticket_path = None
         self.httpd = None
         self.thread = None
