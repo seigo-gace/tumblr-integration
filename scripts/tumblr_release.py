@@ -194,7 +194,10 @@ def validated_live_ai(root, environ=None):
         raise ReleaseError("AI_QUOTA_PERSISTENT_PATH_REQUIRED")
     path = Path(raw)
     permanent = root / "dist" / "data"
-    if (path.is_symlink() or not path.is_file()
+    if (not permanent.is_dir() or permanent.is_symlink()
+            or permanent.stat().st_uid != os.getuid()
+            or permanent.stat().st_mode & 0o077
+            or path.is_symlink() or not path.is_file()
             or path.resolve().parent != permanent.resolve()
             or path.stat().st_uid != os.getuid()
             or not stat.S_ISREG(path.stat().st_mode)
