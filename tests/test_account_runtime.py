@@ -162,6 +162,28 @@ class OwnerAccountTests(unittest.TestCase):
         self.assertFalse(oauth.status()["can_publish"])
         self.assertEqual(oauth.store.read()["access_token"], "legacy-access-token")
 
+    def test_refresh_rejects_non_bearer_and_boolean_expiry_without_overwriting(self):
+        from tumblrkit.oauth import AccountTokens
+        for invalid in ({"token_type": "mac"}, {"expires_in": True}, {"token_type": None}):
+            with self.subTest(invalid=invalid):
+                class MalformedRefresh(FakeTransport):
+                    def post_form(self, url, data):
+                        response = super().post_form(url, data)
+                        if data["grant_type"] == "refresh_token":
+                            return {**response, **invalid}
+                        return response
+                oauth = OwnerOAuth(self.root, "recruitment", MalformedRefresh())
+                oauth.store.write(AccountTokens(
+                    "previous-access-token", "bearer", "previous-refresh-token", 3600,
+                    ("basic", "write", "offline_access")), "recruitment")
+                saved = oauth.store.read()
+                saved["expires_at"] = int(time.time()) - 1
+                oauth.store._atomic(oauth.store.tokens, json.dumps(saved))
+                with self.assertRaisesRegex(ValueError, "oauth_refresh_invalid"):
+                    oauth.refresh_if_needed()
+                self.assertEqual(oauth.store.read()["access_token"], "previous-access-token")
+                self.assertEqual(oauth.store.access.read_text().strip(), "previous-access-token")
+
     def test_wrong_blog_never_persists(self):
         self.transport.blogs = ("personal-private",)
         state = parse_qs(urlsplit(self.oauth.start()).query)["state"][0]
