@@ -955,6 +955,8 @@ class AppServer:
         converter=Transcoder(str(tools_dir / "ffprobe"),str(tools_dir / "ffmpeg"))
         self.httpd.media_save = MediaSave(self.httpd.discovery_store,media_root,transcoder=converter)
         self.httpd.draft_store = DraftStore(self.release.resolve().parent.parent / "data" / "drafts.sqlite3")
+        # Assistant and the owner UI must use the same durable draft records.
+        self.httpd.assistant.draft_store = self.httpd.draft_store
         self.httpd.attachment_store = AttachmentStore(self.release.resolve().parent.parent / "data")
         if self.ticket:
             ticket = secrets.token_urlsafe(24)
