@@ -396,6 +396,13 @@ class Assistant:
         if not target:
             text = "対象が不足しています。対象: 名前 の形で教えてください。実行していません。"
             return self._pack("unclear", text + omitted, False, recovery=True, provider=provider, action=action)
+        if action=="tumblr.publish_draft":
+            tumblr=self.bridge.adapters.get("tumblr")
+            publisher=getattr(tumblr,"publisher",None)
+            if publisher is None:
+                return self._pack(
+                    "not_connected","Tumblr投稿は未連携です。本人のTumblr連携と投稿権限の承諾が必要です。投稿していません。",
+                    False,recovery=True,action=action,provider=provider)
         if action in CONFIRM:
             request_id = uuid.uuid4().hex
             self.pending[request_id] = (action, target)
@@ -449,6 +456,7 @@ class Assistant:
             "tumblr_publish_uncertain":"投稿結果を確認できません。二重投稿防止のため自動再送しません。",
             "tumblr_publish_readback_unverified":"Tumblrの投稿読戻しが一致しません。実行済みと扱いません。",
             "tumblr_publish_rejected":"Tumblrが投稿を拒否しました。公開完了していません。",
+            "tumblr_write_consent_required":"Tumblr投稿の権限が未承諾です。Tumblr連携から投稿権限を承諾してください。投稿していません。",
         }
         code=result.detail.get("error_code") if isinstance(result.detail,dict) else None
         message=notices.get(code,"操作は完了していません。実行していません。")
