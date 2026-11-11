@@ -182,6 +182,7 @@ def providers_from_env(env, transport=None):
             {"authorization": "Bearer " + env["TUMBLR_GROQ_API_KEY"]},
             True,
             transport,
+            quota=quota,
         ))
     model = env.get("TUMBLR_OPENROUTER_MODEL", "openrouter/free")
     if env.get("TUMBLR_OPENROUTER_API_KEY"):
