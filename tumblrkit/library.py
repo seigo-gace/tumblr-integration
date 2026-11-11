@@ -93,7 +93,9 @@ class Library:
                             (limit,offset)).fetchall()
             session=db.execute("SELECT candidate_id,media_index FROM library_session WHERE key='last'").fetchone()
         records=self._decode_records(rows)
-        return records
+        return {"verified":True,"items":records,"total":count,"offset":offset,"limit":limit,
+                "filter":filter_name,"last_position":{"candidate_id":session[0],"media_index":session[1]} if session else None,
+                "resume_item":self.resume_item() if session else None}
 
     @staticmethod
     def _decode_records(rows):
@@ -109,9 +111,7 @@ class Library:
                 "thumbnail_url":thumbnail,"state":state,"seen":bool(seen),
                 "favorite":bool(fav),"watch_later":bool(later),
                 "last_media_index":min(index,max(0,len(media)-1))})
-        return {"verified":True,"items":records,"total":count,"offset":offset,"limit":limit,
-                "filter":filter_name,"last_position":{"candidate_id":session[0],"media_index":session[1]} if session else None,
-                "resume_item":self.resume_item() if session else None}
+        return records
 
     def selected(self,candidate_ids):
         """Resolve the owner's exact cross-page selections in one private DB.
