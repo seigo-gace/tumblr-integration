@@ -223,7 +223,7 @@ def start(port, release, token, root, live_ai=False):
     return process
 
 
-def find_old(root):
+def find_old(root, allow_stopped=False):
     matches = []
     for item in Path("/proc").iterdir():
         if not item.name.isdigit():
@@ -238,6 +238,11 @@ def find_old(root):
             matches.append(int(item.name))
         except (OSError, PermissionError, ValueError):
             continue
+    if not matches and allow_stopped:
+        # Recovery is explicit: never displace an unknown process or listener.
+        if wait_port(PRODUCTION_PORT, True, 1):
+            raise ReleaseError("UNKNOWN_PRODUCTION_LISTENER")
+        return None
     if len(matches) != 1:
         raise ReleaseError("OWNER_PROCESS_NOT_UNIQUE")
     return matches[0]
@@ -247,6 +252,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--token-file", required=True)
     parser.add_argument("--target-sha", required=True)
+    parser.add_argument("--recover-stopped", action="store_true",
+                        help="Explicitly restore the existing stopped app only when no process or listener exists")
     args = parser.parse_args()
     root = Path.cwd()
     from tumblrkit.appserve import build_release
@@ -255,7 +262,7 @@ def main():
         raise ReleaseError("UNEXPECTED_BRANCH")
     if git("status", "--porcelain"):
         raise ReleaseError("DIRTY_CHECKOUT")
-    old_pid = find_old(root)
+    old_pid = find_old(root, allow_stopped=args.recover_stopped)
     git("fetch", "--no-tags", "origin", "refs/heads/" + TARGET_BRANCH)
     if git("rev-parse", "FETCH_HEAD") != args.target_sha:
         raise ReleaseError("SOURCE_SHA_CHANGED")
@@ -265,8 +272,10 @@ def main():
     stage_root = root / "dist-staging"
     stage_release = build_release(root / "app", stage_root, args.target_sha)
     release = root / "dist" / "current"
-    if not wait_port(PRODUCTION_PORT, True, 1):
+    if old_pid is not None and not wait_port(PRODUCTION_PORT, True, 1):
         raise ReleaseError("EXISTING_PRODUCTION_NOT_RUNNING")
+    if old_pid is None and wait_port(PRODUCTION_PORT, True, 1):
+        raise ReleaseError("UNKNOWN_PRODUCTION_LISTENER")
     if wait_port(STAGING_PORT, True, 1):
         raise ReleaseError("STAGING_PORT_IN_USE")
     # Fail before touching the old live process if the owner explicitly
@@ -288,7 +297,8 @@ def main():
     # Only after the detached staging app passed all checks, touch the live
     # versioned release symlink. The prior release remains rollback-capable.
     build_release(root / "app", root / "dist", args.target_sha)
-    os.kill(old_pid, signal.SIGTERM)
+    if old_pid is not None:
+        os.kill(old_pid, signal.SIGTERM)
     if not wait_port(PRODUCTION_PORT, False):
         raise ReleaseError("PRODUCTION_PORT_NOT_RELEASED")
     active = start(PRODUCTION_PORT, release, token, root, live_ai=ai_live)
