@@ -245,7 +245,8 @@ class OwnerOAuth:
                     raise ValueError("oauth_refresh_scopes_invalid")
                 allowed=frozenset(("basic","write","offline_access"))
                 granted=tuple(returned.split())
-                if not set(granted).issubset(allowed):
+                if not set(granted).issubset(allowed) or not set(granted).issubset(prior):
+                    # Refresh must never upgrade permissions beyond the saved grant.
                     raise ValueError("oauth_refresh_scopes_invalid")
             else:
                 granted=prior
