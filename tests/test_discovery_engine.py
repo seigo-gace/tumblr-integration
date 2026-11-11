@@ -230,6 +230,46 @@ class DiscoveryEngineTests(unittest.TestCase):
         self.assertEqual(parse_qs(urlsplit(stub.calls[1]).query)["before"],["100"])
         self.assertEqual(len(stub.calls),2)
 
+    def test_related_tags_are_observed_not_invented_and_are_actionable(self):
+        from tumblrkit.assistant import Assistant
+        from tumblrkit.bridge import Bridge
+        posts=[
+            {"blog_name":"first","id_string":"71",
+             "post_url":"https://first.tumblr.com/post/71",
+             "summary":"one","timestamp":300,"tags":["focus","art","video","art"]},
+            {"blog_name":"second","id_string":"72",
+             "post_url":"https://second.tumblr.com/post/72",
+             "summary":"two","timestamp":299,"tags":["focus","video","tools","invalid/?"]},
+        ]
+        adapter,stub=self.scanner([envelope(posts)])
+        output=Assistant(bridge=Bridge({"tumblr":adapter}),providers=[]).turn(
+            "検索して 対象: related:focus")
+        self.assertEqual(output["state"],"completed")
+        view=output["view"]
+        self.assertEqual(view["related_basis"],"observed_cooccurring_tags")
+        self.assertEqual(view["related_tags"],[
+            {"tag":"video","count":2,"target":"tag:video"},
+            {"tag":"art","count":1,"target":"tag:art"},
+            {"tag":"tools","count":1,"target":"tag:tools"},
+        ])
+        self.assertEqual(len(stub.calls),1)
+        self.assertIn("tag=focus",stub.calls[0])
+        # Cached read returns the same observed links without new provider use.
+        repeat=adapter.perform("tumblr.discover","related:focus",{})
+        self.assertTrue(repeat["from_cache"])
+        self.assertEqual(repeat["related_tags"][0]["count"],2)
+        self.assertEqual(len(stub.calls),1)
+
+    def test_related_search_without_verified_tags_does_not_fake_suggestions(self):
+        adapter,stub=self.scanner([envelope([
+            {"blog_name":"first","id_string":"90",
+             "post_url":"https://first.tumblr.com/post/90",
+             "summary":"none","timestamp":300,"tags":["focus"]},
+        ])])
+        output=adapter.perform("tumblr.discover","related:focus",{})
+        self.assertEqual(output["related_tags"],[])
+        self.assertEqual(output["related_basis"],"observed_cooccurring_tags")
+
     def test_featured_timestamp_used_for_tag_cursor(self):
         posts=[{"blog_name":"one","id_string":str(100+i),
                 "post_url":"https://one.tumblr.com/post/"+str(100+i),
