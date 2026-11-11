@@ -337,7 +337,7 @@ class _Handler(BaseHTTPRequestHandler):
         parts = urlsplit(self.path)
         # Browser entry URLs can include harmless query parameters.
         # They must never obscure the login page with a plain-text 400.
-        if parts.query and parts.path not in ("/", "/index.html", "/login", "/oauth/callback", "/library", "/media/jobs"):
+        if parts.query and parts.path not in ("/", "/index.html", "/login", "/oauth/callback", "/library", "/media/jobs", "/drafts"):
             self._send(400, "bad request\n", "text/plain; charset=utf-8")
             return
         if parts.path == "/oauth/callback":
@@ -468,10 +468,24 @@ class _Handler(BaseHTTPRequestHandler):
             if not _authorized(self):
                 self._unauthorized()
                 return
+            from urllib.parse import parse_qs
+            params=parse_qs(parts.query,keep_blank_values=True)
+            if set(params)-{"offset","limit"} or any(len(v)!=1 for v in params.values()):
+                self._json(400,{"error":"invalid_draft_page"})
+                return
             try:
-                self._json(200, {"drafts": self.server.draft_store.list()})
-            except (OSError, ValueError):
-                self._json(503, {"error": "draft_store_unavailable"})
+                offset=int(params.get("offset",["0"])[0])
+                limit=int(params.get("limit",["100"])[0])
+                drafts=self.server.draft_store.list(offset=offset,limit=limit)
+                total=self.server.draft_store.count()
+            except ValueError:
+                self._json(400,{"error":"invalid_draft_page"})
+                return
+            except (OSError,sqlite3.Error):
+                self._json(503,{"error":"draft_store_unavailable"})
+                return
+            self._json(200,{"drafts":drafts,"total":total,"offset":offset,"limit":limit,
+                             "has_next":offset+len(drafts)<total})
             return
         if parts.path in ("/healthz", "/version"):
             self._json(200, release_status(self.server.release))
