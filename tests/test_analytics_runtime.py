@@ -44,16 +44,50 @@ class AnalyticsRuntimeTests(unittest.TestCase):
         result=self.adapter.perform("analytics.get_summary","week",{})
         self.assertTrue(result["verified"])
         self.assertEqual(result["basis"],"owner_private_discovery_library")
-        self.assertEqual([r["value"] for r in result["rows"]],[2,1,1,1,1])
+        self.assertEqual([r["value"] for r in result["rows"]],[2,1,1,1,1,0,0,0])
         self.assertEqual(result["rows"][0]["period"],"過去7日間")
         self.assertIn("Tumblrフォロワー数",result["not_measured"])
 
     def test_all_time_counts_and_exclusions_are_respected(self):
         total=self.adapter.perform("analytics.get_summary","all",{})
-        self.assertEqual([r["value"] for r in total["rows"]],[3,1,1,1,1])
+        self.assertEqual([r["value"] for r in total["rows"]],[3,1,1,1,1,0,0,0])
         self.store.exclude_blog("newer")
         after=self.adapter.perform("analytics.get_summary","all",{})
-        self.assertEqual([r["value"] for r in after["rows"]],[1,0,0,0,0])
+        self.assertEqual([r["value"] for r in after["rows"]],[1,0,0,0,0,0,0,0])
+
+    def test_only_provider_readback_verified_engagement_counts_as_real(self):
+        # These are deliberately seeded owner-private receipts, not Tumblr
+        # follower counts or guessed public reactions.
+        from tumblrkit.engagement_runtime import RECEIPTS
+        import sqlite3
+        with sqlite3.connect(self.store.path) as db:
+            db.executescript(RECEIPTS)
+            db.executemany(
+                "INSERT INTO engagement_receipts(action,target,state,updated_at) "
+                "VALUES(?,?,?,?)",[
+                    ("engagement.like","newer:2","verified",self.now),
+                    ("engagement.like","newer:3","reserved",self.now),
+                    ("engagement.reblog","older:1","verified",self.now-10*86400),
+                    ("engagement.follow","newer","sent",self.now),
+                    ("engagement.follow","older","verified",self.now),
+                ])
+        week=self.adapter.perform("analytics.get_summary","week",{})
+        self.assertEqual([x["value"] for x in week["rows"]][-3:],[1,0,1])
+        self.assertEqual(week["engagement_basis"],
+                         "official_oauth_readback_receipts")
+        all_time=self.adapter.perform("analytics.get_summary","all",{})
+        self.assertEqual([x["value"] for x in all_time["rows"]][-3:],[1,1,1])
+        self.assertIn("Tumblr反応総数",all_time["not_measured"])
+        self.store.exclude_blog("newer")
+        historical=self.adapter.perform("analytics.get_summary","all",{})
+        # Excluding a later target hides Discovery recommendations, but must
+        # not erase genuinely confirmed historical owner interactions.
+        self.assertEqual([x["value"] for x in historical["rows"]][-3:],[1,1,1])
+
+    def test_missing_engagement_table_means_zero_not_provider_fabrication(self):
+        response=self.adapter.perform("analytics.get_summary","today",{})
+        self.assertEqual([r["value"] for r in response["rows"]][-3:],[0,0,0])
+        self.assertIn("Tumblrフォロワー数",response["not_measured"])
 
     def test_invalid_period_or_payload_refuses_without_estimates(self):
         for value in ("week;DELETE","follower_growth","future",123):
