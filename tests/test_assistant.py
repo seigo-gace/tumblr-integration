@@ -74,7 +74,9 @@ class AssistantTests(unittest.TestCase):
             "巡回","投稿","キャンペーン","紹介","集計","メディア"])
         self.assertEqual(result["plan"]["not_connected_goals"],["キャンペーン","紹介"])
         self.assertEqual(result["plan"]["all_actions_count"],4)
-        self.assertEqual(len(result["plan"]["recommendations"]),3)
+        self.assertEqual(len(result["plan"]["recommendations"]),4)
+        self.assertEqual(result["plan"]["recommendations"][3]["action"],
+                         "analytics.get_summary")
         self.assertTrue(all(item["basis"]=="既存Bridgeに登録された操作契約"
                             for item in result["plan"]["recommendations"]))
         self.assertEqual(adapter.calls,0)
