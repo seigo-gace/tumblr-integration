@@ -118,6 +118,31 @@ class PublisherRuntimeTests(unittest.TestCase):
         self.assertEqual(approved["state"],"completed")
         self.assertEqual(len(self.provider.posts),1)
 
+    def test_edit_during_confirmation_is_refused_under_draft_db_lock(self):
+        import hashlib
+        approved=hashlib.sha256(self.draft["text"].encode("utf-8")).hexdigest()
+        def adversarial_token_provider():
+            # Simulates a real competing editor after preview/read but
+            # before PublisherAdapter commits its idempotency reservation.
+            self.drafts.update(self.draft["id"],"変更済みで未承諾の本文",
+                               self.draft["text"])
+            return "sample-token"
+        publisher=PublisherAdapter("owner",self.drafts,
+            adversarial_token_provider,read_transport=self.provider,
+            write_transport=self.provider,budget=self.budget)
+        with self.assertRaisesRegex(ValueError,"tumblr_publish_draft_changed"):
+            publisher.perform("tumblr.publish_draft",self.draft["id"],
+                              {"expected_digest":approved})
+        self.assertEqual(self.provider.posts,[])
+        with sqlite3.connect(self.drafts.path) as db:
+            self.assertIsNone(db.execute(
+                "SELECT state FROM tumblr_publish_receipts WHERE draft_id=?",
+                (self.draft["id"],)).fetchone())
+        # Failed approval has no durable reservation; the current owner may
+        # preview the new text explicitly rather than being locked out.
+        self.assertEqual(self.drafts.get(self.draft["id"])["text"],
+                         "変更済みで未承諾の本文")
+
     def test_deleted_draft_between_preview_and_confirm_does_not_publish(self):
         reader=TumblrReadAdapter("owner",self.folder/"access",
             transport=self.provider,token_provider=lambda:"sample-token")
