@@ -635,6 +635,30 @@
                   });
                   td.appendChild(check);
                 }
+                // Each action only creates a verified-target proposal. The
+                // Assistant renders a second explicit confirmation before
+                // any provider write, and no bulk operation is exposed.
+                const engagement=record.type==="blog"
+                  ? [["engagement.follow","フォロー","blog",record.blog]]
+                  : (typeof record.candidate_id==="string"&&
+                     /^[a-z0-9][a-z0-9-]{0,62}:[0-9]{1,25}$/.test(record.candidate_id)
+                      ? [["engagement.like","いいね","post",record.candidate_id],
+                         ["engagement.reblog","リブログ","post",record.candidate_id],
+                         ["engagement.follow","フォロー","blog",record.blog]]
+                      : []);
+                engagement.forEach(function(spec){
+                  const button=document.createElement("button");
+                  button.type="button";
+                  button.className="discovery-exclude";
+                  button.textContent=spec[1];
+                  button.setAttribute("aria-label",record.blog+"への"+spec[1]+"を事前確認");
+                  button.addEventListener("click",function(){
+                    button.disabled=true;
+                    post({selected_action:spec[0],selected_target:spec[3]})
+                      .finally(function(){button.disabled=false;});
+                  });
+                  td.appendChild(button);
+                });
               }
             }catch(error){td.textContent="リンク無効";}
           }else{td.textContent=value||"—";}
@@ -807,6 +831,9 @@
       "tumblr.discover":"公開候補を検索",
       "tumblr.list_posts":"投稿一覧を確認",
       "tumblr.publish_draft":"下書きの公開を確認",
+      "engagement.like":"指定投稿にいいね",
+      "engagement.reblog":"指定投稿をリブログ",
+      "engagement.follow":"指定ブログをフォロー",
       "analytics.get_summary":"集計を確認",
     };
     let visibleStart=0;
