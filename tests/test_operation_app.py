@@ -53,6 +53,13 @@ class OperationAppTests(unittest.TestCase):
         self.assertNotIn('フォロー・タグ・公開候補を確認',self.html)
         self.assertEqual(self.html.count('class="goal"'),6)
 
+    def test_connected_read_only_tumblr_exposes_write_reauthorization_button(self):
+        self.assertIn('if(state.can_publish!==true)',self.js)
+        self.assertIn('connect.textContent="投稿権限を追加"',self.js)
+        self.assertIn('connect.textContent="Tumblr再連携"',self.js)
+        self.assertIn('fetch("/oauth/start"',self.js)
+        self.assertIn('url.hostname!=="www.tumblr.com"',self.js)
+
     def test_chat_first_without_oversized_metadata_or_repeated_explanations(self):
         self.assertNotIn('class="eyebrow"', self.html)
         self.assertNotIn('TGtumbler / Tumblr</span>', self.html)
