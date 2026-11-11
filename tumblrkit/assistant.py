@@ -413,6 +413,22 @@ class Assistant:
                 result["next_target"] = target
                 result["complete"] = detail.get("complete") is True
                 result["from_cache"] = detail.get("from_cache") is True
+            candidates=detail.get("related_tags")
+            if (detail.get("related_basis")=="observed_cooccurring_tags"
+                    and isinstance(candidates,list)):
+                related=[]
+                for candidate in candidates[:8]:
+                    if not isinstance(candidate,dict):
+                        continue
+                    tag=candidate.get("tag")
+                    count=candidate.get("count")
+                    if (isinstance(tag,str) and 0<len(tag)<=64
+                            and not any(char in tag for char in "/?#&=<>")
+                            and isinstance(count,int) and not isinstance(count,bool)
+                            and 0<count<=100):
+                        related.append({"tag":tag,"count":count,"target":"tag:"+tag})
+                result["related_tags"]=related
+                result["related_basis"]="observed_cooccurring_tags"
         return result
 
     def _failure_text(self, code):
