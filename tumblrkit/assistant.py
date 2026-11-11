@@ -6,6 +6,7 @@ not reported as completed work. Secret-like text is removed before any provider
 prompt. Paid fallback is not attempted.
 """
 import json
+import hashlib
 import os
 import socket
 import re
@@ -405,9 +406,9 @@ class Assistant:
                     False,recovery=True,action=action,provider=provider)
         if action in CONFIRM:
             request_id = uuid.uuid4().hex
-            self.pending[request_id] = (action, target)
             label = "AIの提案" if ai else "既存ツール索引の候補であり、AIの判断ではありません"
             text = label + "。プレビュー: " + action + " を " + target + " に対して行う操作です。まだ実行していません。"
+            expected_digest=None
             if action=="tumblr.publish_draft":
                 tumblr=self.bridge.adapters.get("tumblr")
                 publisher=getattr(tumblr,"publisher",None)
@@ -415,10 +416,11 @@ class Assistant:
                     try:
                         saved=publisher.drafts.get(target)
                     except (ValueError,OSError):
-                        self.pending.pop(request_id,None)
                         return self._pack("failed","保存済み下書きを確認できません。投稿していません。",
                                           False,recovery=True,action=action,provider=provider)
+                    expected_digest=hashlib.sha256(saved["text"].encode("utf-8")).hexdigest()
                     text="Tumblr公開前確認。対象：本人のブログ\n投稿本文：\n"+saved["text"]+"\n確認ボタンを押すまで公開しません。"
+            self.pending[request_id] = (action, target, expected_digest)
             return self._pack("confirmation_required", text + omitted + question, False, request_id=request_id, action=action, provider=provider)
         result = self.bridge.dispatch(ActionRequest(uuid.uuid4().hex, action, target))
         return self._from_bridge(result, provider)
@@ -427,7 +429,21 @@ class Assistant:
         item = self.pending.get(request_id or "")
         if not item:
             return self._pack("failed", "確認できる提案がありません。実行していません。", False, recovery=True)
-        action, target = item
+        action, target, expected_digest = item
+        if action=="tumblr.publish_draft":
+            tumblr=self.bridge.adapters.get("tumblr")
+            publisher=getattr(tumblr,"publisher",None)
+            try:
+                current=publisher.drafts.get(target) if publisher is not None else None
+            except (ValueError,OSError):
+                current=None
+            if (current is None or expected_digest is None or
+                    hashlib.sha256(current["text"].encode("utf-8")).hexdigest()!=expected_digest):
+                self.pending.pop(request_id,None)
+                return self._pack("failed",
+                    "確認した本文が変更または削除されました。公開していません。"
+                    "現在の下書きを表示して再確認してください。",
+                    False,recovery=True,action=action,provider="confirmed")
         result = self.bridge.dispatch(ActionRequest(request_id, action, target, confirmed=True))
         self.pending.pop(request_id, None)
         return self._from_bridge(result, "confirmed", confirmed=True)
