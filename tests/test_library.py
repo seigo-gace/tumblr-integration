@@ -94,6 +94,26 @@ class LibraryTests(unittest.TestCase):
         self.assertFalse(next(x for x in self.library.list()["items"] if x["candidate_id"]=="alpha:100")["seen"])
         self.assertEqual(self.library.list("favorite")["total"],0)
 
+    def test_later_media_indexes_are_not_silently_truncated_and_resume(self):
+        media=[{"url":f"https://64.media.tumblr.com/image-{i}.jpg","type":"image"}
+               for i in range(85)]
+        self.store.save_page("tag:many",[],[{
+            "candidate_id":"alpha:140","blog":"alpha","post_id":"140",
+            "url":"https://alpha.tumblr.com/post/140","title":"many images",
+            "type":"image","date":"","thumbnail_url":"","text_excerpt":"",
+            "tags":[],"note_count":0,"media_refs":media,
+        }],4,complete=True)
+        entry=next(x for x in self.library.list()["items"] if x["candidate_id"]=="alpha:140")
+        self.assertEqual(len(entry["media"]),85)
+        self.assertEqual(entry["media"][74]["url"],media[74]["url"])
+        self.library.progress("alpha:140",74)
+        reopened=Library(DiscoveryStore(self.store.path))
+        position=reopened.list()["last_position"]
+        self.assertEqual(position,{"candidate_id":"alpha:140","media_index":74})
+        self.assertEqual(reopened.resume_item()["last_media_index"],74)
+        with self.assertRaises(ValueError):
+            reopened.progress("alpha:140",85)
+
     def test_invalid_media_position_never_mutates(self):
         for index in (-1,2,50,True,"0"):
             with self.assertRaises(ValueError):
