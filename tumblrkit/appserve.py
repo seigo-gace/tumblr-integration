@@ -554,7 +554,7 @@ class _Handler(BaseHTTPRequestHandler):
             except (OSError,sqlite3.Error):
                 self._json(503,{"error":"media_store_unavailable"})
             return
-        if parts.path in ("/library/update","/library/progress"):
+        if parts.path in ("/library/update","/library/progress","/library/selected"):
             if not _authorized(self):
                 self._unauthorized()
                 return
@@ -565,13 +565,17 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 if self.headers.get("Content-Type","").split(";",1)[0].strip().lower()!="application/json":
                     raise ValueError("invalid_content_type")
-                data=json.loads(self._read_body(8192).decode("utf-8"))
+                data=json.loads(self._read_body(65536).decode("utf-8"))
                 if not isinstance(data,dict):
                     raise ValueError("library_payload_invalid")
                 if parts.path=="/library/update":
                     if set(data)!={"candidate_ids","field","value"}:
                         raise ValueError("library_payload_invalid")
                     result=self.server.library.update(data["candidate_ids"],data["field"],data["value"])
+                elif parts.path=="/library/selected":
+                    if set(data)!={"candidate_ids"}:
+                        raise ValueError("library_payload_invalid")
+                    result=self.server.library.selected(data["candidate_ids"])
                 else:
                     if set(data)!={"candidate_id","media_index"}:
                         raise ValueError("library_payload_invalid")
