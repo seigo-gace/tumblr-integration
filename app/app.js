@@ -575,6 +575,35 @@
         section.appendChild(chart);
       }
     }
+    if(view.action==="tumblr.discover"&&view.related_basis==="observed_cooccurring_tags"&&
+       Array.isArray(view.related_tags)){
+      const intro=document.createElement("p");
+      intro.textContent="取得済み投稿で一緒に使われたタグ（実測回数）";
+      section.appendChild(intro);
+      if(!view.related_tags.length){
+        const empty=document.createElement("p");
+        empty.textContent="関連タグは確認できませんでした。推測で追加しません。";
+        section.appendChild(empty);
+      }
+      view.related_tags.slice(0,8).forEach(function(item){
+        if(!item||typeof item.tag!=="string"||
+           !Number.isInteger(item.count)||item.count<1||
+           item.target!=="tag:"+item.tag||item.tag.length>64)return;
+        const button=document.createElement("button");
+        button.type="button";
+        button.className="discovery-next";
+        button.textContent="#"+item.tag+" ("+item.count+"件)";
+        button.setAttribute("aria-label","関連タグ "+item.tag+" の公開投稿を取得");
+        button.addEventListener("click",function(){
+          if(!window.confirm("関連タグの公開投稿をTumblr公式APIから1ページ取得しますか？"))return;
+          button.disabled=true;
+          const text="検索して 対象: "+item.target;
+          lastText=text;display(text,"user");
+          post({message:text}).finally(function(){button.disabled=false;});
+        });
+        section.appendChild(button);
+      });
+    }
     if(view.truncated){
       const note=document.createElement("p");note.textContent="先頭100件を表示しています。";section.appendChild(note);
     }
