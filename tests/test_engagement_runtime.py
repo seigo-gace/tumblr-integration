@@ -185,6 +185,25 @@ class EngagementTests(unittest.TestCase):
         self.assertEqual(self.budget.calls,[3,1])
         self.assertEqual(len(self.writer.calls),1)
 
+    def test_malformed_readback_after_post_stays_sent_without_reposting(self):
+        original=self.reader.get
+        def malformed_after_write(path,bearer):
+            if self.reader.liked:
+                return {"meta":None,"response":{}}
+            return original(path,bearer)
+        self.reader.get=malformed_after_write
+        with self.assertRaisesRegex(ValueError,"engagement_readback_unverified"):
+            self.adapter.perform("engagement.like","source:123",{})
+        self.assertEqual(len(self.writer.calls),1)
+        with sqlite3.connect(self.store.path) as db:
+            state=db.execute("SELECT state FROM engagement_receipts").fetchone()[0]
+        self.assertEqual(state,"sent")
+        self.reader.get=original
+        result=self.adapter.perform("engagement.like","source:123",{})
+        self.assertTrue(result["verified"])
+        self.assertEqual(len(self.writer.calls),1)
+        self.assertEqual(self.budget.calls,[3,1])
+
     def test_excluded_unknown_or_self_target_does_not_touch_provider(self):
         for action,target in (("engagement.like","other:123"),
                               ("engagement.reblog","source:999"),
