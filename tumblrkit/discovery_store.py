@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS discovery_sources(
   cursor INTEGER NOT NULL DEFAULT 0,
   watermark TEXT NOT NULL DEFAULT '',
   complete INTEGER NOT NULL DEFAULT 0,
+  cursor_kind TEXT NOT NULL DEFAULT 'offset',
   updated_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS discovery_blogs(
@@ -86,6 +87,13 @@ class DiscoveryStore:
         db.execute("PRAGMA busy_timeout=4000")
         db.execute("PRAGMA journal_mode=DELETE")
         db.executescript(SCHEMA)
+        source_columns={row[1] for row in db.execute("PRAGMA table_info(discovery_sources)")}
+        if "cursor_kind" not in source_columns:
+            # Only existing timestamp-based blog checkpoints need preserving.
+            # New offset cursors must never be guessed from their magnitude.
+            db.execute("ALTER TABLE discovery_sources ADD COLUMN cursor_kind TEXT NOT NULL DEFAULT 'offset'")
+            db.execute("UPDATE discovery_sources SET cursor_kind='timestamp' "
+                       "WHERE source_key LIKE 'blog:%' AND cursor>100000")
         columns={row[1] for row in db.execute("PRAGMA table_info(discovery_posts)")}
         if "media_json" not in columns:
             db.execute("ALTER TABLE discovery_posts ADD COLUMN media_json TEXT NOT NULL DEFAULT '[]'")
@@ -98,10 +106,21 @@ class DiscoveryStore:
         return {"cursor":row[0],"watermark":row[1],"complete":bool(row[2])} if row else {
             "cursor":0,"watermark":"","complete":False}
 
-    def save_page(self,source,blogs,posts,next_cursor,complete=False,watermark=""):
+    def blog_cursor_kind(self, source):
+        with closing(self._open()) as db:
+            row=db.execute("SELECT cursor_kind FROM discovery_sources WHERE source_key=?",
+                           (source,)).fetchone()
+        kind=row[0] if row else "offset"
+        if kind not in ("offset", "timestamp"):
+            raise ValueError("discovery_cursor_kind_invalid")
+        return kind
+
+    def save_page(self,source,blogs,posts,next_cursor,complete=False,watermark="",cursor_kind=None):
         if (not isinstance(next_cursor,int) or isinstance(next_cursor,bool)
                 or next_cursor<0 or next_cursor>253402300799):
             raise ValueError("discovery_cursor_invalid")
+        if cursor_kind not in (None, "offset", "timestamp"):
+            raise ValueError("discovery_cursor_kind_invalid")
         now=int(self.clock())
         with closing(self._open()) as db:
             try:
@@ -136,11 +155,13 @@ class DiscoveryStore:
                     db.execute("INSERT INTO discovery_post_sources(candidate_id,source,last_seen) VALUES(?,?,?) "
                                "ON CONFLICT(candidate_id,source) DO UPDATE SET last_seen=excluded.last_seen",
                                (post["candidate_id"],source,now))
-                db.execute("INSERT INTO discovery_sources(source_key,cursor,watermark,complete,updated_at)"
-                           " VALUES(?,?,?,?,?) ON CONFLICT(source_key) DO UPDATE SET"
+                db.execute("INSERT INTO discovery_sources(source_key,cursor,watermark,complete,updated_at,cursor_kind)"
+                           " VALUES(?,?,?,?,?,?) ON CONFLICT(source_key) DO UPDATE SET"
                            " cursor=excluded.cursor,watermark=excluded.watermark,"
-                           " complete=excluded.complete,updated_at=excluded.updated_at",
-                           (source,next_cursor,watermark,int(bool(complete)),now))
+                           " complete=excluded.complete,updated_at=excluded.updated_at,"
+                           " cursor_kind=CASE WHEN ? THEN excluded.cursor_kind ELSE discovery_sources.cursor_kind END",
+                           (source,next_cursor,watermark,int(bool(complete)),now,
+                            cursor_kind or "offset",cursor_kind is not None))
                 db.execute("COMMIT")
             except Exception:
                 db.execute("ROLLBACK")
