@@ -72,7 +72,11 @@ class EngagementTransport:
             result=json.loads(raw.decode("utf-8"))
         except (UnicodeError, ValueError):
             raise ValueError("engagement_post_uncertain") from None
-        if not isinstance(result,dict) or result.get("meta",{}).get("status")!=status:
+        # An HTTP success without the official response envelope is not a
+        # verified provider acknowledgement. Preserve the reserved receipt:
+        # a possibly completed write must never be automatically replayed.
+        if (not isinstance(result,dict) or not isinstance(result.get("meta"),dict)
+                or result["meta"].get("status")!=status):
             raise ValueError("engagement_post_uncertain")
         return status,result
 
