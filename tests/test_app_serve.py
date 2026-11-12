@@ -181,7 +181,7 @@ class AppServeTests(unittest.TestCase):
             def __init__(self):
                 self.calls=[]
                 self.results=[
-                    {"meta":{"status":200},"response":{"posts":[{"id_string":"123"}]}},
+                    {"meta":{"status":200},"response":{"posts":[{"id_string":"123","blog_name":"one"}]}},
                     ValueError("tumblr_post_unavailable"),
                 ]
             def get(self,path,token):
