@@ -221,7 +221,7 @@ class DiscoveryEngineTests(unittest.TestCase):
     def test_legacy_timestamp_checkpoint_is_preserved_not_reinterpreted(self):
         store=DiscoveryStore(self.root/"discovery.sqlite3")
         store.save_page("following:following",[{"name":"first","url":"https://first.tumblr.com"}],[],1,True)
-        store.save_page("blog:first",[],[],1762891200,False)
+        store.save_page("blog:first",[],[],1762891200,False,cursor_kind="timestamp")
         adapter,stub=self.scanner([
             envelope({"blog":{"name":"first"},"posts":[]}),
         ])
@@ -234,6 +234,37 @@ class DiscoveryEngineTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             adapter.perform("tumblr.discover","refresh:blog:first",{})
         self.assertEqual(store.checkpoint("blog:first")["cursor"],1762891200)
+
+    def test_blog_offset_over_100000_remains_offset_not_timestamp(self):
+        store=DiscoveryStore(self.root/"discovery.sqlite3")
+        store.save_page("following:following",
+                        [{"name":"first","url":"https://first.tumblr.com"}],[],1,True)
+        store.save_page("blog:first",[],[],100010,False,cursor_kind="offset")
+        adapter,stub=self.scanner([
+            envelope({"blog":{"name":"first"},"posts":[]}),
+        ])
+        result=adapter.perform("tumblr.discover","blog:first",{})
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["cursor"],100010)
+        self.assertEqual(store.blog_cursor_kind("blog:first"),"offset")
+        self.assertIn("offset=100010",stub.calls[0])
+        self.assertNotIn("before=",stub.calls[0])
+
+    def test_legacy_database_migrates_timestamp_cursor_once(self):
+        import sqlite3
+        db_path=self.root/"discovery.sqlite3"
+        with sqlite3.connect(db_path) as db:
+            db.execute("CREATE TABLE discovery_sources("
+                       "source_key TEXT PRIMARY KEY,cursor INTEGER NOT NULL,"
+                       "watermark TEXT NOT NULL DEFAULT '',complete INTEGER NOT NULL DEFAULT 0,"
+                       "updated_at INTEGER NOT NULL DEFAULT 0)")
+            db.execute("INSERT INTO discovery_sources(source_key,cursor) "
+                       "VALUES('blog:first',1762891200)")
+        os.chmod(db_path,0o600)
+        store=DiscoveryStore(db_path)
+        self.assertEqual(store.blog_cursor_kind("blog:first"),"timestamp")
+        self.assertEqual(store.checkpoint("blog:first")["cursor"],1762891200)
+        self.assertEqual(store.blog_cursor_kind("blog:first"),"timestamp")
 
     def test_existing_assistant_action_reaches_selected_blog_posts_and_library(self):
         from tumblrkit.assistant import Assistant
