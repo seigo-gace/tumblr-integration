@@ -35,6 +35,28 @@ class CoreTests(unittest.TestCase):
         self.assertFalse(record_event(self.db,"e1","click","tumblr"))
         self.assertEqual([("tumblr","click",1)],event_counts(self.db))
 
+    def test_reused_event_id_with_different_origin_is_rejected(self):
+        self.assertTrue(record_event(self.db,"event-1","click","tumblr"))
+        self.assertFalse(record_event(self.db,"event-1","click","tumblr"))
+        for kind,source in (("member","tumblr"),("click","telegram")):
+            with self.subTest(kind=kind,source=source):
+                with self.assertRaisesRegex(ValueError,"campaign_event_id_conflict"):
+                    record_event(self.db,"event-1",kind,source)
+        self.assertEqual(event_counts(self.db),[("tumblr","click",1)])
+        for bad in ("",None,42):
+            with self.assertRaises(ValueError):
+                record_event(self.db,bad,"click","tumblr")
+
+    def test_job_key_conflict_cannot_change_existing_action(self):
+        self.assertTrue(enqueue(self.db,"same-job","scan"))
+        self.assertFalse(enqueue(self.db,"same-job","scan"))
+        with self.assertRaisesRegex(ValueError,"campaign_job_key_conflict"):
+            enqueue(self.db,"same-job","publish")
+        self.assertEqual(self.db.execute(
+            "SELECT action FROM jobs WHERE job_key='same-job'").fetchone()[0],"scan")
+        with self.assertRaises(ValueError):
+            enqueue(self.db,"","scan")
+
     def test_library(self):
         upsert_post(self.db,"p1","https://example.com/p1")
         mark_post(self.db,"p1",seen=True,favorite=True)
