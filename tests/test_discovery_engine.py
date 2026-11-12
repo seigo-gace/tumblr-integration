@@ -127,6 +127,27 @@ class DiscoveryEngineTests(unittest.TestCase):
                 self.assertTrue(repeated["from_cache"])
                 self.assertEqual(len(stub.calls), 1)
 
+    def test_empty_following_or_followers_page_before_total_preserves_cursor(self):
+        for mode, records_key, count_key in (
+            ("following", "blogs", "total_blogs"),
+            ("followers", "users", "total_users"),
+        ):
+            with self.subTest(mode=mode):
+                db=self.root/("discovery-"+mode+".sqlite3")
+                store=DiscoveryStore(db)
+                source=mode+":"+mode
+                store.save_page(source,[],[],10,complete=False)
+                stub=FakePages([envelope({records_key:[],count_key:30})])
+                engine=DiscoveryEngine("owner",self.token,stub)
+                engine.store=store
+                with self.assertRaisesRegex(ValueError,"discovery_page_incomplete"):
+                    engine.scan(mode,{})
+                self.assertEqual(len(stub.calls),1)
+                self.assertIn("offset=10",stub.calls[0])
+                self.assertEqual(store.checkpoint(source)["cursor"],10)
+                self.assertFalse(store.checkpoint(source)["complete"])
+                self.assertEqual(store.count_blogs(source),0)
+
     def test_following_pagination_persists_across_restart_and_dedupes(self):
         page1=envelope({"total_blogs":11,"blogs":[
             {"name":"first"},{"name":"second"},{"name":"second"}]})
