@@ -283,20 +283,25 @@ class MediaSave:
             media=json.loads(raw)
             if not isinstance(media,list):
                 raise MediaError("MEDIA_SELECTION_INVALID")
-            # A video post without any direct media may use its single
-            # verified-post extractor fallback at index zero. Every other
-            # index must exist in the *actual* stored list, not an invented cap.
-            if index>=len(media) and (index!=0 or media):
+            # The Library viewer numbers only accepted Tumblr media URLs.
+            # Use that same filtered order, not raw Discovery JSON positions:
+            # an unsafe reference before a valid video must not shift what
+            # the owner explicitly chose to save.
+            visible=[accepted for item in media
+                     if (accepted:=_safe_media(item)) is not None]
+            # A video post without any direct media may still use the
+            # single verified-post extractor fallback at index zero.
+            if index>=len(visible) and (index!=0 or visible):
                 raise MediaError("MEDIA_INDEX_INVALID")
-            selected=media[index] if index<len(media) else None
-            if selected is not None and selected.get("type")=="video":
-                accepted=_safe_media(selected)
-                if accepted and accepted["type"]=="video":
-                    _media_url(accepted["url"])
-                    return post_id,accepted["url"],post_url,blog,True
-            # A present but invalid video source is not evidence that the
-            # provider has no direct source. Do not bypass its URL guard.
-            if isinstance(selected,dict) and selected.get("type")=="video" and selected.get("url"):
+            selected=visible[index] if index<len(visible) else None
+            if selected is not None and selected["type"]=="video":
+                _media_url(selected["url"])
+                return post_id,selected["url"],post_url,blog,True
+            # Invalid direct video URLs cannot be used as an excuse to
+            # extract through the post fallback; that is not proof that a
+            # safe source is absent.
+            if any(isinstance(item,dict) and item.get("type")=="video"
+                   and item.get("url") and _safe_media(item) is None for item in media):
                 raise MediaError("MEDIA_SELECTION_INVALID")
             # Original Tumblr post with no direct video source, often video
             # blocks with a poster or externally embedded video metadata.
@@ -308,8 +313,9 @@ class MediaSave:
             # post extractor attempt that exact post; never select an image.
             videos=[i for i,item in enumerate(media)
                     if isinstance(item,dict) and item.get("type")=="video"]
-            if videos and (videos!=[0] or not isinstance(selected,dict)
-                           or selected.get("type")!="video"):
+            fallback_source=media[0] if media else None
+            if videos and (videos!=[0] or not isinstance(fallback_source,dict)
+                           or fallback_source.get("type")!="video"):
                 raise MediaError("MEDIA_SELECTION_INVALID")
             return post_id,post_url,post_url,blog,False
         except MediaError:
