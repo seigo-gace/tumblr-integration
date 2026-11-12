@@ -185,6 +185,28 @@ class LibraryTests(unittest.TestCase):
         item=next(x for x in self.library.list()["items"] if x["candidate_id"]=="alpha:103")
         self.assertEqual(item["media"],[{"url":"https://64.media.tumblr.com/p.jpg","type":"image"}])
 
+    def test_progress_indexes_match_only_safe_visible_media(self):
+        self.store.save_page("tag:unsafe-index",[],[{
+            "candidate_id":"alpha:104","blog":"alpha","post_id":"104",
+            "url":"https://alpha.tumblr.com/post/104","title":"mixed references",
+            "type":"image","date":"","thumbnail_url":"","text_excerpt":"",
+            "tags":[],"note_count":0,"media_refs":[
+                {"url":"https://attacker.invalid/hidden.jpg","type":"image"},
+                {"url":"https://64.media.tumblr.com/first.jpg","type":"image"},
+                {"url":"https://64.media.tumblr.com/second.jpg","type":"image"},
+                {"url":"http://64.media.tumblr.com/hidden.jpg","type":"image"},
+            ],
+        }],1,complete=True)
+        entry=next(x for x in self.library.list()["items"] if x["candidate_id"]=="alpha:104")
+        self.assertEqual(len(entry["media"]),2)
+        with self.assertRaisesRegex(ValueError,"library_media_index_invalid"):
+            self.library.progress("alpha:104",2)
+        self.assertIsNone(self.library.list()["last_position"])
+        self.library.progress("alpha:104",1)
+        resumed=Library(DiscoveryStore(self.store.path)).resume_item()
+        self.assertEqual(resumed["last_media_index"],1)
+        self.assertEqual(resumed["media"][1]["url"],"https://64.media.tumblr.com/second.jpg")
+
     def test_private_database_permissions_fail_closed(self):
         os.chmod(self.store.path,0o644)
         with self.assertRaises(ValueError):
