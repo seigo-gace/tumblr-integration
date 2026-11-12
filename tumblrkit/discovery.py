@@ -369,12 +369,25 @@ class DiscoveryEngine:
                 self.store.mark_unavailable(candidate_id)
                 return {"verified":True,"candidate_id":candidate_id,"state":"unavailable"}
             raise
-        if (not isinstance(result,dict) or result.get("meta",{}).get("status")!=200):
+        if (not isinstance(result,dict) or not isinstance(result.get("meta"),dict)
+                or result["meta"].get("status")!=200):
             raise ValueError("discovery_candidate_check_unverified")
-        posts=result.get("response",{}).get("posts") if isinstance(result.get("response"),dict) else None
+        response=result.get("response")
+        posts=response.get("posts") if isinstance(response,dict) else None
         if not isinstance(posts,list):
             raise ValueError("discovery_candidate_check_unverified")
-        if not any(str(p.get("id_string") or p.get("id"))==post_id for p in posts if isinstance(p,dict)):
-            self.store.mark_unavailable(candidate_id)
-            return {"verified":True,"candidate_id":candidate_id,"state":"unavailable"}
+        # A 200 with no matching post can be incomplete, stale, or unrelated.
+        # Only the verified exact-ID 404 branch above permits marking it
+        # unavailable; never turn an ambiguous success into a deletion.
+        matched=False
+        for item in posts:
+            if not isinstance(item,dict):
+                raise ValueError("discovery_candidate_check_unverified")
+            if str(item.get("id_string") or item.get("id"))!=post_id:
+                continue
+            if normalize_blog(item.get("blog_name"))!=blog:
+                raise ValueError("discovery_candidate_check_unverified")
+            matched=True
+        if not matched:
+            raise ValueError("discovery_candidate_check_unverified")
         return {"verified":True,"candidate_id":candidate_id,"state":"visible"}
