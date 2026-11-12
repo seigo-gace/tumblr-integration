@@ -659,6 +659,37 @@ class DiscoveryEngineTests(unittest.TestCase):
         self.assertIn("id=991",stub.calls[-1])
         self.assertEqual(DiscoveryStore(self.root/"discovery.sqlite3").read_candidates(),[])
 
+    def test_success_without_exact_matching_post_never_marks_candidate_deleted(self):
+        initial={"blog_name":"one","id_string":"993",
+                 "post_url":"https://one.tumblr.com/post/993",
+                 "summary":"post","timestamp":212}
+        ambiguous=([],[{"blog_name":"one","id_string":"994"}],
+                   [{"blog_name":"different","id_string":"993"}])
+        for posts in ambiguous:
+            with self.subTest(posts=posts):
+                store=DiscoveryStore(self.root/"discovery.sqlite3")
+                adapter,stub=self.scanner([
+                    envelope([initial]),
+                    envelope({"posts":posts}),
+                ])
+                adapter.perform("tumblr.discover","refresh:tag:valid",{})
+                with self.assertRaisesRegex(ValueError,"discovery_candidate_check_unverified"):
+                    DiscoveryEngine("owner",self.token,stub).recheck_candidate("one:993")
+                self.assertEqual(store.candidate("one:993")["state"],"visible")
+                self.assertEqual(len(stub.calls),2)
+
+    def test_verified_exact_id_success_preserves_candidate(self):
+        initial={"blog_name":"one","id_string":"995",
+                 "post_url":"https://one.tumblr.com/post/995",
+                 "summary":"post","timestamp":212}
+        adapter,stub=self.scanner([
+            envelope([initial]),envelope({"posts":[initial]})
+        ])
+        adapter.perform("tumblr.discover","tag:valid",{})
+        result=DiscoveryEngine("owner",self.token,stub).recheck_candidate("one:995")
+        self.assertEqual(result["state"],"visible")
+        self.assertEqual(DiscoveryStore(self.root/"discovery.sqlite3").candidate("one:995")["state"],"visible")
+
     def test_network_failure_never_marks_candidate_deleted(self):
         initial=envelope([{"blog_name":"one","id_string":"992",
             "post_url":"https://one.tumblr.com/post/992","summary":"post","timestamp":212}])
