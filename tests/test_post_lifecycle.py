@@ -253,6 +253,45 @@ class PublishedLifecycleTests(unittest.TestCase):
         current=next(x for x in self.store.list() if x["id"]==self.source["id"])
         self.assertEqual(current["publish_state"],"deleted")
 
+    def test_malformed_owner_post_precheck_does_not_lock_or_edit(self):
+        target,_=self._edit("編集してはならない")
+        preview=self.publisher.lifecycle.preview("tumblr.edit_post",target)
+        original=self.fake.get
+        self.fake.get=lambda path,bearer: {"meta":None,"response":{}}
+        with self.assertRaisesRegex(ValueError,"tumblr_post_external_changed"):
+            self.publisher.lifecycle.perform("tumblr.edit_post",target,
+                            {"expected_digest":preview["approval"]})
+        self.assertEqual(len([c for c in self.fake.calls if c[0]=="edit"]),0)
+        with sqlite3.connect(self.store.path) as db:
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM tumblr_post_mutations").fetchone()[0],0)
+        self.fake.get=original
+        verified=self.publisher.lifecycle.perform("tumblr.edit_post",target,
+                            {"expected_digest":preview["approval"]})
+        self.assertTrue(verified["verified"])
+        self.assertEqual(len([c for c in self.fake.calls if c[0]=="edit"]),1)
+
+    def test_malformed_after_edit_readback_only_reconciles_no_repost(self):
+        target,_=self._edit("新しい編集内容")
+        preview=self.publisher.lifecycle.preview("tumblr.edit_post",target)
+        original=self.fake.get
+        def malformed_after_edit(path,bearer):
+            if self.fake.text=="新しい編集内容":
+                return {"meta":None,"response":{}}
+            return original(path,bearer)
+        self.fake.get=malformed_after_edit
+        with self.assertRaisesRegex(ValueError,"tumblr_post_readback_unverified"):
+            self.publisher.lifecycle.perform("tumblr.edit_post",target,
+                            {"expected_digest":preview["approval"]})
+        self.assertEqual(len([c for c in self.fake.calls if c[0]=="edit"]),1)
+        with sqlite3.connect(self.store.path) as db:
+            self.assertEqual(db.execute(
+                "SELECT state FROM tumblr_post_mutations").fetchone()[0],"sent")
+        self.fake.get=original
+        result=self.publisher.lifecycle.reconcile(self.source["id"])
+        self.assertTrue(result["verified"])
+        self.assertEqual(len([c for c in self.fake.calls if c[0]=="edit"]),1)
+
     def test_external_change_blocks_update_and_delete_without_side_effects(self):
         target,_=self._edit("勝手に上書きさせない")
         preview=self.publisher.lifecycle.preview("tumblr.edit_post",target)
