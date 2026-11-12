@@ -218,7 +218,20 @@ class DiscoveryEngine:
             unique={}
             for item in records[:SOURCE_LIMIT]:
                 row=self._blog(item,blocked)
-                if row: unique[row["name"]]=row
+                if row is None:
+                    # An explicit local exclusion may discard a valid blog.
+                    # Malformed provider records may not silently consume a
+                    # cursor position and lose a still-unseen followed blog.
+                    if not isinstance(item,dict) or not isinstance(item.get("name"),str):
+                        raise ValueError("discovery_page_blog_unverified")
+                    try:
+                        candidate_name=normalize_blog(item["name"])
+                    except (TypeError,ValueError):
+                        raise ValueError("discovery_page_blog_unverified") from None
+                    if candidate_name not in blocked:
+                        raise ValueError("discovery_page_blog_unverified")
+                    continue
+                unique[row["name"]]=row
             next_cursor=offset+len(records[:SOURCE_LIMIT])
             complete=next_cursor>=count or not records
             self.store.save_page(source,list(unique.values()),[],next_cursor,
