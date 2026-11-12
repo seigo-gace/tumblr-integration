@@ -120,6 +120,34 @@ class MediaSaveTests(unittest.TestCase):
         self.assertTrue(file.read_bytes().startswith(b"\x00\x00\x00\x14ftyp"))
         self.assertFalse(list(self.media.glob("*.part")))
 
+    def test_media_save_index_matches_library_visible_video_order(self):
+        from tumblrkit.library import Library
+        videos=[
+            {"url":"https://attacker.invalid/unsafe.mp4","type":"video"},
+            {"url":"https://64.media.tumblr.com/first.mp4","type":"video"},
+            {"url":"https://attacker.invalid/hidden.jpg","type":"image"},
+            {"url":"https://64.media.tumblr.com/second.mp4","type":"video"},
+        ]
+        self.db.save_page("tag:mixed",[],[{
+            "candidate_id":"source:456","blog":"source","post_id":"456",
+            "url":"https://source.tumblr.com/post/456","title":"ordered videos",
+            "type":"video","date":"","thumbnail_url":"","text_excerpt":"",
+            "tags":[],"note_count":0,"media_refs":videos,
+        }],1,complete=True)
+        listed=Library(self.db).selected(["source:456"])["items"][0]["media"]
+        self.assertEqual([item["url"] for item in listed],[
+            "https://64.media.tumblr.com/first.mp4",
+            "https://64.media.tumblr.com/second.mp4"])
+        first=self.worker.save("source:456",0,rights_confirmed=True)
+        self.assertEqual(first["state"],"completed")
+        second=self.worker.save("source:456",1,rights_confirmed=True)
+        self.assertEqual(second["state"],"completed")
+        self.assertEqual([url for operation,url in self.downloader.calls if operation=="HEAD"],
+                         [listed[0]["url"],listed[1]["url"]])
+        self.assertFalse(any("attacker.invalid" in url for _,url in self.downloader.calls))
+        with self.assertRaisesRegex(MediaError,"MEDIA_INDEX_INVALID"):
+            self.worker.save("source:456",2,rights_confirmed=True)
+
     def test_repeated_request_is_cached_without_download(self):
         first=self.worker.save("source:123",0,True)
         second=self.worker.save("source:123",0,True)
