@@ -206,6 +206,54 @@ class PublisherRuntimeTests(unittest.TestCase):
             "tumblr.publish_draft",self.draft["id"],{})["verified"])
         self.assertEqual(len(self.provider.posts),1)
 
+    def test_malformed_post_envelope_never_retries_a_possible_publication(self):
+        class BadEnvelope(OfflinePost):
+            def post_json(self,path,bearer,body,budget):
+                self.posts.append((path,bearer,body))
+                return {"meta":None,"response":{"id":"23456789"}}
+        provider=BadEnvelope()
+        publisher=PublisherAdapter("owner",self.drafts,lambda:"sample-token",
+            read_transport=provider,write_transport=provider,budget=self.budget)
+        with self.assertRaisesRegex(ValueError,"tumblr_publish_uncertain"):
+            publisher.perform("tumblr.publish_draft",self.draft["id"],{})
+        self.assertEqual(len(provider.posts),1)
+        with self.assertRaisesRegex(ValueError,"tumblr_publish_reconcile_required"):
+            publisher.perform("tumblr.publish_draft",self.draft["id"],{})
+        self.assertEqual(len(provider.posts),1)
+        with sqlite3.connect(self.drafts.path) as db:
+            state=db.execute("SELECT state FROM tumblr_publish_receipts").fetchone()[0]
+        self.assertEqual(state,"reserved")
+
+    def test_malformed_readback_preserves_sent_receipt_and_no_repost(self):
+        original=self.provider.get
+        self.provider.get=lambda path,bearer: {"meta":None,"response":{}}
+        with self.assertRaisesRegex(ValueError,"tumblr_publish_readback_unverified"):
+            self.publisher.perform("tumblr.publish_draft",self.draft["id"],{})
+        self.assertEqual(len(self.provider.posts),1)
+        with sqlite3.connect(self.drafts.path) as db:
+            state=db.execute("SELECT state FROM tumblr_publish_receipts").fetchone()[0]
+        self.assertEqual(state,"sent")
+        self.provider.get=original
+        self.assertTrue(self.publisher.perform(
+            "tumblr.publish_draft",self.draft["id"],{})["verified"])
+        self.assertEqual(len(self.provider.posts),1)
+
+    def test_mutation_malformed_success_envelope_is_uncertain(self):
+        from unittest.mock import patch
+        from tumblrkit.publisher_runtime import PostTransport
+        class Response:
+            status=200
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def read(self,max_size): return b'{"meta":null,"response":{}}'
+        class Opener:
+            def open(self,request,timeout): return Response()
+        with patch("tumblrkit.publisher_runtime.build_opener",return_value=Opener()):
+            with self.assertRaisesRegex(ValueError,"tumblr_mutation_uncertain"):
+                PostTransport().mutate_json("POST",
+                    "/v2/blog/owner.tumblr.com/post/delete",
+                    "sample-token",{"id":"23456789"},self.budget)
+
     def test_no_unverified_target_payload_or_budget_leaves_no_post(self):
         with self.assertRaises(ValueError):
             self.publisher.perform("tumblr.publish_draft","invalid",{})
