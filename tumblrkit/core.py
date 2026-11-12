@@ -105,8 +105,16 @@ def confirm_membership(db, campaign_id: str, member_id: str, *, gate_verified: b
         return granted
 
 def record_event(db, event_id: str, kind: str, source: str) -> bool:
+    if not all(isinstance(value,str) and value for value in (event_id,kind,source)):
+        raise ValueError("campaign_event_invalid")
     with db:
-        return bool(db.execute("INSERT OR IGNORE INTO events VALUES(?,?,?,?)",(event_id,kind,source,utc_now())).rowcount)
+        existing=db.execute("SELECT kind,source FROM events WHERE id=?",(event_id,)).fetchone()
+        if existing:
+            if existing!=(kind,source):
+                raise ValueError("campaign_event_id_conflict")
+            return False
+        db.execute("INSERT INTO events VALUES(?,?,?,?)",(event_id,kind,source,utc_now()))
+        return True
 
 def event_counts(db) -> list[tuple[str,str,int]]:
     return db.execute("SELECT source,kind,count(*) FROM events GROUP BY source,kind ORDER BY source,kind").fetchall()
@@ -123,5 +131,13 @@ def mark_post(db, post_id: str, *, seen=None, favorite=None, watch_later=None) -
         db.execute("UPDATE posts SET "+", ".join(f"{k}=?" for k in updates)+" WHERE post_id=?",(*updates.values(),post_id))
 
 def enqueue(db, key: str, action: str) -> bool:
+    if not all(isinstance(value,str) and value for value in (key,action)):
+        raise ValueError("campaign_job_invalid")
     with db:
-        return bool(db.execute("INSERT OR IGNORE INTO jobs(job_key,action) VALUES(?,?)",(key,action)).rowcount)
+        existing=db.execute("SELECT action FROM jobs WHERE job_key=?",(key,)).fetchone()
+        if existing:
+            if existing[0]!=action:
+                raise ValueError("campaign_job_key_conflict")
+            return False
+        db.execute("INSERT INTO jobs(job_key,action) VALUES(?,?)",(key,action))
+        return True
