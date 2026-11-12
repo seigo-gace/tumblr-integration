@@ -216,6 +216,34 @@ class EngagementTests(unittest.TestCase):
         self.assertEqual(self.writer.calls,[])
         self.assertEqual(self.reader.calls,[])
 
+    def test_official_post_malformed_envelope_is_uncertain_not_retryable(self):
+        from unittest.mock import patch
+        from tumblrkit.engagement_runtime import EngagementTransport
+        class FakeResponse:
+            status=200
+            def __init__(self, data):
+                self.data=data
+            def __enter__(self):
+                return self
+            def __exit__(self,*args):
+                return False
+            def read(self, limit):
+                return self.data
+        class FakeOpener:
+            def __init__(self, data):
+                self.data=data
+            def open(self, request, timeout):
+                return FakeResponse(self.data)
+        for raw in (b'{"meta":null}', b'{"meta":[]}',
+                    b'{"meta":{"status":201}}', b'[]'):
+            with self.subTest(response=raw):
+                with patch("tumblrkit.engagement_runtime.build_opener",
+                           return_value=FakeOpener(raw)):
+                    with self.assertRaisesRegex(ValueError,"engagement_post_uncertain"):
+                        EngagementTransport().post("/v2/user/like",
+                            "valid-owner-token",{"id":"123","reblog_key":"verified-key"},
+                            self.budget)
+
     def test_no_unlisted_action_or_batch_payload(self):
         with self.assertRaises(ValueError):
             self.adapter.perform("engagement.bulk_like","source:123",{})
