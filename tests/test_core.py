@@ -12,6 +12,29 @@ class CoreTests(unittest.TestCase):
     def test_referral_stable(self):
         self.assertEqual(self.code,issue_referral(self.db,"c1","alice"))
 
+    def test_referral_code_is_stable_and_inactive_campaign_does_not_issue(self):
+        first=issue_referral(self.db,"c1","parallel-referrer")
+        second=issue_referral(self.db,"c1","parallel-referrer")
+        self.assertEqual(first,second)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM referrals WHERE campaign_id='c1' "
+            "AND referrer_id='parallel-referrer'").fetchone()[0],1)
+        with self.db:
+            self.db.execute("UPDATE campaigns SET active=0 WHERE id='c1'")
+        with self.assertRaises(ValueError):
+            issue_referral(self.db,"c1","new-referrer")
+        self.assertIsNone(self.db.execute(
+            "SELECT code FROM referrals WHERE referrer_id='new-referrer'").fetchone())
+
+    def test_gate_confirmation_requires_exact_boolean_true(self):
+        for invalid in (1,"true",[],None,False):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(PermissionError):
+                    confirm_membership(self.db,"c1","bob",
+                                       gate_verified=invalid,referral_code=self.code)
+        self.assertIsNone(self.db.execute(
+            "SELECT member_id FROM memberships WHERE member_id='bob'").fetchone())
+
     def test_gate_required(self):
         with self.assertRaises(PermissionError):
             confirm_membership(self.db,"c1","bob",gate_verified=False,referral_code=self.code)
