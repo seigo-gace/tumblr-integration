@@ -103,8 +103,8 @@ class PostTransport:
             payload=json.loads(raw.decode("utf-8"))
         except (ValueError,UnicodeError):
             raise ValueError("tumblr_mutation_uncertain") from None
-        if (not isinstance(payload,dict) or
-                payload.get("meta",{}).get("status")!=200):
+        if (not isinstance(payload,dict) or not isinstance(payload.get("meta"),dict)
+                or payload["meta"].get("status")!=200):
             raise ValueError("tumblr_mutation_uncertain")
         return payload
 
@@ -175,7 +175,8 @@ class PublisherAdapter:
         raw=self.reader.get(
             "/v2/blog/"+self.blog+".tumblr.com/posts/"+post_id+"?post_format=npf",
             bearer)
-        if (not isinstance(raw,dict) or raw.get("meta",{}).get("status")!=200
+        if (not isinstance(raw,dict) or not isinstance(raw.get("meta"),dict)
+                or raw["meta"].get("status")!=200
                 or not isinstance(raw.get("response"),dict)):
             raise ValueError("tumblr_publish_readback_unverified")
         post=raw["response"]
@@ -245,7 +246,8 @@ class PublisherAdapter:
             raw_id=post.get("id") if isinstance(post,dict) else None
             post_id=str(raw_id) if isinstance(raw_id,(str,int)) and not isinstance(raw_id,bool) else None
             if (not isinstance(response,dict)
-                    or response.get("meta",{}).get("status")!=201
+                    or not isinstance(response.get("meta"),dict)
+                    or response["meta"].get("status")!=201
                     or not isinstance(post_id,str) or not POST_ID.fullmatch(post_id)):
                 raise ValueError("tumblr_publish_uncertain")
             self._set_state(target,"sent",post_id)
