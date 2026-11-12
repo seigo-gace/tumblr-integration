@@ -148,6 +148,43 @@ class DiscoveryEngineTests(unittest.TestCase):
                 self.assertFalse(store.checkpoint(source)["complete"])
                 self.assertEqual(store.count_blogs(source),0)
 
+    def test_malformed_following_and_followers_pages_do_not_lose_unseen_blogs(self):
+        for mode, records_key, count_key in (
+            ("following", "blogs", "total_blogs"),
+            ("followers", "users", "total_users"),
+        ):
+            for bad_item in (None, {"name":""}, {"name":42}, {"name":"invalid/name"}):
+                with self.subTest(mode=mode, item=bad_item):
+                    db=self.root/("malformed-"+mode+".sqlite3")
+                    store=DiscoveryStore(db)
+                    source=mode+":"+mode
+                    store.save_page(source,[],[],10,complete=False)
+                    stub=FakePages([envelope({records_key:[{"name":"valid"},bad_item],
+                                             count_key:20})])
+                    engine=DiscoveryEngine("owner",self.token,stub)
+                    engine.store=store
+                    with self.assertRaisesRegex(ValueError,"discovery_page_blog_unverified"):
+                        engine.scan(mode,{})
+                    self.assertEqual(len(stub.calls),1)
+                    self.assertIn("offset=10",stub.calls[0])
+                    self.assertEqual(store.checkpoint(source)["cursor"],10)
+                    self.assertFalse(store.checkpoint(source)["complete"])
+                    self.assertEqual(store.count_blogs(source),0)
+
+    def test_explicitly_excluded_followed_blog_is_not_readded(self):
+        store=DiscoveryStore(self.root/"discovery.sqlite3")
+        store.save_page("following:following",
+                        [{"name":"excluded","url":"https://excluded.tumblr.com"}],
+                        [],0,complete=False)
+        store.exclude_blog("excluded")
+        adapter,stub=self.scanner([envelope({
+            "blogs":[{"name":"excluded"},{"name":"included"}],"total_blogs":2})])
+        result=adapter.perform("tumblr.discover","following",{})
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["cursor"],2)
+        self.assertEqual({x["blog"] for x in result["rows"]},{"included"})
+        self.assertEqual(len(stub.calls),1)
+
     def test_following_pagination_persists_across_restart_and_dedupes(self):
         page1=envelope({"total_blogs":11,"blogs":[
             {"name":"first"},{"name":"second"},{"name":"second"}]})
