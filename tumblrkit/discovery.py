@@ -176,7 +176,7 @@ class DiscoveryEngine:
             # cursor could drop posts that share the same publication second.
             # Preserve old persisted timestamp checkpoints until an explicit
             # refresh, rather than silently treating seconds as an offset.
-            legacy_cursor=offset>100000
+            legacy_cursor=(not refresh and self.store.blog_cursor_kind(source)=="timestamp")
             args={"limit":SOURCE_LIMIT,"npf":"true"}
             if legacy_cursor:
                 args["before"]=offset
@@ -270,7 +270,8 @@ class DiscoveryEngine:
                                      [{"name":p["blog"],"url":"https://"+p["blog"]+".tumblr.com"}
                                       for p in unique.values()],list(unique.values()),
                                      next_cursor,complete=complete,
-                                     watermark=str(max(timestamps)) if timestamps else checkpoint["watermark"])
+                                     watermark=str(max(timestamps)) if timestamps else checkpoint["watermark"],
+                                     cursor_kind="offset" if refresh else None)
                 return self._result(source,mode,self.store.checkpoint(source))
             if len(payload)>=SOURCE_LIMIT:
                 # The 'before' cursor is seconds-based and exclusive.
