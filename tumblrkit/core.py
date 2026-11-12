@@ -68,17 +68,28 @@ def create_campaign(db, campaign_id: str, name: str, tiers: dict[int, str]) -> N
             db.execute("INSERT INTO tiers VALUES(?,?,?)", (campaign_id,threshold,reward))
 
 def issue_referral(db, campaign_id: str, referrer_id: str) -> str:
-    if not referrer_id:
+    if not isinstance(referrer_id,str) or not referrer_id:
         raise ValueError("referrer required")
-    row = db.execute("SELECT code FROM referrals WHERE campaign_id=? AND referrer_id=?", (campaign_id,referrer_id)).fetchone()
-    if row: return row[0]
-    code = secrets.token_urlsafe(12)
     with db:
-        db.execute("INSERT INTO referrals VALUES(?,?,?)",(campaign_id,referrer_id,code))
-    return code
+        campaign=db.execute("SELECT active FROM campaigns WHERE id=?",(campaign_id,)).fetchone()
+        if not campaign or not campaign[0]:
+            raise ValueError("campaign inactive or missing")
+        row=db.execute("SELECT code FROM referrals WHERE campaign_id=? AND referrer_id=?",
+                       (campaign_id,referrer_id)).fetchone()
+        if row:
+            return row[0]
+        code=secrets.token_urlsafe(12)
+        # A concurrent request for the same referrer must reuse its stable
+        # code. A code collision with another referrer remains an error.
+        db.execute("INSERT INTO referrals(campaign_id,referrer_id,code) VALUES(?,?,?) "
+                   "ON CONFLICT(campaign_id,referrer_id) DO NOTHING",
+                   (campaign_id,referrer_id,code))
+        persisted=db.execute("SELECT code FROM referrals WHERE campaign_id=? AND referrer_id=?",
+                             (campaign_id,referrer_id)).fetchone()
+        return persisted[0]
 
 def confirm_membership(db, campaign_id: str, member_id: str, *, gate_verified: bool, referral_code: str | None = None) -> list[str]:
-    if not gate_verified:
+    if gate_verified is not True:
         raise PermissionError("verified GATE event required")
     if not member_id:
         raise ValueError("member required")
