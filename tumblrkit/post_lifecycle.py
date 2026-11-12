@@ -186,7 +186,8 @@ class PublishedPostLifecycle:
     def _verify_text(self,post_id,expected,bearer):
         raw=self._get_post(post_id,bearer)
         post=raw.get("response") if isinstance(raw,dict) else None
-        if not isinstance(post,dict) or raw.get("meta",{}).get("status")!=200:
+        if (not isinstance(post,dict) or not isinstance(raw.get("meta"),dict)
+                or raw["meta"].get("status")!=200):
             raise ValueError("tumblr_post_readback_unverified")
         owner=post.get("blog_name")
         if not owner and isinstance(post.get("blog"),dict):
