@@ -108,13 +108,14 @@ def record_event(db, event_id: str, kind: str, source: str) -> bool:
     if not all(isinstance(value,str) and value for value in (event_id,kind,source)):
         raise ValueError("campaign_event_invalid")
     with db:
+        inserted=db.execute("INSERT OR IGNORE INTO events VALUES(?,?,?,?)",
+                            (event_id,kind,source,utc_now())).rowcount
+        if inserted:
+            return True
         existing=db.execute("SELECT kind,source FROM events WHERE id=?",(event_id,)).fetchone()
-        if existing:
-            if existing!=(kind,source):
-                raise ValueError("campaign_event_id_conflict")
-            return False
-        db.execute("INSERT INTO events VALUES(?,?,?,?)",(event_id,kind,source,utc_now()))
-        return True
+        if existing!=(kind,source):
+            raise ValueError("campaign_event_id_conflict")
+        return False
 
 def event_counts(db) -> list[tuple[str,str,int]]:
     return db.execute("SELECT source,kind,count(*) FROM events GROUP BY source,kind ORDER BY source,kind").fetchall()
@@ -134,10 +135,11 @@ def enqueue(db, key: str, action: str) -> bool:
     if not all(isinstance(value,str) and value for value in (key,action)):
         raise ValueError("campaign_job_invalid")
     with db:
+        inserted=db.execute("INSERT OR IGNORE INTO jobs(job_key,action) VALUES(?,?)",
+                            (key,action)).rowcount
+        if inserted:
+            return True
         existing=db.execute("SELECT action FROM jobs WHERE job_key=?",(key,)).fetchone()
-        if existing:
-            if existing[0]!=action:
-                raise ValueError("campaign_job_key_conflict")
-            return False
-        db.execute("INSERT INTO jobs(job_key,action) VALUES(?,?)",(key,action))
-        return True
+        if not existing or existing[0]!=action:
+            raise ValueError("campaign_job_key_conflict")
+        return False
