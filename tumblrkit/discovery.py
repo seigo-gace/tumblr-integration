@@ -209,6 +209,11 @@ class DiscoveryEngine:
                 raise ValueError("discovery_response_unverified")
             if not isinstance(count,int) or isinstance(count,bool) or count<0:
                 raise ValueError("discovery_response_unverified")
+            # A provider page reporting no entries while its verified total
+            # still indicates unseen entries is not evidence of completion.
+            # Preserve the checkpoint so a later explicit action can retry.
+            if not records and offset<count:
+                raise ValueError("discovery_page_incomplete")
             blocked=self.store.excluded_blogs()
             unique={}
             for item in records[:SOURCE_LIMIT]:
