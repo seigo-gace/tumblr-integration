@@ -121,7 +121,8 @@ class EngagementAdapter:
 
     def _read(self, path, bearer):
         result=self.reader.get(path,bearer)
-        if not isinstance(result,dict) or result.get("meta",{}).get("status")!=200:
+        if (not isinstance(result,dict) or not isinstance(result.get("meta"),dict)
+                or result["meta"].get("status")!=200):
             raise ValueError("engagement_readback_unverified")
         return result.get("response")
 
