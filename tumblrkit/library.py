@@ -222,8 +222,16 @@ class Library:
                                "WHERE p.candidate_id=?",(candidate_id,)).fetchone()
                 if not row or row[0]!="visible" or row[2]:
                     raise ValueError("library_candidate_unavailable")
-                media=json.loads(row[1])
-                if not isinstance(media,list) or not media or media_index>=len(media):
+                # Viewer exposes only verified, safe media references. Its
+                # index must address that exact visible list, not raw JSON
+                # entries rejected by the media host/type filter.
+                try:
+                    raw_media=json.loads(row[1])
+                except (TypeError,ValueError):
+                    raise ValueError("library_media_index_invalid") from None
+                media=[safe for entry in raw_media
+                       if (safe:=_safe_media(entry)) is not None] if isinstance(raw_media,list) else []
+                if media_index>=len(media):
                     raise ValueError("library_media_index_invalid")
                 db.execute("INSERT INTO library_state(candidate_id,seen,last_media_index,updated_at)"
                            " VALUES(?,1,?,?) ON CONFLICT(candidate_id) DO UPDATE SET seen=1,"
