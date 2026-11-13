@@ -59,6 +59,29 @@ class IntegrationTests(unittest.TestCase):
         flow=CampaignHandoff(Links(), UntrustedGate(True), self.publisher)
         self.assertEqual(flow.check_membership("g1","verified-user").status,"member_verified")
 
+    def test_gate_timeout_never_credits_membership_or_rewards(self):
+        class UnavailableGate:
+            calls=0
+            def verify_member(self, group_id, user_id):
+                self.calls += 1
+                raise TimeoutError("GATE readback unavailable")
+        gate=UnavailableGate()
+        db=connect()
+        try:
+            create_campaign(db,"gate-timeout","safe",{1:"reward"})
+            referral=issue_referral(db,"gate-timeout","alice")
+            flow=CampaignHandoff(Links(),gate,self.publisher,
+                                 campaign_group=lambda _: "g1")
+            self.assertEqual(flow.check_membership("g1","bob").status,"not_verified")
+            result=flow.attribute_membership(db,"gate-timeout","g1","bob",referral)
+            self.assertEqual(result.status,"not_verified")
+            self.assertEqual(result.new_rewards,())
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM memberships").fetchone()[0],0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM grants").fetchone()[0],0)
+            self.assertEqual(gate.calls,2)
+        finally:
+            db.close()
+
     def test_malformed_mpb_receipt_is_unverified_not_published(self):
         class MalformedPublisher(Publisher):
             def __init__(self, response):
