@@ -226,6 +226,53 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(result.status,"published")
         self.assertEqual(self.publisher.calls,1)
 
+    def test_confirm_requires_exact_boolean_not_truthy_text(self):
+        for unconfirmed in (False, None, "true", 1):
+            with self.subTest(value=unconfirmed):
+                result=self.flow.publish_announcement(
+                    "group","text","confirmation",confirmed=unconfirmed)
+                self.assertEqual(result.status,"confirmation_required")
+        self.assertEqual(self.publisher.calls,0)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM announcement_receipts").fetchone()[0],0)
+
+    def test_delivery_ledger_survives_process_restart_for_verified_and_unknown(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path=str(Path(temp)/"delivery.sqlite3")
+            db=connect(path)
+            flow=CampaignHandoff(Links(),Gate(),self.publisher,delivery_db=db)
+            self.assertEqual(flow.publish_announcement(
+                "group","text","done",confirmed=True).status,"published")
+            db.close()
+            db=connect(path)
+            flow=CampaignHandoff(Links(),Gate(),self.publisher,delivery_db=db)
+            try:
+                self.assertEqual(flow.publish_announcement(
+                    "group","text","done",confirmed=True).status,"published")
+                self.assertEqual(self.publisher.calls,1)
+                class UnknownPublisher(Publisher):
+                    def publish(self,destination,text,operation_key):
+                        self.calls+=1
+                        raise TimeoutError("outcome unknown")
+                other=UnknownPublisher()
+                unverified=CampaignHandoff(Links(),Gate(),other,delivery_db=db)
+                self.assertEqual(unverified.publish_announcement(
+                    "group","text-2","unknown-key",confirmed=True).status,"unverified")
+                self.assertEqual(other.calls,1)
+            finally:
+                db.close()
+            db=connect(path)
+            try:
+                restored=CampaignHandoff(Links(),Gate(),other,delivery_db=db)
+                self.assertEqual(restored.publish_announcement(
+                    "group","text-2","unknown-key",confirmed=True).status,"unverified")
+                self.assertEqual(other.calls,1)
+                self.assertEqual(db.execute(
+                    "SELECT state FROM announcement_receipts "
+                    "WHERE operation_key='unknown-key'").fetchone()[0],"reserved")
+            finally:
+                db.close()
+
     def test_missing_event_id_rejected(self):
         with self.assertRaises(ValueError): self.flow.track_entry("", "l1")
 
