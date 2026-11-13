@@ -452,11 +452,11 @@ class Assistant:
                 return self._pack("not_connected",
                     "Telegram投稿先との接続がありません。まだ送信していません。",
                     False,recovery=True,action=action,provider=provider)
-            body=re.search(r"(?:^|\\n)\\s*本文\\s*[:：]\\s*(.+)\\Z",
+            body=re.search(r"(?:^|\n)\s*本文\s*[:：]\s*(.+)\Z",
                            cleaned or "",flags=re.DOTALL)
             if not body or not body.group(1).strip():
                 return self._pack("unclear",
-                    "告知する本文を入力してください。例：告知 対象: 投稿先\\n本文: 告知内容",
+                    "告知する本文を入力してください。例：告知 対象: 投稿先\n本文: 告知内容",
                     False,recovery=True,action=action,provider=provider)
         if action in CONFIRM:
             request_id = uuid.uuid4().hex
@@ -465,8 +465,8 @@ class Assistant:
             expected_digest=None
             if action=="telegram.publish_announcement":
                 expected_digest=body.group(1).strip()
-                text=("Telegram告知の投稿前確認。\\n投稿先："+target+
-                      "\\n本文：\\n"+expected_digest+"\\n確認後、既存MPBで投稿します。")
+                text=("Telegram告知の投稿前確認。\n投稿先："+target+
+                      "\n本文：\n"+expected_digest+"\n確認後、既存MPBで投稿します。")
             if engagement_preview is not None:
                 operation={"engagement.like":"いいね",
                            "engagement.reblog":"リブログ",
