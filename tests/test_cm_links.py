@@ -1,7 +1,7 @@
 import sqlite3
 import unittest
 
-from tumblrkit.cm_links import CMRegistry, append_cm_buttons
+from tumblrkit.cm_links import CMRegistry, append_cm_buttons, handle_cm_message
 
 
 class CMRegistryTests(unittest.TestCase):
@@ -71,6 +71,27 @@ class CMRegistryTests(unittest.TestCase):
         self.assertEqual(combined[1][0]["text"], "PR / 案内0")
         self.assertEqual(combined[1][0]["url"], "https://example.org/item/0")
         self.assertEqual(len(combined), 3)
+
+    def test_owner_chat_commands_register_list_stop_resume_and_preview(self):
+        state, message = handle_cm_message(
+            self.cm, "CMを追加 テスト https://example.org/offer 対象:100")
+        self.assertEqual(state, "cm_added")
+        ident = self.cm.list_links()[0]["id"]
+        self.assertIn(ident, message)
+        self.assertEqual(handle_cm_message(self.cm, "CM一覧")[0], "cm_list")
+        self.assertIn("テスト", handle_cm_message(self.cm, "CM一覧")[1])
+        self.assertEqual(handle_cm_message(self.cm, "次のCMを見る 対象:100")[0],
+                         "cm_preview")
+        self.assertEqual(len(self.cm.select("100")), 1)
+        self.assertEqual(self.cm.select("200"), [])
+        self.assertEqual(handle_cm_message(self.cm, "このCMを停止 " + ident)[0],
+                         "cm_updated")
+        self.assertEqual(self.cm.select("100"), [])
+        self.assertEqual(handle_cm_message(self.cm, "CMを再開 " + ident)[0],
+                         "cm_updated")
+        self.assertEqual(len(self.cm.select("100")), 1)
+        self.assertIsNone(handle_cm_message(self.cm, "投稿を一覧表示"))
+        self.assertEqual(handle_cm_message(self.cm, "CMを追加")[0], "cm_help")
 
     def test_invalid_links_and_duplicate_operation_rejected(self):
         for url in ("http://example.org", "https://user:pass@example.org",
