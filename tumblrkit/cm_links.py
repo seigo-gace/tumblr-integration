@@ -150,3 +150,48 @@ def append_cm_buttons(existing_rows, selected):
         label, url = CMRegistry._link(item["label"], item["url"])
         rows.append([{"text": "PR / " + label, "url": url}])
     return rows
+
+
+def handle_cm_message(registry, message):
+    """Minimal owner-chat commands; publication stays with existing MPB."""
+    import re
+    import uuid
+
+    text = message.strip() if isinstance(message, str) else ""
+    if text == "CM一覧":
+        items = registry.list_links()
+        if not items:
+            return ("cm_list", "登録されたCMはありません。")
+        lines = ["CM一覧"]
+        for item in items:
+            label = "有効" if item["enabled"] else "停止"
+            target = item["destination"] or "全投稿先"
+            lines.append(f'{item["id"]}｜{item["label"]}｜{label}｜{target}｜{item["url"]}')
+        return ("cm_list", "\n".join(lines))
+    if text.startswith("CMを追加"):
+        match = re.fullmatch(
+            r"CMを追加\s+(\S{1,40})\s+(https://\S+)(?:\s+対象[:：]([1-9]\d{0,12}))?",
+            text)
+        if not match:
+            return ("cm_help", "CMを追加 表示名 https://URL 対象:TopicID（対象は省略可）")
+        label, url, destination = match.groups()
+        ident = uuid.uuid4().hex[:12]
+        registry.add(ident, label, url, destination)
+        return ("cm_added", f"CMを登録しました。ID: {ident}｜{label}｜{destination or '全投稿先'}")
+    if text.startswith("このCMを停止") or text.startswith("CMを再開"):
+        match = re.fullmatch(r"(このCMを停止|CMを再開)\s+([a-f0-9]{12})", text)
+        if not match:
+            return ("cm_help", "このCMを停止 CMのID ／ CMを再開 CMのID")
+        enabled = match.group(1) == "CMを再開"
+        registry.set_enabled(match.group(2), enabled)
+        return ("cm_updated", "CMを再開しました。" if enabled else "CMを停止しました。")
+    if text.startswith("次のCMを見る"):
+        match = re.fullmatch(r"次のCMを見る\s+対象[:：]([1-9]\d{0,12})", text)
+        if not match:
+            return ("cm_help", "次のCMを見る 対象:TopicID")
+        selection = registry.select(match.group(1))
+        if not selection:
+            return ("cm_preview", "この投稿先で掲載する有効なCMはありません。")
+        labels = "／".join("PR " + item["label"] for item in selection)
+        return ("cm_preview", f"次回CM（未送信・位置変更なし）: {labels}")
+    return None
