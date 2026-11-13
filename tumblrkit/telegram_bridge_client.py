@@ -60,7 +60,7 @@ class LocalTelegramOwner:
                                      "text": text,
                                      "operation_key": operation})
             message = result.get("message_id") if isinstance(result, dict) else None
-            if result.get("verified") is not True or not isinstance(message, str) or not message:
+            if not isinstance(result, dict) or result.get("verified") is not True or not isinstance(message, str) or not message:
                 return {"verified": False, "status": "unverified", "reference": None}
             # The owner already exposes durable MPB readback. A publish
             # response alone is not evidence that the posted message was
