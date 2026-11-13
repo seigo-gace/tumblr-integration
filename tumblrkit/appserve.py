@@ -914,7 +914,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 class AppServer:
-    def __init__(self, release, token, host="127.0.0.1", port=0, ticket=False, assistant=None):
+    def __init__(self, release, token, host="127.0.0.1", port=0, ticket=False, assistant=None, telegram_adapter=None):
         self.release = Path(release)
         self.token = require_token(token)
         self.host = loopback_host(host)
@@ -950,6 +950,8 @@ class AppServer:
             analytics=AnalyticsAdapter(DiscoveryStore(
                 self.oauth_folder / "discovery.sqlite3"))
             adapters={"analytics": analytics}
+            if telegram_adapter is not None:
+                adapters["telegram"] = telegram_adapter
             if tumblr_reader:
                 adapters["tumblr"]=tumblr_reader
                 if getattr(tumblr_reader,"engagement",None) is not None:
