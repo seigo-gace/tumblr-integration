@@ -1,0 +1,72 @@
+"""One local call into the existing GayBBS GATE/MPB owner.
+
+The running Bot owns Telegram credentials, approvals, verified topics and
+durable delivery receipts. Tumblr does not duplicate these databases.
+"""
+import json
+import os
+from pathlib import Path
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
+
+
+class LocalTelegramOwner:
+    def __init__(self, token_file, *, endpoint="http://127.0.0.1:8876/internal/tumblr",
+                 member_id=None, transport=None):
+        if endpoint != "http://127.0.0.1:8876/internal/tumblr":
+            raise ValueError("telegram_owner_endpoint_invalid")
+        self.token = Path(token_file).read_text(encoding="utf-8").strip()
+        if len(self.token) < 32:
+            raise ValueError("telegram_owner_token_invalid")
+        self.endpoint = endpoint
+        self.member_id = member_id
+        self.transport = transport or self._post
+
+    def _post(self, value):
+        request = Request(self.endpoint,
+                          json.dumps(value, ensure_ascii=False).encode("utf-8"),
+                          {"Content-Type": "application/json",
+                           "Authorization": "Bearer " + self.token},
+                          method="POST")
+        with urlopen(request, timeout=8) as response:
+            if response.status != 200:
+                raise ValueError("telegram_owner_unavailable")
+            return json.load(response)
+
+    def perform(self, action, target, payload):
+        if action == "telegram.check_membership":
+            # The owner identity must come from the private app configuration.
+            # In a future user-bound flow, the trusted server may inject it.
+            if not self.member_id:
+                return {"verified": False, "status": "not_connected"}
+            result = self.transport({"action": "member",
+                                     "destination": target,
+                                     "user_id": str(self.member_id)})
+            return {"verified": result.get("verified") is True,
+                    "status": "member_verified" if result.get("verified") is True
+                              else "not_verified"}
+        if action == "telegram.publish_announcement":
+            text, operation = payload.get("text"), payload.get("operation_key")
+            if not isinstance(text, str) or not text.strip():
+                raise ValueError("announcement_text_required")
+            if not isinstance(operation, str) or not operation:
+                raise ValueError("announcement_operation_key_required")
+            result = self.transport({"action": "publish",
+                                     "destination": target,
+                                     "text": text,
+                                     "operation_key": operation})
+            message = result.get("message_id")
+            verified = result.get("verified") is True and isinstance(message, str) and bool(message)
+            return {"verified": verified,
+                    "status": "published" if verified else "unverified",
+                    "reference": message if verified else None}
+        raise ValueError("telegram_owner_action_invalid")
+
+
+def telegram_owner_from_env(env=None):
+    env = os.environ if env is None else env
+    key_file = env.get("TUMBLR_BRIDGE_KEY_FILE", "")
+    if not key_file:
+        return None
+    return LocalTelegramOwner(key_file,
+                              member_id=env.get("TUMBLR_TELEGRAM_MEMBER_ID"))
