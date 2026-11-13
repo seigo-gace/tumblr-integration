@@ -142,8 +142,12 @@ class CampaignHandoff:
         if self.delivery_db is None:
             return HandoffResult("not_connected",("configure_durable_delivery",))
         authorize=getattr(self.publisher,"authorize",None)
-        if not callable(authorize) or authorize(destination,operation_key) is not True:
-            return HandoffResult("not_connected",("resolve_mpb_destination",))
+        try:
+            authorized = callable(authorize) and authorize(destination,operation_key) is True
+        except Exception:
+            authorized = False
+        if not authorized:
+            return HandoffResult("not_connected", ("resolve_mpb_destination",))
         db=self.delivery_db
         exists=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
                           "AND name='announcement_receipts'").fetchone()
@@ -213,7 +217,11 @@ class CampaignHandoff:
         # injected MPB-owned adapter must independently resolve origin and
         # actor permissions; a truthy result is not sufficient evidence.
         authorize=getattr(self.publisher,"authorize",None)
-        if not callable(authorize) or authorize(destination,operation_key) is not True:
+        try:
+            authorized = callable(authorize) and authorize(destination,operation_key) is True
+        except Exception:
+            authorized = False
+        if not authorized:
             return HandoffResult("not_connected", ("resolve_mpb_destination",))
         fingerprint=hashlib.sha256(json.dumps(
             [destination,text],ensure_ascii=False,separators=(",",":")
