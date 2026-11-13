@@ -134,6 +134,72 @@ class CampaignHandoff:
                                   gate_verified=True,referral_code=referral_code)
         return MembershipAttribution("member_verified",tuple(grants))
 
+    def reconcile_announcement(self, destination: str, text: str,
+                               operation_key: str) -> HandoffResult:
+        """Read-only MPB recovery by stable operation key; never repost."""
+        if not all(isinstance(v,str) and v for v in (destination,text,operation_key)):
+            raise ValueError("destination/text/key required")
+        if self.delivery_db is None:
+            return HandoffResult("not_connected",("configure_durable_delivery",))
+        authorize=getattr(self.publisher,"authorize",None)
+        if not callable(authorize) or authorize(destination,operation_key) is not True:
+            return HandoffResult("not_connected",("resolve_mpb_destination",))
+        db=self.delivery_db
+        exists=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                          "AND name='announcement_receipts'").fetchone()
+        if not exists:
+            return HandoffResult("unverified",("reconcile_delivery",))
+        row=db.execute("SELECT payload_digest,destination,state,message_id "
+                       "FROM announcement_receipts WHERE operation_key=?",
+                       (operation_key,)).fetchone()
+        if row is None:
+            return HandoffResult("unverified",("reconcile_delivery",))
+        fingerprint=hashlib.sha256(json.dumps(
+            [destination,text],ensure_ascii=False,separators=(",",":")
+        ).encode("utf-8")).hexdigest()
+        if row[0]!=fingerprint or row[1]!=destination:
+            raise ValueError("announcement_operation_conflict")
+        state,message_id=row[2],row[3]
+        if state=="verified":
+            if not isinstance(message_id,str) or not message_id:
+                raise ValueError("announcement_receipt_invalid")
+            return HandoffResult("published",("inspect_post","measure_referrals"),message_id)
+        if state=="reserved":
+            if message_id is not None:
+                raise ValueError("announcement_receipt_invalid")
+            # This is a separately owned, read-only MPB operation lookup.
+            # No query endpoint is invented here; the injected trusted MPB
+            # adapter must implement it before recovery can be used live.
+            lookup=getattr(self.publisher,"find_by_operation_key",None)
+            if not callable(lookup):
+                return HandoffResult("unverified",("reconcile_delivery",))
+            try:
+                found=lookup(destination,operation_key)
+            except Exception:
+                return HandoffResult("unverified",("reconcile_delivery",))
+            message_id=found.get("message_id") if isinstance(found,dict) else None
+            if not isinstance(message_id,str) or not message_id:
+                return HandoffResult("unverified",("reconcile_delivery",))
+            with db:
+                db.execute("UPDATE announcement_receipts "
+                           "SET state='sent',message_id=?,updated_at=? "
+                           "WHERE operation_key=? AND state='reserved'",
+                           (message_id,datetime.now(timezone.utc).isoformat(),operation_key))
+        elif state!="sent" or not isinstance(message_id,str) or not message_id:
+            raise ValueError("announcement_receipt_invalid")
+        try:
+            matched=self.publisher.readback(destination,message_id) is True
+        except Exception:
+            matched=False
+        if not matched:
+            return HandoffResult("unverified",("reconcile_delivery",),message_id)
+        with db:
+            db.execute("UPDATE announcement_receipts "
+                       "SET state='verified',updated_at=? "
+                       "WHERE operation_key=? AND state='sent'",
+                       (datetime.now(timezone.utc).isoformat(),operation_key))
+        return HandoffResult("published",("inspect_post","measure_referrals"),message_id)
+
     def publish_announcement(self, destination: str, text: str, operation_key: str, *, confirmed: bool = False) -> HandoffResult:
         if not all(isinstance(v,str) and v for v in (destination,text,operation_key)):
             raise ValueError("destination/text/key required")
