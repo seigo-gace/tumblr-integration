@@ -41,6 +41,35 @@ class IntegrationTests(unittest.TestCase):
     def test_unverified_publish(self):
         self.publisher.ok = False
         self.assertEqual("unverified", self.flow.publish_announcement("g1", "msg", "k", confirmed=True).status)
+    def test_gate_readback_must_be_exact_true_not_truthy(self):
+        class UntrustedGate:
+            def __init__(self, answer): self.answer=answer
+            def verify_member(self, group_id, user_id): return self.answer
+        for wrong in (1, "true", {"verified":True}, None, False):
+            with self.subTest(answer=wrong):
+                flow=CampaignHandoff(Links(), UntrustedGate(wrong), self.publisher)
+                result=flow.check_membership("g1","verified-user")
+                self.assertEqual(result.status,"not_verified")
+        flow=CampaignHandoff(Links(), UntrustedGate(True), self.publisher)
+        self.assertEqual(flow.check_membership("g1","verified-user").status,"member_verified")
+
+    def test_malformed_mpb_receipt_is_unverified_not_published(self):
+        class MalformedPublisher(Publisher):
+            def __init__(self, response):
+                super().__init__()
+                self.response=response
+            def publish(self, destination, text, operation_key):
+                self.calls+=1
+                return self.response
+        for response in (None, [], {"message_id":42}, {"message_id":""}):
+            with self.subTest(response=response):
+                publisher=MalformedPublisher(response)
+                flow=CampaignHandoff(Links(), Gate(), publisher)
+                result=flow.publish_announcement("g1","message","key",confirmed=True)
+                self.assertEqual(result.status,"unverified")
+                self.assertEqual(result.next_actions,("reconcile_delivery",))
+                self.assertEqual(publisher.calls,1)
+
     def test_missing_event_id_rejected(self):
         with self.assertRaises(ValueError): self.flow.track_entry("", "l1")
 
