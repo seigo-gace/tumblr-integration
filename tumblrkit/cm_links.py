@@ -116,21 +116,24 @@ class CMRegistry:
         ids = list(chosen_ids)
         if len(ids) > 3 or len(set(ids)) != len(ids):
             raise ValueError("cm_selection_invalid")
+        encoded = json.dumps(ids, separators=(",", ":"))
         with self.db:
-            prior = self.db.execute(
-                "SELECT destination,chosen_ids FROM cm_advances WHERE operation_key=?",
-                (operation_key,)).fetchone()
-            encoded = json.dumps(ids, separators=(",", ":"))
-            if prior:
+            # INSERT obtains the SQLite writer slot before we read/advance
+            # the cursor. Competing deliveries with the same key cannot
+            # independently rotate the same destination.
+            created = self.db.execute(
+                "INSERT OR IGNORE INTO cm_advances(operation_key,destination,chosen_ids) "
+                "VALUES(?,?,?)", (operation_key, destination, encoded)).rowcount
+            if not created:
+                prior = self.db.execute(
+                    "SELECT destination,chosen_ids FROM cm_advances WHERE operation_key=?",
+                    (operation_key,)).fetchone()
                 if prior != (destination, encoded):
                     raise ValueError("cm_operation_conflict")
                 return False
             current = [entry["id"] for entry in self.select(destination)]
             if current != ids:
                 raise ValueError("cm_selection_stale")
-            self.db.execute(
-                "INSERT INTO cm_advances(operation_key,destination,chosen_ids) VALUES(?,?,?)",
-                (operation_key, destination, encoded))
             if ids:
                 self.db.execute(
                     "INSERT INTO cm_positions(destination,offset) VALUES(?,1) "
