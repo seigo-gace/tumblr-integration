@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from tumblrkit.cm_links import CMRegistry, append_cm_buttons, handle_cm_message
@@ -37,14 +38,14 @@ class CMRegistryTests(unittest.TestCase):
     def test_restart_preserves_position_on_existing_file_backed_sqlite(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "owner.sqlite3"
-            with sqlite3.connect(path) as db:
+            with closing(sqlite3.connect(path)) as db:
                 owner = CMRegistry(db)
                 for number in range(5):
                     owner.add(f"c{number}", f"案内{number}",
                               f"https://example.org/item/{number}")
                 chosen = [item["id"] for item in owner.select("100")]
                 owner.advance_after_delivery("100", "op", chosen, verified=True)
-            with sqlite3.connect(path) as reopened:
+            with closing(sqlite3.connect(path)) as reopened:
                 another = CMRegistry(reopened)
                 self.assertEqual([item["id"] for item in another.select("100")],
                                  ["c1", "c2", "c3"])
