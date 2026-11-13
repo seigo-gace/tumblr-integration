@@ -1,7 +1,7 @@
 import unittest
 import tempfile
 from pathlib import Path
-from tumblrkit.core import connect, create_campaign, event_counts
+from tumblrkit.core import connect, create_campaign, event_counts, issue_referral
 from tumblrkit.integration import CampaignHandoff, CoreLinkStore
 
 class Links:
@@ -114,6 +114,62 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(db.execute(
                 "SELECT COUNT(*) FROM campaign_links").fetchone()[0],1)
             self.assertTrue(previous)
+        finally:
+            db.close()
+
+    def test_verified_member_requires_bound_group_and_counts_tier_once(self):
+        class ConfirmingGate:
+            def __init__(self): self.calls=[]; self.answer=True
+            def verify_member(self,group_id,user_id):
+                self.calls.append((group_id,user_id))
+                return self.answer
+        db=connect()
+        try:
+            create_campaign(db,"c1","safe", {2:"two-referrals"})
+            code=issue_referral(db,"c1","alice")
+            gate=ConfirmingGate()
+            no_binding=CampaignHandoff(Links(),gate,self.publisher)
+            with self.assertRaisesRegex(PermissionError,"campaign_group_binding_required"):
+                no_binding.attribute_membership(db,"c1","allowed","bob",code)
+            self.assertEqual(gate.calls,[])
+            flow=CampaignHandoff(Links(),gate,self.publisher,
+                                  campaign_group=lambda campaign: "allowed" if campaign=="c1" else None)
+            with self.assertRaisesRegex(PermissionError,"campaign_group_mismatch"):
+                flow.attribute_membership(db,"c1","other","bob",code)
+            self.assertEqual(gate.calls,[])
+            gate.answer=1
+            self.assertEqual(flow.attribute_membership(db,"c1","allowed","bob",code).status,
+                             "not_verified")
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM memberships").fetchone()[0],0)
+            gate.answer=True
+            first=flow.attribute_membership(db,"c1","allowed","bob",code)
+            self.assertEqual(first.status,"member_verified")
+            self.assertEqual(first.new_rewards,())
+            again=flow.attribute_membership(db,"c1","allowed","bob",code)
+            self.assertEqual(again.new_rewards,())
+            second=flow.attribute_membership(db,"c1","allowed","charlie",code)
+            self.assertEqual(second.new_rewards,("two-referrals",))
+            self.assertEqual(flow.attribute_membership(
+                db,"c1","allowed","charlie",code).new_rewards,())
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM memberships").fetchone()[0],2)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM grants").fetchone()[0],1)
+        finally:
+            db.close()
+
+    def test_self_referral_is_rejected_even_after_gate_succeeds(self):
+        db=connect()
+        try:
+            create_campaign(db,"c1","safe",{1:"tier"})
+            code=issue_referral(db,"c1","alice")
+            flow=CampaignHandoff(Links(),Gate(),self.publisher,
+                                 campaign_group=lambda _: "g1")
+            with self.assertRaisesRegex(ValueError,"self referral"):
+                # Fake GATE marks 'verified-user' as verified, and that user
+                # must never refer themselves under an identical account ID.
+                db.execute("UPDATE referrals SET referrer_id='verified-user' WHERE code=?",
+                           (code,))
+                flow.attribute_membership(db,"c1","g1","verified-user",code)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM grants").fetchone()[0],0)
         finally:
             db.close()
 
