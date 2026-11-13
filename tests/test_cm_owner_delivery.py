@@ -46,6 +46,15 @@ class CMOwnerDeliveryTests(unittest.TestCase):
         self.assertEqual(len(sent["cm_buttons"]), 3)
         self.assertEqual(sent["cm_buttons"][0][0]["text"], "PR / 案内0")
 
+    def test_recovery_reuses_pinned_selection_after_cursor_moves(self):
+        self.assertEqual(self.deliver().state, "completed")
+        chosen = self.cm.select_for_operation("100", "cm-op-1")
+        self.assertEqual([x["id"] for x in chosen], ["c0", "c1", "c2"])
+        self.assertTrue(self.cm.is_advanced("100", "cm-op-1",
+                                           ["c0", "c1", "c2"]))
+        self.assertEqual([x["id"] for x in self.cm.select("100")],
+                         ["c1", "c2", "c3"])
+
     def test_missing_keyboard_does_not_claim_success_or_advance(self):
         result = self.deliver(keyboard=False)
         self.assertEqual(result.state, "unverified")
