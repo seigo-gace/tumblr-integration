@@ -889,6 +889,24 @@ class _Handler(BaseHTTPRequestHandler):
         except (AttachmentError, OSError, sqlite3.Error, TypeError):
             self._json(400, {"error": "invalid_attachment_reference"})
             return
+        # Owner-only CM commands reuse the existing private drafts SQLite.
+        # Preview/management never sends a Telegram message.
+        if message.strip().startswith(("CM一覧", "CMを追加", "このCMを停止",
+                                       "CMを再開", "次のCMを見る")):
+            from tumblrkit.cm_links import CMRegistry, handle_cm_message
+            try:
+                with self.server.draft_store._connect() as db:
+                    response = handle_cm_message(CMRegistry(db), message)
+            except (ValueError, TypeError):
+                self._json(400, {"error": "cm_request_invalid"})
+                return
+            except (OSError, sqlite3.Error):
+                self._json(503, {"error": "cm_store_unavailable"})
+                return
+            if response is not None:
+                state, text = response
+                self._json(200, self.server.assistant._pack(state, text, False))
+                return
         # The current Assistant has no multimodal adapter. File bytes remain
         # private on Gserver; acknowledge receipt without pretending analysis.
         if records:
