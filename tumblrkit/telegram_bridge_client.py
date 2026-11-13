@@ -67,6 +67,9 @@ def telegram_owner_from_env(env=None):
     env = os.environ if env is None else env
     key_file = env.get("TUMBLR_BRIDGE_KEY_FILE", "")
     if not key_file:
-        return None
+        existing = Path.home() / ".config" / "tgtumbler" / "bridge" / "owner-token"
+        if not existing.is_file():
+            return None
+        key_file = str(existing)
     return LocalTelegramOwner(key_file,
                               member_id=env.get("TUMBLR_TELEGRAM_MEMBER_ID"))
