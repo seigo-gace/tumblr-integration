@@ -307,7 +307,9 @@ class Assistant:
             if (not isinstance(selected_action,str) or selected_action not in ALLOWED
                     or not isinstance(selected_target,str) or not 0<len(selected_target)<=maximum):
                 return self._pack("invalid_tool","未登録の操作または不正な対象を拒否しました。実行していません。",False,recovery=True)
-            return self._propose(selected_action,selected_target,"","", "", "owner_selected",ai=False)
+            return self._propose(selected_action,selected_target,
+                                 message if selected_action=="telegram.publish_announcement" else "",
+                                 "", "", "owner_selected",ai=False)
         text = (message or "").strip()
         if not text and not goals:
             return self._pack("unclear", "やりたいことを一文で書いてください。実行していません。", False, recovery=True)
@@ -445,11 +447,26 @@ class Assistant:
                 return self._pack(
                     "not_connected","Tumblr投稿は未連携です。本人のTumblr連携と投稿権限の承諾が必要です。投稿していません。",
                     False,recovery=True,action=action,provider=provider)
+        if action=="telegram.publish_announcement":
+            if "telegram" not in self.bridge.adapters:
+                return self._pack("not_connected",
+                    "Telegram投稿先との接続がありません。まだ送信していません。",
+                    False,recovery=True,action=action,provider=provider)
+            body=re.search(r"(?:^|\\n)\\s*本文\\s*[:：]\\s*(.+)\\Z",
+                           cleaned or "",flags=re.DOTALL)
+            if not body or not body.group(1).strip():
+                return self._pack("unclear",
+                    "告知する本文を入力してください。例：告知 対象: 投稿先\\n本文: 告知内容",
+                    False,recovery=True,action=action,provider=provider)
         if action in CONFIRM:
             request_id = uuid.uuid4().hex
             label = "AIの提案" if ai else "既存ツール索引の候補であり、AIの判断ではありません"
             text = label + "。プレビュー: " + action + " を " + target + " に対して行う操作です。まだ実行していません。"
             expected_digest=None
+            if action=="telegram.publish_announcement":
+                expected_digest=body.group(1).strip()
+                text=("Telegram告知の投稿前確認。\\n投稿先："+target+
+                      "\\n本文：\\n"+expected_digest+"\\n確認後、既存MPBで投稿します。")
             if engagement_preview is not None:
                 operation={"engagement.like":"いいね",
                            "engagement.reblog":"リブログ",
@@ -513,6 +530,8 @@ class Assistant:
                     False,recovery=True,action=action,provider="confirmed")
         payload={"expected_digest":expected_digest} if action in (
             "tumblr.publish_draft","tumblr.edit_post","tumblr.delete_post") else {}
+        if action=="telegram.publish_announcement":
+            payload={"text":expected_digest}
         if action in ("tumblr.edit_post","tumblr.delete_post"):
             tumblr=self.bridge.adapters.get("tumblr")
             publisher=getattr(tumblr,"publisher",None)
