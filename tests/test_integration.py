@@ -25,7 +25,9 @@ class Publisher:
 class IntegrationTests(unittest.TestCase):
     def setUp(self):
         self.publisher = Publisher()
-        self.flow = CampaignHandoff(Links(), Gate(), self.publisher)
+        self.db=connect()
+        self.addCleanup(self.db.close)
+        self.flow = CampaignHandoff(Links(), Gate(), self.publisher,delivery_db=self.db)
     def test_referral_link(self):
         self.assertEqual("c1:p1", self.flow.referral_entry("c1", "p1").reference)
     def test_click_idempotence(self):
@@ -67,7 +69,8 @@ class IntegrationTests(unittest.TestCase):
         for response in (None, [], {"message_id":42}, {"message_id":""}):
             with self.subTest(response=response):
                 publisher=MalformedPublisher(response)
-                flow=CampaignHandoff(Links(), Gate(), publisher)
+                flow=CampaignHandoff(Links(), Gate(), publisher,delivery_db=connect())
+                self.addCleanup(flow.delivery_db.close)
                 result=flow.publish_announcement("g1","message","key",confirmed=True)
                 self.assertEqual(result.status,"unverified")
                 self.assertEqual(result.next_actions,("reconcile_delivery",))
@@ -172,6 +175,56 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT COUNT(*) FROM grants").fetchone()[0],0)
         finally:
             db.close()
+
+    def test_announcement_requires_persistent_ledger_before_mpb(self):
+        flow=CampaignHandoff(Links(), Gate(), self.publisher)
+        self.assertEqual(flow.publish_announcement(
+            "group","text","key",confirmed=True).status,"not_connected")
+        self.assertEqual(self.publisher.calls,0)
+
+    def test_announcement_replay_never_republishes_or_mutates_payload(self):
+        done=self.flow.publish_announcement("group","text","stable",confirmed=True)
+        self.assertEqual(done.status,"published")
+        self.assertEqual(self.publisher.calls,1)
+        again=self.flow.publish_announcement("group","text","stable",confirmed=True)
+        self.assertEqual(again.status,"published")
+        self.assertEqual(self.publisher.calls,1)
+        for destination,text in (("different","text"),("group","different")):
+            with self.assertRaisesRegex(ValueError,"announcement_operation_conflict"):
+                self.flow.publish_announcement(destination,text,"stable",confirmed=True)
+        self.assertEqual(self.publisher.calls,1)
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM announcement_receipts WHERE operation_key='stable'"
+        ).fetchone()[0],"verified")
+
+    def test_unknown_mpb_result_remains_reserved_and_not_reposted(self):
+        class UnknownPublisher(Publisher):
+            def publish(self,destination,text,operation_key):
+                self.calls+=1
+                return None
+        publisher=UnknownPublisher()
+        flow=CampaignHandoff(Links(),Gate(),publisher,delivery_db=self.db)
+        first=flow.publish_announcement("group","text","unknown",confirmed=True)
+        self.assertEqual(first.status,"unverified")
+        second=flow.publish_announcement("group","text","unknown",confirmed=True)
+        self.assertEqual(second.status,"unverified")
+        self.assertEqual(publisher.calls,1)
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM announcement_receipts WHERE operation_key='unknown'"
+        ).fetchone()[0],"reserved")
+
+    def test_sent_receipt_reconciles_by_readback_without_second_publish(self):
+        self.publisher.ok=False
+        first=self.flow.publish_announcement("group","text","sent",confirmed=True)
+        self.assertEqual(first.status,"unverified")
+        self.assertEqual(first.reference,"42")
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM announcement_receipts WHERE operation_key='sent'"
+        ).fetchone()[0],"sent")
+        self.publisher.ok=True
+        result=self.flow.publish_announcement("group","text","sent",confirmed=True)
+        self.assertEqual(result.status,"published")
+        self.assertEqual(self.publisher.calls,1)
 
     def test_missing_event_id_rejected(self):
         with self.assertRaises(ValueError): self.flow.track_entry("", "l1")
