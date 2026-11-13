@@ -15,6 +15,13 @@ PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS campaigns (
  id TEXT PRIMARY KEY, name TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS campaign_links (
+ link_id TEXT PRIMARY KEY,
+ campaign_id TEXT NOT NULL,
+ source_post_id TEXT NOT NULL,
+ UNIQUE(campaign_id,source_post_id),
+ FOREIGN KEY(campaign_id) REFERENCES campaigns(id)
+);
 CREATE TABLE IF NOT EXISTS referrals (
  campaign_id TEXT NOT NULL, referrer_id TEXT NOT NULL,
  code TEXT NOT NULL UNIQUE,
