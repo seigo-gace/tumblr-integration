@@ -54,6 +54,26 @@ class AppServeTests(unittest.TestCase):
         meta = json.loads((release / "RELEASE.json").read_text(encoding="utf-8"))
         self.assertEqual(meta["files"]["app.js"], hashlib.sha256((APP / "app.js").read_bytes()).hexdigest())
 
+    def test_existing_telegram_owner_adapter_is_available_to_app_bridge(self):
+        class OwnerTelegram:
+            def __init__(self):
+                self.calls = []
+            def perform(self, action, target, payload):
+                self.calls.append((action, target))
+                return {"verified": True, "status": "member_verified"}
+        owner=OwnerTelegram()
+        release=build_release(APP, self.tmp, SHA_A)
+        with AppServer(release, TOKEN, telegram_adapter=owner) as server:
+            self.assertIs(server.assistant.bridge.adapters["telegram"], owner)
+            from tumblrkit.bridge import ActionRequest
+            result=server.assistant.bridge.dispatch(
+                ActionRequest("tg-existing", "telegram.check_membership", "g1"))
+            self.assertEqual(result.state, "completed")
+            self.assertEqual(owner.calls, [
+                ("telegram.check_membership", "g1")])
+        with AppServer(release, TOKEN) as server:
+            self.assertNotIn("telegram", server.assistant.bridge.adapters)
+
     def test_screen_requires_token_and_health_has_no_screen(self):
         build_release(APP, self.tmp, SHA_A)
         with AppServer(self.tmp / "current", TOKEN) as server:
