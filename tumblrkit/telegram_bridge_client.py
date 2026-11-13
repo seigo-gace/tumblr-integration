@@ -57,7 +57,7 @@ class LocalTelegramOwner:
                 raise ValueError("announcement_text_required")
             if not isinstance(operation, str) or not operation:
                 raise ValueError("announcement_operation_key_required")
-            cm_selection = self.cm_registry.select(target) if self.cm_registry else []
+            cm_selection = self.cm_registry.select_for_operation(target, operation) if self.cm_registry else []
             cm_rows = append_cm_buttons([], cm_selection) if cm_selection else []
             # Existing MPB operation ledger is the recovery source. Check it
             # first, so a retry after a lost response only reads the post.
@@ -98,9 +98,10 @@ class LocalTelegramOwner:
                             keyboard[-len(cm_rows):] == cm_rows)
                 if verified:
                     try:
-                        self.cm_registry.advance_after_delivery(
-                            target, operation, [item["id"] for item in cm_selection],
-                            verified=True)
+                        ids = [item["id"] for item in cm_selection]
+                        if not self.cm_registry.is_advanced(target, operation, ids):
+                            self.cm_registry.advance_after_delivery(
+                                target, operation, ids, verified=True)
                     except ValueError:
                         verified = False
             return {"verified": verified,
