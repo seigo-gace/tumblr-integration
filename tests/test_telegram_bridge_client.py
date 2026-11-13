@@ -27,13 +27,20 @@ class TelegramOwnerBridgeTests(unittest.TestCase):
         self.assertEqual(member.state, "completed")
         self.assertEqual(self.calls[0],
                          {"action": "member", "destination": "4", "user_id": "123"})
+        second = Bridge({"telegram":LocalTelegramOwner(
+            self.key, transport=self._transport)}).dispatch(
+                ActionRequest("m2", "telegram.check_membership", "4:456"))
+        self.assertEqual(second.state, "completed")
+        self.assertEqual(self.calls[-1],
+                         {"action": "member", "destination": "4", "user_id": "456"})
+
         draft = ActionRequest("one-id", "telegram.publish_announcement", "4",
                               payload={"text": "告知本文"}, confirmed=True)
         self.assertEqual(bridge.dispatch(draft).state, "completed")
         self.assertEqual(bridge.dispatch(draft).state, "completed")
-        self.assertEqual(len(self.calls), 2)
-        self.assertEqual(self.calls[1]["operation_key"], "one-id")
-        self.assertEqual(self.calls[1]["text"], "告知本文")
+        self.assertEqual(len(self.calls), 3)
+        self.assertEqual(self.calls[2]["operation_key"], "one-id")
+        self.assertEqual(self.calls[2]["text"], "告知本文")
 
     def test_no_settings_no_external_call_and_incorrect_result_not_completed(self):
         self.assertIsNone(telegram_owner_from_env({}))
