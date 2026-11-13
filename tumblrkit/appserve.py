@@ -950,6 +950,9 @@ class AppServer:
             analytics=AnalyticsAdapter(DiscoveryStore(
                 self.oauth_folder / "discovery.sqlite3"))
             adapters={"analytics": analytics}
+            if telegram_adapter is None:
+                from tumblrkit.telegram_bridge_client import telegram_owner_from_env
+                telegram_adapter = telegram_owner_from_env()
             if telegram_adapter is not None:
                 adapters["telegram"] = telegram_adapter
             if tumblr_reader:
