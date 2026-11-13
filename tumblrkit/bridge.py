@@ -57,7 +57,12 @@ class Bridge:
         if not adapter:
             return ActionResult(request.request_id, request.action, "not_connected")
         try:
-            data = adapter.perform(request.action, request.target, request.payload)
+            payload = request.payload
+            if request.action == "telegram.publish_announcement":
+                # One operation ID already exists in the Bridge; reuse it at
+                # MPB instead of making the caller supply a second key.
+                payload = {**request.payload, "operation_key": request.request_id}
+            data = adapter.perform(request.action, request.target, payload)
         except Exception as exc:
             # Only fixed, known provider codes cross the trust boundary.
             # Never surface arbitrary exception messages or credentials.
