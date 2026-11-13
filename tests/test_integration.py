@@ -1,5 +1,8 @@
 import unittest
-from tumblrkit.integration import CampaignHandoff
+import tempfile
+from pathlib import Path
+from tumblrkit.core import connect, create_campaign, event_counts
+from tumblrkit.integration import CampaignHandoff, CoreLinkStore
 
 class Links:
     def __init__(self): self.events = set()
@@ -69,6 +72,50 @@ class IntegrationTests(unittest.TestCase):
                 self.assertEqual(result.status,"unverified")
                 self.assertEqual(result.next_actions,("reconcile_delivery",))
                 self.assertEqual(publisher.calls,1)
+
+    def test_persistent_campaign_link_and_click_survive_restart(self):
+        with tempfile.TemporaryDirectory() as temp:
+            db_path=str(Path(temp)/"campaign.sqlite3")
+            db=connect(db_path)
+            create_campaign(db,"campaign","real source",{2:"tier"})
+            first=CoreLinkStore(db)
+            link=first.create("campaign","post-123")
+            self.assertEqual(link,first.create("campaign","post-123"))
+            self.assertTrue(link and ":" not in link)
+            self.assertTrue(first.mark("click-1","entry",link))
+            self.assertFalse(first.mark("click-1","entry",link))
+            db.close()
+            db=connect(db_path)
+            try:
+                restored=CoreLinkStore(db)
+                self.assertEqual(restored.create("campaign","post-123"),link)
+                self.assertFalse(restored.mark("click-1","entry",link))
+                other=restored.create("campaign","post-456")
+                self.assertNotEqual(link,other)
+                with self.assertRaisesRegex(ValueError,"campaign_event_id_conflict"):
+                    restored.mark("click-1","entry",other)
+                self.assertEqual(event_counts(db),[(link,"entry",1)])
+                with self.assertRaisesRegex(ValueError,"campaign_link_missing"):
+                    restored.mark("click-2","entry","unknown-link")
+                self.assertEqual(event_counts(db),[(link,"entry",1)])
+            finally:
+                db.close()
+
+    def test_inactive_campaign_cannot_create_new_entry_link(self):
+        db=connect()
+        try:
+            create_campaign(db,"campaign","demo",{})
+            links=CoreLinkStore(db)
+            previous=links.create("campaign","post-1")
+            with db:
+                db.execute("UPDATE campaigns SET active=0 WHERE id='campaign'")
+            with self.assertRaisesRegex(ValueError,"campaign inactive"):
+                links.create("campaign","post-2")
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM campaign_links").fetchone()[0],1)
+            self.assertTrue(previous)
+        finally:
+            db.close()
 
     def test_missing_event_id_rejected(self):
         with self.assertRaises(ValueError): self.flow.track_entry("", "l1")
