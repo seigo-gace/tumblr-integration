@@ -108,7 +108,12 @@ class CampaignHandoff:
             raise ValueError("group/user ID required")
         # The GATE adapter alone supplies a trusted boolean readback.
         # Never accept integer 1 or nonempty strings as proof of membership.
-        if self.gate.verify_member(group_id, telegram_user_id) is True:
+        try:
+            verified = self.gate.verify_member(group_id, telegram_user_id) is True
+        except Exception:
+            # An unavailable GATE is not evidence of membership.
+            verified = False
+        if verified:
             return HandoffResult("member_verified", ("evaluate_campaign_eligibility",))
         return HandoffResult("not_verified", ("show_join_instructions", "retry_verification"))
 
@@ -128,7 +133,11 @@ class CampaignHandoff:
         owned_group=self.campaign_group(campaign_id)
         if not isinstance(owned_group,str) or not owned_group or owned_group!=group_id:
             raise PermissionError("campaign_group_mismatch")
-        if self.gate.verify_member(group_id,telegram_user_id) is not True:
+        try:
+            verified = self.gate.verify_member(group_id,telegram_user_id) is True
+        except Exception:
+            verified = False
+        if not verified:
             return MembershipAttribution("not_verified")
         grants=confirm_membership(db,campaign_id,telegram_user_id,
                                   gate_verified=True,referral_code=referral_code)
