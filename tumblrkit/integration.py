@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Protocol
 import secrets
 
-from tumblrkit.core import record_event
+from tumblrkit.core import record_event, confirm_membership
 
 class LinkStore(Protocol):
     def create(self, campaign_id: str, source_post_id: str) -> str: ...
@@ -63,14 +63,24 @@ class CoreLinkStore:
 
 
 @dataclass(frozen=True)
+class MembershipAttribution:
+    status: str
+    new_rewards: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class HandoffResult:
     status: str
     next_actions: tuple[str, ...]
     reference: str | None = None
 
 class CampaignHandoff:
-    def __init__(self, links: LinkStore, gate: TelegramGate, publisher: TelegramPublisher):
+    def __init__(self, links: LinkStore, gate: TelegramGate, publisher: TelegramPublisher,
+                 *, campaign_group=None):
         self.links, self.gate, self.publisher = links, gate, publisher
+        # Trusted owner-provided campaign->group binding, not an untrusted
+        # group_id from a browser or a public referral URL.
+        self.campaign_group = campaign_group
 
     def referral_entry(self, campaign_id: str, tumblr_post_id: str) -> HandoffResult:
         if not campaign_id or not tumblr_post_id:
@@ -92,6 +102,28 @@ class CampaignHandoff:
         if self.gate.verify_member(group_id, telegram_user_id) is True:
             return HandoffResult("member_verified", ("evaluate_campaign_eligibility",))
         return HandoffResult("not_verified", ("show_join_instructions", "retry_verification"))
+
+    def attribute_membership(self, db, campaign_id: str, group_id: str,
+                             telegram_user_id: str, referral_code=None) -> MembershipAttribution:
+        """One trusted GATE readback -> one local membership/tier attribution.
+
+        No public API, cross-service credential, or membership guess is made.
+        The caller must inject the trusted group assignment from the GATE
+        owner; absent assignment fails closed before any membership query.
+        """
+        if not all(isinstance(v,str) and v for v in
+                   (campaign_id,group_id,telegram_user_id)):
+            raise ValueError("campaign_membership_target_invalid")
+        if self.campaign_group is None:
+            raise PermissionError("campaign_group_binding_required")
+        owned_group=self.campaign_group(campaign_id)
+        if not isinstance(owned_group,str) or not owned_group or owned_group!=group_id:
+            raise PermissionError("campaign_group_mismatch")
+        if self.gate.verify_member(group_id,telegram_user_id) is not True:
+            return MembershipAttribution("not_verified")
+        grants=confirm_membership(db,campaign_id,telegram_user_id,
+                                  gate_verified=True,referral_code=referral_code)
+        return MembershipAttribution("member_verified",tuple(grants))
 
     def publish_announcement(self, destination: str, text: str, operation_key: str, *, confirmed: bool = False) -> HandoffResult:
         if not destination or not text or not operation_key:
