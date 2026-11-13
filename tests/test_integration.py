@@ -92,10 +92,11 @@ class IntegrationTests(unittest.TestCase):
             def publish(self, destination, text, operation_key):
                 self.calls+=1
                 return self.response
-        for response in (None, [], {"message_id":42}, {"message_id":""}):
+        for index, response in enumerate((None, [], {"message_id":42}, {"message_id":""})):
             with self.subTest(response=response):
                 publisher=MalformedPublisher(response)
-                flow=CampaignHandoff(Links(), Gate(), publisher,delivery_db=connect())
+                ledger=connect(str(Path(self.ledger_dir.name)/f"malformed-{index}.sqlite3"))
+                flow=CampaignHandoff(Links(), Gate(), publisher,delivery_db=ledger)
                 self.addCleanup(flow.delivery_db.close)
                 result=flow.publish_announcement("g1","message","key",confirmed=True)
                 self.assertEqual(result.status,"unverified")
