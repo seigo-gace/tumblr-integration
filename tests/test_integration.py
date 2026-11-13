@@ -41,14 +41,14 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(membership.detail["status"],"member_verified")
         self.assertEqual(self.publisher.calls,0)
         requested=ActionRequest("mpb-1","telegram.publish_announcement","g1",
-            payload={"text":"Notice","operation_key":"op-1"},confirmed=True)
+            payload={"text":"Notice"},confirmed=True)
         self.assertEqual(bridge.dispatch(requested).state,"completed")
         self.assertEqual(self.publisher.calls,1)
         self.assertEqual(bridge.dispatch(requested).state,"completed")
         self.assertEqual(self.publisher.calls,1)
         no_confirm=bridge.dispatch(ActionRequest("mpb-2",
             "telegram.publish_announcement","g1",
-            payload={"text":"Notice","operation_key":"op-2"}))
+            payload={"text":"Notice"}))
         self.assertEqual(no_confirm.state,"confirmation_required")
         self.assertEqual(self.publisher.calls,1)
 
