@@ -26,7 +26,9 @@ class Publisher:
 class IntegrationTests(unittest.TestCase):
     def setUp(self):
         self.publisher = Publisher()
-        self.db=connect()
+        self.ledger_dir=tempfile.TemporaryDirectory()
+        self.addCleanup(self.ledger_dir.cleanup)
+        self.db=connect(str(Path(self.ledger_dir.name)/"receipts.sqlite3"))
         self.addCleanup(self.db.close)
         self.flow = CampaignHandoff(Links(), Gate(), self.publisher,delivery_db=self.db)
     def test_referral_link(self):
@@ -243,6 +245,32 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(self.db.execute(
             "SELECT COUNT(*) FROM announcement_receipts "
             "WHERE operation_key='auth-failure'").fetchone()[0],0)
+
+    def test_memory_ledger_blocks_publish_and_readback_without_owner_calls(self):
+        class CountingPublisher(Publisher):
+            def __init__(self):
+                super().__init__()
+                self.auth_calls=0
+                self.lookups=0
+            def authorize(self, destination, operation_key):
+                self.auth_calls+=1
+                return True
+            def find_by_operation_key(self, destination, operation_key):
+                self.lookups+=1
+                return {"message_id":"42"}
+        db=connect()
+        self.addCleanup(db.close)
+        publisher=CountingPublisher()
+        flow=CampaignHandoff(Links(),Gate(),publisher,delivery_db=db)
+        self.assertEqual(flow.publish_announcement(
+            "group","text","volatile",confirmed=True).status,"not_connected")
+        self.assertEqual(flow.reconcile_announcement(
+            "group","text","volatile").status,"not_connected")
+        self.assertEqual(publisher.calls,0)
+        self.assertEqual(publisher.auth_calls,0)
+        self.assertEqual(publisher.lookups,0)
+        self.assertEqual(db.execute(
+            "SELECT COUNT(*) FROM announcement_receipts").fetchone()[0],0)
 
     def test_announcement_requires_persistent_ledger_before_mpb(self):
         flow=CampaignHandoff(Links(), Gate(), self.publisher)
