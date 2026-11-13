@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 
 from tumblrkit.analytics_runtime import AnalyticsAdapter
+from tumblrkit.core import connect, create_campaign, issue_referral, confirm_membership
+from tumblrkit.integration import CoreLinkStore
 from tumblrkit.discovery_store import DiscoveryStore
 from tumblrkit.library import Library
 from tumblrkit.assistant import Assistant
@@ -88,6 +90,46 @@ class AnalyticsRuntimeTests(unittest.TestCase):
         response=self.adapter.perform("analytics.get_summary","today",{})
         self.assertEqual([r["value"] for r in response["rows"]][-3:],[0,0,0])
         self.assertIn("Tumblrフォロワー数",response["not_measured"])
+
+    def test_campaign_records_are_reported_only_from_injected_private_db(self):
+        db=connect(str(self.folder/"campaign.sqlite3"))
+        self.addCleanup(db.close)
+        create_campaign(db,"campaign","verified records",{2:"tier"})
+        code=issue_referral(db,"campaign","alice")
+        links=CoreLinkStore(db)
+        link=links.create("campaign","123")
+        self.assertTrue(links.mark("click-1","entry",link))
+        self.assertFalse(links.mark("click-1","entry",link))
+        self.assertTrue(links.mark("click-2","entry",link))
+        self.assertEqual(confirm_membership(db,"campaign","bob",
+                         gate_verified=True,referral_code=code),[])
+        self.assertEqual(confirm_membership(db,"campaign","charlie",
+                         gate_verified=True,referral_code=code),["tier"])
+        with db:
+            db.execute("INSERT INTO announcement_receipts "
+                       "(operation_key,payload_digest,destination,state,message_id,updated_at) "
+                       "VALUES('sent','hash','group','sent','11','2033-05-01T00:00:00+00:00')")
+            db.execute("INSERT INTO announcement_receipts "
+                       "(operation_key,payload_digest,destination,state,message_id,updated_at) "
+                       "VALUES('verified','hash2','group','verified','12','2033-05-01T00:00:00+00:00')")
+        report=AnalyticsAdapter(self.store,clock=lambda:self.now,
+                                campaign_db=db).perform("analytics.get_summary","all",{})
+        self.assertEqual(report["campaign_basis"],
+                         "local_campaign_records_not_external_conversion")
+        self.assertEqual([r["value"] for r in report["rows"]][-4:],[2,2,1,1])
+        self.assertIn("Telegram参加転換率",report["not_measured"])
+        absent=self.adapter.perform("analytics.get_summary","all",{})
+        self.assertEqual(absent["campaign_basis"],"not_connected")
+        self.assertEqual(len(absent["rows"]),8)
+
+    def test_partial_campaign_schema_does_not_fabricate_zeroes(self):
+        db=connect(str(self.folder/"campaign-missing.sqlite3"))
+        self.addCleanup(db.close)
+        with db:
+            db.execute("DROP TABLE announcement_receipts")
+        adapter=AnalyticsAdapter(self.store,clock=lambda:self.now,campaign_db=db)
+        with self.assertRaisesRegex(ValueError,"analytics_campaign_source_unavailable"):
+            adapter.perform("analytics.get_summary","all",{})
 
     def test_invalid_period_or_payload_refuses_without_estimates(self):
         for value in ("week;DELETE","follower_growth","future",123):
