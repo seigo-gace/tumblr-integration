@@ -16,6 +16,9 @@ class TelegramGate(Protocol):
     def verify_member(self, group_id: str, telegram_user_id: str) -> bool: ...
 
 class TelegramPublisher(Protocol):
+    # The existing MPB owner must resolve origin + actor + destination and
+    # authorize the operation before Tumblr can request any delivery.
+    def authorize(self, destination: str, operation_key: str) -> bool: ...
     def publish(self, destination: str, text: str, operation_key: str) -> dict: ...
     def readback(self, destination: str, message_id: str) -> bool: ...
 
@@ -140,6 +143,12 @@ class CampaignHandoff:
             # An in-memory request ID cannot prevent duplicate MPB delivery
             # after restart or an uncertain provider response.
             return HandoffResult("not_connected", ("configure_durable_delivery",))
+        # Never let a caller-chosen group/topic travel straight to MPB. The
+        # injected MPB-owned adapter must independently resolve origin and
+        # actor permissions; a truthy result is not sufficient evidence.
+        authorize=getattr(self.publisher,"authorize",None)
+        if not callable(authorize) or authorize(destination,operation_key) is not True:
+            return HandoffResult("not_connected", ("resolve_mpb_destination",))
         fingerprint=hashlib.sha256(json.dumps(
             [destination,text],ensure_ascii=False,separators=(",",":")
         ).encode("utf-8")).hexdigest()
