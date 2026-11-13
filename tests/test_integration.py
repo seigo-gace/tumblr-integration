@@ -256,6 +256,34 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(result.status,"published")
         self.assertEqual(self.publisher.calls,1)
 
+    def test_mpb_readback_exception_retains_sent_and_never_reposts(self):
+        class FlakyReadback(Publisher):
+            def __init__(self):
+                super().__init__()
+                self.fail=True
+            def readback(self,destination,message_id):
+                if self.fail:
+                    raise TimeoutError("MPB readback unavailable")
+                return True
+        publisher=FlakyReadback()
+        flow=CampaignHandoff(Links(),Gate(),publisher,delivery_db=self.db)
+        first=flow.publish_announcement("group","text","flaky",confirmed=True)
+        self.assertEqual(first.status,"unverified")
+        self.assertEqual(first.reference,"42")
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM announcement_receipts WHERE operation_key='flaky'"
+        ).fetchone()[0],"sent")
+        second=flow.publish_announcement("group","text","flaky",confirmed=True)
+        self.assertEqual(second.status,"unverified")
+        self.assertEqual(publisher.calls,1)
+        publisher.fail=False
+        recovered=flow.reconcile_announcement("group","text","flaky")
+        self.assertEqual(recovered.status,"published")
+        self.assertEqual(publisher.calls,1)
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM announcement_receipts WHERE operation_key='flaky'"
+        ).fetchone()[0],"verified")
+
     def test_confirm_requires_exact_boolean_not_truthy_text(self):
         for unconfirmed in (False, None, "true", 1):
             with self.subTest(value=unconfirmed):
