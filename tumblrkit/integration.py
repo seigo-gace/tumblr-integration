@@ -2,6 +2,9 @@
 from dataclasses import dataclass
 from typing import Protocol
 import secrets
+import hashlib
+import json
+from datetime import datetime, timezone
 
 from tumblrkit.core import record_event, confirm_membership
 
@@ -76,11 +79,14 @@ class HandoffResult:
 
 class CampaignHandoff:
     def __init__(self, links: LinkStore, gate: TelegramGate, publisher: TelegramPublisher,
-                 *, campaign_group=None):
+                 *, campaign_group=None, delivery_db=None):
         self.links, self.gate, self.publisher = links, gate, publisher
         # Trusted owner-provided campaign->group binding, not an untrusted
         # group_id from a browser or a public referral URL.
         self.campaign_group = campaign_group
+        # Owner-private persistent SQLite connection; never a browser cache.
+        # No MPB effect is admitted without a durable operation receipt.
+        self.delivery_db = delivery_db
 
     def referral_entry(self, campaign_id: str, tumblr_post_id: str) -> HandoffResult:
         if not campaign_id or not tumblr_post_id:
@@ -126,16 +132,66 @@ class CampaignHandoff:
         return MembershipAttribution("member_verified",tuple(grants))
 
     def publish_announcement(self, destination: str, text: str, operation_key: str, *, confirmed: bool = False) -> HandoffResult:
-        if not destination or not text or not operation_key:
+        if not all(isinstance(v,str) and v for v in (destination,text,operation_key)):
             raise ValueError("destination/text/key required")
         if not confirmed:
-            return HandoffResult("confirmation_required", ("confirm_publish", "edit_draft"))
-        receipt = self.publisher.publish(destination, text, operation_key)
-        # Unknown publication outcomes must be reconciled by the MPB owner
-        # with the same operation key, never guessed into an identifier.
-        message_id = receipt.get("message_id") if isinstance(receipt, dict) else None
-        if not isinstance(message_id, str) or not message_id:
+            return HandoffResult("confirmation_required", ("confirm_publish","edit_draft"))
+        if self.delivery_db is None:
+            # An in-memory request ID cannot prevent duplicate MPB delivery
+            # after restart or an uncertain provider response.
+            return HandoffResult("not_connected", ("configure_durable_delivery",))
+        fingerprint=hashlib.sha256(json.dumps(
+            [destination,text],ensure_ascii=False,separators=(",",":")
+        ).encode("utf-8")).hexdigest()
+        db=self.delivery_db
+        with db:
+            # Uses the same owner-private campaign DB; no second persistence.
+            db.execute("""CREATE TABLE IF NOT EXISTS announcement_receipts (
+              operation_key TEXT PRIMARY KEY,
+              payload_digest TEXT NOT NULL,
+              destination TEXT NOT NULL,
+              state TEXT NOT NULL CHECK(state IN ('reserved','sent','verified')),
+              message_id TEXT,
+              updated_at TEXT NOT NULL
+            )""")
+            created=db.execute("INSERT OR IGNORE INTO announcement_receipts "
+                       "(operation_key,payload_digest,destination,state,updated_at) "
+                       "VALUES(?,?,?,'reserved',?)",
+                       (operation_key,fingerprint,destination,
+                        datetime.now(timezone.utc).isoformat())).rowcount==1
+            row=db.execute("SELECT payload_digest,destination,state,message_id "
+                           "FROM announcement_receipts WHERE operation_key=?",
+                           (operation_key,)).fetchone()
+            if row[0]!=fingerprint or row[1]!=destination:
+                raise ValueError("announcement_operation_conflict")
+        state,message_id=row[2],row[3]
+        if state=="verified":
+            return HandoffResult("published", ("inspect_post","measure_referrals"),message_id)
+        if state=="reserved" and row[3] is not None:
+            raise ValueError("announcement_receipt_invalid")
+        # Only a newly reserved operation may call MPB publish. Existing
+        # reserved but uncertain operation keys must never be resubmitted.
+        # Determine this from INSERT rowcount under the transaction.
+        if state=="reserved" and not created:
             return HandoffResult("unverified", ("reconcile_delivery",))
-        if not self.publisher.readback(destination, message_id):
-            return HandoffResult("unverified", ("reconcile_delivery",), message_id)
-        return HandoffResult("published", ("inspect_post", "measure_referrals"), message_id)
+        if state=="reserved":
+            try:
+                receipt=self.publisher.publish(destination,text,operation_key)
+            except Exception:
+                return HandoffResult("unverified", ("reconcile_delivery",))
+            message_id=receipt.get("message_id") if isinstance(receipt,dict) else None
+            if not isinstance(message_id,str) or not message_id:
+                return HandoffResult("unverified", ("reconcile_delivery",))
+            with db:
+                db.execute("UPDATE announcement_receipts "
+                           "SET state='sent',message_id=?,updated_at=? "
+                           "WHERE operation_key=? AND state='reserved'",
+                           (message_id,datetime.now(timezone.utc).isoformat(),operation_key))
+        # For a sent-but-unverified request, only read back the same known ID.
+        if self.publisher.readback(destination,message_id) is not True:
+            return HandoffResult("unverified", ("reconcile_delivery",),message_id)
+        with db:
+            db.execute("UPDATE announcement_receipts "
+                       "SET state='verified',updated_at=? WHERE operation_key=? AND state='sent'",
+                       (datetime.now(timezone.utc).isoformat(),operation_key))
+        return HandoffResult("published", ("inspect_post","measure_referrals"),message_id)
