@@ -17,6 +17,7 @@ class Gate:
 
 class Publisher:
     def __init__(self): self.calls = 0; self.ok = True
+    def authorize(self, destination, operation_key): return True
     def publish(self, destination, text, operation_key):
         self.calls += 1
         return {"message_id": "42"}
@@ -175,6 +176,35 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT COUNT(*) FROM grants").fetchone()[0],0)
         finally:
             db.close()
+
+    def test_mpb_owner_authorization_is_required_before_any_send(self):
+        class NoAuthorization:
+            calls=0
+            def publish(self,destination,text,operation_key):
+                self.calls+=1
+                return {"message_id":"123"}
+            def readback(self,destination,message_id): return True
+        missing=NoAuthorization()
+        denied=CampaignHandoff(Links(),Gate(),missing,delivery_db=self.db)
+        self.assertEqual(denied.publish_announcement(
+            "unsafe-destination","text","op-1",confirmed=True).status,"not_connected")
+        self.assertEqual(missing.calls,0)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM announcement_receipts").fetchone()[0],0)
+        class UntrustedPublisher(Publisher):
+            def __init__(self,result):
+                super().__init__()
+                self.result=result
+            def authorize(self,destination,operation_key): return self.result
+        for result in (1,"true",None,False):
+            with self.subTest(result=result):
+                publisher=UntrustedPublisher(result)
+                flow=CampaignHandoff(Links(),Gate(),publisher,delivery_db=self.db)
+                self.assertEqual(flow.publish_announcement(
+                    "unsafe-destination","text","op-1",confirmed=True).status,"not_connected")
+                self.assertEqual(publisher.calls,0)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM announcement_receipts").fetchone()[0],0)
 
     def test_announcement_requires_persistent_ledger_before_mpb(self):
         flow=CampaignHandoff(Links(), Gate(), self.publisher)
