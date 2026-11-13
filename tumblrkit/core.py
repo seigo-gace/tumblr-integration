@@ -50,6 +50,14 @@ CREATE TABLE IF NOT EXISTS posts (
  post_id TEXT PRIMARY KEY, source_url TEXT NOT NULL, seen INTEGER NOT NULL DEFAULT 0,
  favorite INTEGER NOT NULL DEFAULT 0, watch_later INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS announcement_receipts (
+ operation_key TEXT PRIMARY KEY,
+ payload_digest TEXT NOT NULL,
+ destination TEXT NOT NULL,
+ state TEXT NOT NULL CHECK (state IN ('reserved','sent','verified')),
+ message_id TEXT,
+ updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS jobs (
  job_key TEXT PRIMARY KEY, action TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending'
 );
