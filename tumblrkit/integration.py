@@ -265,7 +265,13 @@ class CampaignHandoff:
                            "WHERE operation_key=? AND state='reserved'",
                            (message_id,datetime.now(timezone.utc).isoformat(),operation_key))
         # For a sent-but-unverified request, only read back the same known ID.
-        if self.publisher.readback(destination,message_id) is not True:
+        try:
+            matched = self.publisher.readback(destination,message_id) is True
+        except Exception:
+            # The MPB operation may have succeeded; retain the durable sent
+            # receipt and reconcile later instead of losing the result.
+            matched = False
+        if not matched:
             return HandoffResult("unverified", ("reconcile_delivery",),message_id)
         with db:
             db.execute("UPDATE announcement_receipts "
