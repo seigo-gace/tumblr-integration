@@ -97,6 +97,42 @@ class AssistantTests(unittest.TestCase):
             reopened=DraftStore(Path(folder)/"data"/"drafts.sqlite3")
             self.assertEqual(reopened.get(draft_id)["text"],"共通の永続下書き")
 
+
+    def test_telegram_announcement_keeps_text_in_existing_confirmation(self):
+        class ExistingTelegram:
+            def __init__(self):
+                self.calls=[]
+            def perform(self, action, target, payload):
+                self.calls.append((action,target,dict(payload)))
+                return {"verified":True,"status":"published"}
+        owner=ExistingTelegram()
+        assistant=Assistant(bridge=Bridge({"telegram":owner}),providers=[])
+        preview=assistant.turn(
+            "告知 対象: area_bbs\n本文: 今週のご案内です")
+        self.assertEqual(preview["state"],"confirmation_required")
+        self.assertIn("今週のご案内です",preview["text"])
+        self.assertEqual(owner.calls,[])
+        result=assistant.turn(confirm=True,request_id=preview["request_id"])
+        self.assertEqual(result["state"],"completed")
+        self.assertEqual(owner.calls,[(
+            "telegram.publish_announcement","area_bbs",
+            {"text":"今週のご案内です","operation_key":preview["request_id"]})])
+        self.assertFalse(assistant.turn(confirm=True,
+            request_id=preview["request_id"])["executed"])
+        self.assertEqual(len(owner.calls),1)
+
+    def test_telegram_announcement_needs_body_and_existing_owner(self):
+        class ExistingTelegram:
+            def perform(self, *_):
+                raise AssertionError("must not publish without body")
+        missing=Assistant(providers=[]).turn(
+            "告知 対象: area_bbs\n本文: hello")
+        self.assertEqual(missing["state"],"not_connected")
+        ready=Assistant(bridge=Bridge({"telegram":ExistingTelegram()}),providers=[])
+        no_body=ready.turn("告知 対象: area_bbs")
+        self.assertEqual(no_body["state"],"unclear")
+        self.assertIsNone(no_body["request_id"])
+
     def test_six_goals_not_flattened_into_single_action_or_omitted(self):
         adapter=RecordingAdapter()
         assistant=Assistant(bridge=Bridge({"tumblr":adapter}),providers=[])
