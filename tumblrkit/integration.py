@@ -310,3 +310,37 @@ class CampaignHandoff:
                        "SET state='verified',updated_at=? WHERE operation_key=? AND state='sent'",
                        (datetime.now(timezone.utc).isoformat(),operation_key))
         return HandoffResult("published", ("inspect_post","measure_referrals"),message_id)
+
+
+class TelegramActionAdapter:
+    """Expose the existing GATE/MPB handoff through the existing Bridge.
+
+    No second publisher, membership database, authentication flow, or HTTP
+    endpoint. The authenticated owner composition supplies the handoff and
+    the trusted Telegram member identity.
+    """
+    def __init__(self, handoff: CampaignHandoff, *, member_id=None):
+        self.handoff = handoff
+        self.member_id = member_id
+
+    def perform(self, action: str, target: str, payload: dict) -> dict:
+        if action == "telegram.check_membership":
+            if not isinstance(self.member_id, str) or not self.member_id:
+                return {"verified": False, "status": "not_connected"}
+            result = self.handoff.check_membership(target, self.member_id)
+            return {"verified": result.status == "member_verified",
+                    "status": result.status}
+        if action == "telegram.publish_announcement":
+            text = payload.get("text")
+            operation_key = payload.get("operation_key")
+            if not isinstance(text, str) or not text.strip():
+                raise ValueError("announcement_text_required")
+            if not isinstance(operation_key, str) or not operation_key:
+                raise ValueError("announcement_operation_key_required")
+            # Bridge already requires confirmation before this method runs.
+            # Existing MPB handoff owns the idempotency and delivery readback.
+            result = self.handoff.publish_announcement(
+                target, text, operation_key, confirmed=True)
+            return {"verified": result.status == "published",
+                    "status": result.status, "reference": result.reference}
+        raise ValueError("unsupported_telegram_action")
