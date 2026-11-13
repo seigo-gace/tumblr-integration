@@ -895,8 +895,12 @@ class _Handler(BaseHTTPRequestHandler):
                                        "CMを再開", "次のCMを見る")):
             from tumblrkit.cm_links import CMRegistry, handle_cm_message
             try:
-                with self.server.draft_store._connect() as db:
-                    response = handle_cm_message(CMRegistry(db), message)
+                db = self.server.draft_store._connect()
+                try:
+                    with db:
+                        response = handle_cm_message(CMRegistry(db), message)
+                finally:
+                    db.close()
             except (ValueError, TypeError):
                 self._json(400, {"error": "cm_request_invalid"})
                 return
