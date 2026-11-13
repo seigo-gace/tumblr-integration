@@ -24,6 +24,11 @@ class CMRegistry:
                     destination TEXT PRIMARY KEY,
                     offset INTEGER NOT NULL DEFAULT 0
                 );
+                CREATE TABLE IF NOT EXISTS cm_operation_choices (
+                    operation_key TEXT PRIMARY KEY,
+                    destination TEXT NOT NULL,
+                    chosen_ids TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS cm_advances (
                     operation_key TEXT PRIMARY KEY,
                     destination TEXT NOT NULL,
@@ -99,6 +104,30 @@ class CMRegistry:
                  "url": rows[(start+i) % len(rows)][2]}
                 for i in range(min(3, len(rows)))]
 
+    def select_for_operation(self, destination, operation_key):
+        if not isinstance(operation_key, str) or not operation_key:
+            raise ValueError('cm_operation_invalid')
+        with self.db:
+            prior = self.db.execute(
+                'SELECT destination, chosen_ids FROM cm_operation_choices WHERE operation_key=?',
+                (operation_key,)).fetchone()
+            if prior:
+                if prior[0] != destination:
+                    raise ValueError('cm_operation_conflict')
+                ids = json.loads(prior[1])
+                links = {item['id']: item for item in self.list_links()}
+                return [links[i] for i in ids if i in links]
+            chosen = self.select(destination)
+            self.db.execute(
+                'INSERT INTO cm_operation_choices VALUES(?,?,?)',
+                (operation_key, destination, json.dumps([x['id'] for x in chosen])))
+            return chosen
+
+    def is_advanced(self, destination, operation_key, chosen_ids):
+        row = self.db.execute(
+            'SELECT destination, chosen_ids FROM cm_advances WHERE operation_key=?',
+            (operation_key,)).fetchone()
+        return row == (destination, json.dumps(list(chosen_ids), separators=(',', ':')))
     def advance_after_delivery(self, destination, operation_key, chosen_ids, *,
                                verified=False):
         """Advance once, only after trusted MPB delivery confirmation.
