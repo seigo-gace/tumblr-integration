@@ -303,6 +303,55 @@ class IntegrationTests(unittest.TestCase):
             finally:
                 db.close()
 
+    def test_read_only_mpb_reconcile_recovers_unknown_post_without_republish(self):
+        class UnknownThenFound(Publisher):
+            def __init__(self):
+                super().__init__()
+                self.lookups=0
+            def publish(self,destination,text,operation_key):
+                self.calls+=1
+                return None
+            def find_by_operation_key(self,destination,operation_key):
+                self.lookups+=1
+                return {"message_id":"42"}
+        publisher=UnknownThenFound()
+        flow=CampaignHandoff(Links(),Gate(),publisher,delivery_db=self.db)
+        self.assertEqual(flow.publish_announcement(
+            "group","text","unknown",confirmed=True).status,"unverified")
+        self.assertEqual(publisher.calls,1)
+        publisher.ok=False
+        not_yet=flow.reconcile_announcement("group","text","unknown")
+        self.assertEqual(not_yet.status,"unverified")
+        self.assertEqual(not_yet.reference,"42")
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM announcement_receipts WHERE operation_key='unknown'"
+        ).fetchone()[0],"sent")
+        publisher.ok=True
+        confirmed=flow.reconcile_announcement("group","text","unknown")
+        self.assertEqual(confirmed.status,"published")
+        self.assertEqual(publisher.calls,1)
+        self.assertEqual(publisher.lookups,1)
+        self.assertEqual(flow.publish_announcement(
+            "group","text","unknown",confirmed=True).status,"published")
+        self.assertEqual(publisher.calls,1)
+        with self.assertRaisesRegex(ValueError,"announcement_operation_conflict"):
+            flow.reconcile_announcement("group","changed","unknown")
+
+    def test_unknown_delivery_without_owner_lookup_cannot_be_faked_complete(self):
+        class NoLookup(Publisher):
+            def publish(self,destination,text,operation_key):
+                self.calls+=1
+                return None
+        publisher=NoLookup()
+        flow=CampaignHandoff(Links(),Gate(),publisher,delivery_db=self.db)
+        flow.publish_announcement("group","text","unknown-2",confirmed=True)
+        self.assertEqual(flow.reconcile_announcement(
+            "group","text","unknown-2").status,"unverified")
+        self.assertEqual(publisher.calls,1)
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM announcement_receipts WHERE operation_key='unknown-2'"
+        ).fetchone()[0],"reserved")
+
     def test_missing_event_id_rejected(self):
         with self.assertRaises(ValueError): self.flow.track_entry("", "l1")
 
