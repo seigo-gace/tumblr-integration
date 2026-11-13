@@ -134,7 +134,7 @@ class CampaignHandoff:
     def publish_announcement(self, destination: str, text: str, operation_key: str, *, confirmed: bool = False) -> HandoffResult:
         if not all(isinstance(v,str) and v for v in (destination,text,operation_key)):
             raise ValueError("destination/text/key required")
-        if not confirmed:
+        if confirmed is not True:
             return HandoffResult("confirmation_required", ("confirm_publish","edit_draft"))
         if self.delivery_db is None:
             # An in-memory request ID cannot prevent duplicate MPB delivery
@@ -165,6 +165,8 @@ class CampaignHandoff:
             if row[0]!=fingerprint or row[1]!=destination:
                 raise ValueError("announcement_operation_conflict")
         state,message_id=row[2],row[3]
+        if state in ("sent","verified") and (not isinstance(message_id,str) or not message_id):
+            raise ValueError("announcement_receipt_invalid")
         if state=="verified":
             return HandoffResult("published", ("inspect_post","measure_referrals"),message_id)
         if state=="reserved" and row[3] is not None:
