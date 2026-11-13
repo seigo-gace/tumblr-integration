@@ -2,7 +2,8 @@ import unittest
 import tempfile
 from pathlib import Path
 from tumblrkit.core import connect, create_campaign, event_counts, issue_referral
-from tumblrkit.integration import CampaignHandoff, CoreLinkStore
+from tumblrkit.integration import CampaignHandoff, CoreLinkStore, TelegramActionAdapter
+from tumblrkit.bridge import Bridge, ActionRequest
 
 class Links:
     def __init__(self): self.events = set()
@@ -31,6 +32,38 @@ class IntegrationTests(unittest.TestCase):
         self.db=connect(str(Path(self.ledger_dir.name)/"receipts.sqlite3"))
         self.addCleanup(self.db.close)
         self.flow = CampaignHandoff(Links(), Gate(), self.publisher,delivery_db=self.db)
+    def test_telegram_bridge_uses_existing_handoff_without_new_provider(self):
+        bridge=Bridge({"telegram": TelegramActionAdapter(
+            self.flow,member_id="verified-user")})
+        membership=bridge.dispatch(ActionRequest(
+            "gate-1","telegram.check_membership","g1"))
+        self.assertEqual(membership.state,"completed")
+        self.assertEqual(membership.detail["status"],"member_verified")
+        self.assertEqual(self.publisher.calls,0)
+        requested=ActionRequest("mpb-1","telegram.publish_announcement","g1",
+            payload={"text":"Notice","operation_key":"op-1"},confirmed=True)
+        self.assertEqual(bridge.dispatch(requested).state,"completed")
+        self.assertEqual(self.publisher.calls,1)
+        self.assertEqual(bridge.dispatch(requested).state,"completed")
+        self.assertEqual(self.publisher.calls,1)
+        no_confirm=bridge.dispatch(ActionRequest("mpb-2",
+            "telegram.publish_announcement","g1",
+            payload={"text":"Notice","operation_key":"op-2"}))
+        self.assertEqual(no_confirm.state,"confirmation_required")
+        self.assertEqual(self.publisher.calls,1)
+
+    def test_telegram_bridge_unconnected_and_invalid_input(self):
+        bridge=Bridge({"telegram":TelegramActionAdapter(self.flow)})
+        missing=bridge.dispatch(ActionRequest(
+            "gate-missing","telegram.check_membership","g1"))
+        self.assertEqual(missing.state,"unverified")
+        self.assertEqual(self.publisher.calls,0)
+        invalid=bridge.dispatch(ActionRequest(
+            "invalid","telegram.publish_announcement","g1",
+            payload={},confirmed=True))
+        self.assertEqual(invalid.state,"failed")
+        self.assertEqual(self.publisher.calls,0)
+
     def test_referral_link(self):
         self.assertEqual("c1:p1", self.flow.referral_entry("c1", "p1").reference)
     def test_click_idempotence(self):
