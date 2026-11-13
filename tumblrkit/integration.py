@@ -80,6 +80,22 @@ class HandoffResult:
     next_actions: tuple[str, ...]
     reference: str | None = None
 
+def _has_file_backed_ledger(db) -> bool:
+    """Reject volatile receipts before any externally visible MPB operation.
+
+    A memory-backed SQLite ledger loses uncertain delivery state on restart.
+    Only a connected, file-backed main database can guard an MPB request.
+    The owner still controls file permissions and persistent mount lifecycle.
+    """
+    try:
+        for _, name, path in db.execute("PRAGMA database_list").fetchall():
+            if name == "main":
+                return isinstance(path, str) and bool(path.strip())
+    except Exception:
+        return False
+    return False
+
+
 class CampaignHandoff:
     def __init__(self, links: LinkStore, gate: TelegramGate, publisher: TelegramPublisher,
                  *, campaign_group=None, delivery_db=None):
@@ -148,7 +164,7 @@ class CampaignHandoff:
         """Read-only MPB recovery by stable operation key; never repost."""
         if not all(isinstance(v,str) and v for v in (destination,text,operation_key)):
             raise ValueError("destination/text/key required")
-        if self.delivery_db is None:
+        if not _has_file_backed_ledger(self.delivery_db):
             return HandoffResult("not_connected",("configure_durable_delivery",))
         authorize=getattr(self.publisher,"authorize",None)
         try:
@@ -218,9 +234,8 @@ class CampaignHandoff:
             raise ValueError("destination/text/key required")
         if confirmed is not True:
             return HandoffResult("confirmation_required", ("confirm_publish","edit_draft"))
-        if self.delivery_db is None:
-            # An in-memory request ID cannot prevent duplicate MPB delivery
-            # after restart or an uncertain provider response.
+        if not _has_file_backed_ledger(self.delivery_db):
+            # Never call MPB with an in-memory or unavailable receipt ledger.
             return HandoffResult("not_connected", ("configure_durable_delivery",))
         # Never let a caller-chosen group/topic travel straight to MPB. The
         # injected MPB-owned adapter must independently resolve origin and
