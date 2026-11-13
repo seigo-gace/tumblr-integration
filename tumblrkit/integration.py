@@ -38,7 +38,9 @@ class CampaignHandoff:
     def check_membership(self, group_id: str, telegram_user_id: str) -> HandoffResult:
         if not group_id or not telegram_user_id:
             raise ValueError("group/user ID required")
-        if self.gate.verify_member(group_id, telegram_user_id):
+        # The GATE adapter alone supplies a trusted boolean readback.
+        # Never accept integer 1 or nonempty strings as proof of membership.
+        if self.gate.verify_member(group_id, telegram_user_id) is True:
             return HandoffResult("member_verified", ("evaluate_campaign_eligibility",))
         return HandoffResult("not_verified", ("show_join_instructions", "retry_verification"))
 
@@ -48,7 +50,9 @@ class CampaignHandoff:
         if not confirmed:
             return HandoffResult("confirmation_required", ("confirm_publish", "edit_draft"))
         receipt = self.publisher.publish(destination, text, operation_key)
-        message_id = receipt.get("message_id")
+        # Unknown publication outcomes must be reconciled by the MPB owner
+        # with the same operation key, never guessed into an identifier.
+        message_id = receipt.get("message_id") if isinstance(receipt, dict) else None
         if not isinstance(message_id, str) or not message_id:
             return HandoffResult("unverified", ("reconcile_delivery",))
         if not self.publisher.readback(destination, message_id):
