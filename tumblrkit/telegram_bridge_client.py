@@ -37,11 +37,15 @@ class LocalTelegramOwner:
         if action == "telegram.check_membership":
             # The owner identity must come from the private app configuration.
             # In a future user-bound flow, the trusted server may inject it.
-            if not self.member_id:
+            if ":" in target:
+                destination, user_id = target.split(":", 1)
+            else:
+                destination, user_id = target, self.member_id
+            if not user_id:
                 return {"verified": False, "status": "not_connected"}
             result = self.transport({"action": "member",
-                                     "destination": target,
-                                     "user_id": str(self.member_id)})
+                                     "destination": destination,
+                                     "user_id": str(user_id)})
             return {"verified": result.get("verified") is True,
                     "status": "member_verified" if result.get("verified") is True
                               else "not_verified"}
