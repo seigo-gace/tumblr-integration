@@ -206,6 +206,21 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(self.db.execute(
             "SELECT COUNT(*) FROM announcement_receipts").fetchone()[0],0)
 
+    def test_mpb_authorization_error_fails_closed_without_reservation(self):
+        class UnavailableOwner(Publisher):
+            def authorize(self,destination,operation_key):
+                raise TimeoutError("authorization unavailable")
+        publisher=UnavailableOwner()
+        flow=CampaignHandoff(Links(),Gate(),publisher,delivery_db=self.db)
+        self.assertEqual(flow.publish_announcement(
+            "group","text","auth-failure",confirmed=True).status,"not_connected")
+        self.assertEqual(flow.reconcile_announcement(
+            "group","text","auth-failure").status,"not_connected")
+        self.assertEqual(publisher.calls,0)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM announcement_receipts "
+            "WHERE operation_key='auth-failure'").fetchone()[0],0)
+
     def test_announcement_requires_persistent_ledger_before_mpb(self):
         flow=CampaignHandoff(Links(), Gate(), self.publisher)
         self.assertEqual(flow.publish_announcement(
