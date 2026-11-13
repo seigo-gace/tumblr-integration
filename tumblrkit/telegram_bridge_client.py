@@ -59,11 +59,22 @@ class LocalTelegramOwner:
                                      "destination": target,
                                      "text": text,
                                      "operation_key": operation})
-            message = result.get("message_id")
-            verified = result.get("verified") is True and isinstance(message, str) and bool(message)
+            message = result.get("message_id") if isinstance(result, dict) else None
+            if result.get("verified") is not True or not isinstance(message, str) or not message:
+                return {"verified": False, "status": "unverified", "reference": None}
+            # The owner already exposes durable MPB readback. A publish
+            # response alone is not evidence that the posted message was
+            # recorded for this destination and owner.
+            try:
+                receipt = self.transport({"action": "readback",
+                                          "destination": target,
+                                          "message_id": message})
+            except (OSError, ValueError, TypeError, KeyError):
+                return {"verified": False, "status": "unverified", "reference": message}
+            verified = isinstance(receipt, dict) and receipt.get("verified") is True
             return {"verified": verified,
                     "status": "published" if verified else "unverified",
-                    "reference": message if verified else None}
+                    "reference": message}
         raise ValueError("telegram_owner_action_invalid")
 
 
