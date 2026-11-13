@@ -55,16 +55,30 @@ class LocalTelegramOwner:
                 raise ValueError("announcement_text_required")
             if not isinstance(operation, str) or not operation:
                 raise ValueError("announcement_operation_key_required")
-            result = self.transport({"action": "publish",
-                                     "destination": target,
-                                     "text": text,
-                                     "operation_key": operation})
-            message = result.get("message_id") if isinstance(result, dict) else None
-            if not isinstance(result, dict) or result.get("verified") is not True or not isinstance(message, str) or not message:
+            # Existing MPB operation ledger is the recovery source. Check it
+            # first, so a retry after a lost response only reads the post.
+            try:
+                previous = self.transport({"action": "lookup",
+                                           "destination": target,
+                                           "operation_key": operation})
+            except (OSError, ValueError, TypeError, KeyError):
                 return {"verified": False, "status": "unverified", "reference": None}
-            # The owner already exposes durable MPB readback. A publish
-            # response alone is not evidence that the posted message was
-            # recorded for this destination and owner.
+            message = previous.get("message_id") if isinstance(previous, dict) and previous.get("verified") is True else None
+            if not isinstance(message, str) or not message:
+                # No existing sent receipt: ask the same MPB owner to publish,
+                # always reusing the Bridge's stable operation key.
+                try:
+                    result = self.transport({"action": "publish",
+                                             "destination": target,
+                                             "text": text,
+                                             "operation_key": operation})
+                except (OSError, ValueError, TypeError, KeyError):
+                    return {"verified": False, "status": "unverified", "reference": None}
+                message = result.get("message_id") if isinstance(result, dict) else None
+                if not isinstance(result, dict) or result.get("verified") is not True or not isinstance(message, str) or not message:
+                    return {"verified": False, "status": "unverified", "reference": None}
+            # A response from publish/lookup alone cannot prove delivery.
+            # The existing Bot's owner-bound readback is authoritative.
             try:
                 receipt = self.transport({"action": "readback",
                                           "destination": target,
