@@ -1326,6 +1326,8 @@
                 display("未来の予約日時を指定してください。まだ予約していません。","system");
                 return;
               }
+              if(!window.confirm("この本文を指定日時にTumblrへ予約投稿します。日時："+new Date(timestamp*1000).toLocaleString("ja-JP")+"。続行しますか？"))
+                return;
               set.disabled=true;
               try{
                 const saved=await draftRequest("/schedules","POST",{
