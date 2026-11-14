@@ -112,10 +112,11 @@ class ScheduledPublisher:
     def list(self):
         with closing(self.drafts._connect()) as db:
             rows=db.execute(
-                "SELECT schedule_id,draft_id,publish_at,state,post_id FROM "
+                "SELECT schedule_id,draft_id,publish_at,state,post_id,expected_digest FROM "
                 "scheduled_publications ORDER BY publish_at,schedule_id").fetchall()
         return [{"schedule_id":r[0],"draft_id":r[1],"publish_at":r[2],
-                 "state":r[3],"provider_post_id":r[4]} for r in rows]
+                 "state":r[3],"provider_post_id":r[4],
+                 "expected_digest":r[5]} for r in rows]
 
     def dispatch_due(self):
         """Send one due item, once; must be called by the adopted owner runner."""
