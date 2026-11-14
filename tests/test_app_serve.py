@@ -95,6 +95,21 @@ class AppServeTests(unittest.TestCase):
             status, _, _ = fetch(base + "/styles.css?token=" + TOKEN)
             self.assertEqual(status, 400)
 
+    def test_owner_can_read_exact_original_79_action_catalog(self):
+        release=build_release(APP,self.tmp,SHA_A)
+        with AppServer(release,TOKEN) as server:
+            base=f"http://127.0.0.1:{server.port}"
+            self.assertEqual(fetch(base+"/action-catalog")[0],401)
+            status,body,_=fetch(base+"/action-catalog",TOKEN)
+            self.assertEqual(status,200)
+            data=json.loads(body)
+            self.assertEqual(data["total"],79)
+            self.assertEqual(data["status"],"design_index")
+            self.assertEqual(data["actions"][0]["id"],"account.01")
+            self.assertEqual(data["actions"][-1]["id"],"analytics.11")
+            self.assertNotIn("verified",data)
+            self.assertNotIn("executed",data)
+
     def test_owner_campaign_management_uses_existing_private_db(self):
         release=build_release(APP, self.tmp, SHA_A)
         with AppServer(release,TOKEN) as server:
