@@ -5,15 +5,17 @@ durable delivery receipts. Tumblr does not duplicate these databases.
 """
 import json
 import os
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
-from tumblrkit.cm_links import append_cm_buttons
+from tumblrkit.cm_links import append_cm_buttons, CMRegistry
 
 
 class LocalTelegramOwner:
     def __init__(self, token_file, *, endpoint="http://127.0.0.1:8876/internal/tumblr",
-                 member_id=None, transport=None, cm_registry=None):
+                 member_id=None, transport=None, cm_registry=None, cm_store_path=None):
         if endpoint != "http://127.0.0.1:8876/internal/tumblr":
             raise ValueError("telegram_owner_endpoint_invalid")
         self.token = Path(token_file).read_text(encoding="utf-8").strip()
@@ -23,6 +25,7 @@ class LocalTelegramOwner:
         self.member_id = member_id
         self.transport = transport or self._post
         self.cm_registry = cm_registry
+        self.cm_store_path = cm_store_path
 
     def _post(self, value):
         request = Request(self.endpoint,
@@ -52,12 +55,19 @@ class LocalTelegramOwner:
                     "status": "member_verified" if result.get("verified") is True
                               else "not_verified"}
         if action == "telegram.publish_announcement":
+            if self.cm_store_path is not None:
+                with closing(sqlite3.connect(self.cm_store_path, timeout=3)) as db:
+                    return self._publish_announcement(target, payload, CMRegistry(db))
+            return self._publish_announcement(target, payload, self.cm_registry)
+        raise ValueError("telegram_owner_action_invalid")
+
+    def _publish_announcement(self, target, payload, registry):
             text, operation = payload.get("text"), payload.get("operation_key")
             if not isinstance(text, str) or not text.strip():
                 raise ValueError("announcement_text_required")
             if not isinstance(operation, str) or not operation:
                 raise ValueError("announcement_operation_key_required")
-            cm_selection = self.cm_registry.select_for_operation(target, operation) if self.cm_registry else []
+            cm_selection = registry.select_for_operation(target, operation) if registry else []
             cm_rows = append_cm_buttons([], cm_selection) if cm_selection else []
             # Existing MPB operation ledger is the recovery source. Check it
             # first, so a retry after a lost response only reads the post.
@@ -99,18 +109,17 @@ class LocalTelegramOwner:
                 if verified:
                     try:
                         ids = [item["id"] for item in cm_selection]
-                        if not self.cm_registry.is_advanced(target, operation, ids):
-                            self.cm_registry.advance_after_delivery(
+                        if not registry.is_advanced(target, operation, ids):
+                            registry.advance_after_delivery(
                                 target, operation, ids, verified=True)
                     except ValueError:
                         verified = False
             return {"verified": verified,
                     "status": "published" if verified else "unverified",
                     "reference": message}
-        raise ValueError("telegram_owner_action_invalid")
+    
 
-
-def telegram_owner_from_env(env=None):
+def telegram_owner_from_env(env=None, *, cm_store_path=None):
     env = os.environ if env is None else env
     key_file = env.get("TUMBLR_BRIDGE_KEY_FILE", "")
     if not key_file:
@@ -119,4 +128,5 @@ def telegram_owner_from_env(env=None):
             return None
         key_file = str(existing)
     return LocalTelegramOwner(key_file,
-                              member_id=env.get("TUMBLR_TELEGRAM_MEMBER_ID"))
+                              member_id=env.get("TUMBLR_TELEGRAM_MEMBER_ID"),
+                              cm_store_path=cm_store_path)
