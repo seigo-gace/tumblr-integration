@@ -76,6 +76,19 @@ class CampaignRuntimeTests(unittest.TestCase):
         self.assertEqual(self.owner.promote_expired("launch"),[])
         self.assertEqual(self.owner.draw("launch"),first)
 
+    def test_deadline_can_change_only_before_draw_and_entries_have_status(self):
+        revised=self.owner.change_deadline("launch",1200)
+        self.assertEqual(revised["deadline"],1200)
+        self.owner.enter("launch","alice")
+        entries=self.owner.entries("launch")
+        self.assertEqual(entries[0]["status"],"entered")
+        self.assertIsNone(entries[0]["rank"])
+        self.now=1200
+        result=self.owner.draw("launch")
+        self.assertEqual(result.winners,("alice",))
+        with self.assertRaisesRegex(ValueError,"campaign_deadline_locked"):
+            self.owner.change_deadline("launch",2000)
+
     def test_durable_outcomes_do_not_send_unverified_notifications(self):
         self.owner.enter("launch","alice")
         self.now=1101
