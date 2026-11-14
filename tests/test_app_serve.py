@@ -95,6 +95,34 @@ class AppServeTests(unittest.TestCase):
             status, _, _ = fetch(base + "/styles.css?token=" + TOKEN)
             self.assertEqual(status, 400)
 
+    def test_owner_schedules_existing_draft_without_provider_call(self):
+        import time
+        release=build_release(APP,self.tmp,SHA_A)
+        with AppServer(release,TOKEN) as server:
+            base=f"http://127.0.0.1:{server.port}"
+            stored=server.httpd.draft_store.save("公開予定の本文")
+            digest=hashlib.sha256(stored["text"].encode("utf-8")).hexdigest()
+            payload={"action":"queue","draft_id":stored["id"],
+                     "publish_at":int(time.time())+3600,
+                     "expected_digest":digest}
+            status,raw,_=fetch(base+"/schedules",TOKEN,method="POST",
+                               data=json.dumps(payload).encode("utf-8"),
+                               headers={"Content-Type":"application/json"})
+            self.assertEqual(status,200,raw)
+            scheduled=json.loads(raw)["schedule_id"]
+            status,raw,_=fetch(base+"/schedules",TOKEN)
+            self.assertEqual(status,200)
+            self.assertEqual(json.loads(raw)["schedules"][0]["schedule_id"],scheduled)
+            self.assertEqual(json.loads(raw)["schedules"][0]["state"],"pending")
+            self.assertEqual(fetch(base+"/schedules")[0],401)
+            payload={"action":"cancel","schedule_id":scheduled}
+            status,raw,_=fetch(base+"/schedules",TOKEN,method="POST",
+                               data=json.dumps(payload).encode("utf-8"),
+                               headers={"Content-Type":"application/json"})
+            self.assertEqual(status,200,raw)
+            self.assertTrue(json.loads(raw)["cancelled"])
+            self.assertEqual(server.httpd.scheduler.list()[0]["state"],"cancelled")
+
     def test_owner_can_read_exact_original_79_action_catalog(self):
         release=build_release(APP,self.tmp,SHA_A)
         with AppServer(release,TOKEN) as server:
