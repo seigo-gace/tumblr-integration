@@ -365,6 +365,21 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, '<!doctype html><html lang="ja"><meta charset="utf-8"><title>Tumblr連携</title><p>Tumblrの本人確認が完了しました。</p><a href="/">操作画面に戻る</a></html>', "text/html; charset=utf-8")
             return
+        if parts.path == "/action-catalog":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            from tumblrkit.action_catalog import CATALOG
+            # Original 79 entries are planning metadata. Never mark them as
+            # executable merely because their IDs appear in this list.
+            self._json(200, {"source":"tumblr-chat-ux-catalog.zip",
+                             "status":"design_index",
+                             "total":len(CATALOG),
+                             "actions":[{"id":a.action_id,"domain":a.domain,
+                                         "name":a.name,"confirmation":a.confirmation,
+                                         "output_type":a.output_type}
+                                        for a in CATALOG]})
+            return
         if parts.path == "/campaigns":
             if not _authorized(self):
                 self._unauthorized()
