@@ -76,6 +76,51 @@ class CampaignRuntimeTests(unittest.TestCase):
         self.assertEqual(self.owner.promote_expired("launch"),[])
         self.assertEqual(self.owner.draw("launch"),first)
 
+    def test_notification_outbox_requires_verified_owner_readback_without_replay(self):
+        self.owner.enter("launch","alice")
+        self.now=1100
+        self.owner.draw("launch")
+        prepared=self.owner.prepare_notifications("launch")
+        self.assertEqual(prepared["prepared"],1)
+        self.assertFalse(prepared["sent"])
+        self.assertEqual(self.owner.prepare_notifications("launch")["prepared"],1)
+        notice=self.owner.pending_notifications("launch")[0]
+        self.assertEqual(notice["state"],"pending")
+        class Uncertain:
+            def __init__(self):self.calls=[]
+            def deliver(self,**kwargs):
+                self.calls.append(kwargs)
+                return {"verified":False}
+        uncertain=Uncertain()
+        self.assertEqual(self.owner.deliver_notice(notice["event_id"],None)["status"],"not_connected")
+        first=self.owner.deliver_notice(notice["event_id"],uncertain)
+        self.assertEqual(first["status"],"needs_reconcile")
+        self.assertEqual(len(uncertain.calls),1)
+        second=self.owner.deliver_notice(notice["event_id"],uncertain)
+        self.assertEqual(second["status"],"needs_reconcile")
+        self.assertEqual(len(uncertain.calls),1)
+        reloaded=CampaignContest(self.db,clock=lambda:self.now)
+        self.assertEqual(reloaded.pending_notifications("launch")[0]["state"],"needs_reconcile")
+
+    def test_verified_delivery_receipt_is_persisted_once(self):
+        self.owner.enter("launch","alice")
+        self.now=1100
+        self.owner.draw("launch")
+        self.owner.prepare_notifications("launch")
+        notice=self.owner.pending_notifications("launch")[0]
+        class Verified:
+            def __init__(self):self.calls=0
+            def deliver(self,**kwargs):
+                self.calls+=1
+                return {"verified":True,"receipt_id":"message-5"}
+        sender=Verified()
+        result=self.owner.deliver_notice(notice["event_id"],sender)
+        self.assertTrue(result["verified"])
+        self.assertEqual(sender.calls,1)
+        self.assertTrue(self.owner.deliver_notice(notice["event_id"],sender)["verified"])
+        self.assertEqual(sender.calls,1)
+        self.assertEqual(self.owner.pending_notifications("launch")[0]["provider_receipt"],"message-5")
+
     def test_deadline_can_change_only_before_draw_and_entries_have_status(self):
         revised=self.owner.change_deadline("launch",1200)
         self.assertEqual(revised["deadline"],1200)
