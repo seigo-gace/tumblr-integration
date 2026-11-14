@@ -100,7 +100,7 @@
          typeof data.has_next!=="boolean")throw new Error("history_unverified");
       const section=document.createElement("section");
       section.className="library-panel result-view";
-      const title=document.createElement("h3");title.textContent="MP4保存履歴";
+      const title=document.createElement("h3");title.textContent="メディア保存履歴";
       section.appendChild(title);
       const counter=document.createElement("span");
       counter.textContent=(data.jobs.length?offset+1:0)+"～"+(offset+data.jobs.length)+
@@ -115,7 +115,7 @@
         line.appendChild(text);
         if(job.state==="completed"&&/^[0-9a-f]{32}$/.test(job.id)){
           const link=document.createElement("a");
-          link.href="/media/file/"+job.id;link.textContent="MP4を保存";
+          link.href="/media/file/"+job.id;link.textContent=(job.output_name||"").endsWith(".mp4")?"MP4を保存":"画像を保存";
           line.appendChild(link);
         }
         section.appendChild(line);
@@ -149,9 +149,11 @@
   async function mediaSave(item,index,button){
     const selected=(item.media||[])[index];
     const direct=selected&&selected.type==="video"&&libraryMedia(selected.url);
+    const directImage=selected&&selected.type==="image"&&libraryMedia(selected.url);
     const postFallback=index===0&&item.type==="video"&&libraryLink(item.url);
-    if(!direct&&!postFallback)return;
-    if(!window.confirm("この動画の保存について、あなたが権利を持つか、権利者の許諾と利用規約上の保存許可を確認済みですか？ 未確認ならキャンセルしてください。Tumblr本番の投稿操作はしません。"))return;
+    if(!direct&&!postFallback&&!directImage)return;
+    const kind=directImage?"画像":"MP4";
+    if(!window.confirm("この"+kind+"の保存について、あなたが権利を持つか、権利者の許諾と利用規約上の保存許可を確認済みですか？ 未確認ならキャンセルしてください。Tumblr本番の投稿操作はしません。"))return;
     button.disabled=true;
     const old=button.textContent;
     button.textContent="確認・変換中";
@@ -160,10 +162,10 @@
         candidate_id:item.candidate_id,media_index:index,rights_confirmed:true
       });
       if(data.verified!==true)throw new Error("save_unverified");
-      display("MP4保存結果："+(data.state||data.job?.state||"completed")+
+      display(kind+"保存結果："+(data.state||data.job?.state||"completed")+
         "。メディア保存履歴から確認してください。","system");
     }catch(error){
-      display("MP4保存できませんでした。権限・動画形式・空き容量・処理上限を確認してください。保存履歴に成否を記録しています。","system");
+      display(kind+"保存できませんでした。権限・動画形式・空き容量・処理上限を確認してください。保存履歴に成否を記録しています。","system");
     }finally{button.disabled=false;button.textContent=old;}
   }
   async function libraryView(item,index){
@@ -192,7 +194,8 @@
         const a=document.createElement("a");a.href=source;a.target="_blank";a.rel="noopener noreferrer";
         a.textContent="動画の参照元を開く";body.appendChild(a);
       }
-      save.hidden=entry.type!=="video";
+      save.hidden=entry.type!=="video"&&entry.type!=="image";
+      save.textContent=entry.type==="image"?"画像保存":"MP4保存";
       position.textContent=(cursor+1)+" / "+media.length;
       try{
         const saved=await libraryRequest("/library/progress",{candidate_id:item.candidate_id,media_index:media[cursor].originalIndex});
@@ -315,7 +318,7 @@
     });
     bulk.appendChild(viewSelected);
     const history=document.createElement("button");history.type="button";
-    history.textContent="MP4保存履歴";history.addEventListener("click",function(){mediaHistory(0);});
+    history.textContent="メディア保存履歴";history.addEventListener("click",function(){mediaHistory(0);});
     bulk.appendChild(history);
     for(const [label,field,value] of [["既読にする","seen",true],["未読にする","seen",false],["お気に入り","favorite",true],["お気に入り解除","favorite",false],["あとで見る","watch_later",true],["あとで見る解除","watch_later",false]]){
       const b=document.createElement("button");b.type="button";b.textContent=label;
