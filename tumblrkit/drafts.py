@@ -86,6 +86,16 @@ class DraftStore:
             "SELECT 1 FROM tumblr_publish_receipts WHERE draft_id=?",
             (ident,)).fetchone() is not None:
             return True
+        # A scheduled post must retain its exact saved body through the
+        # due-time provider result. Cancelling before send unlocks it again.
+        scheduled=db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='scheduled_publications'").fetchone()
+        if scheduled and db.execute(
+            "SELECT 1 FROM scheduled_publications WHERE draft_id=? "
+            "AND state IN ('pending','sending','needs_reconcile') LIMIT 1",
+            (ident,)).fetchone() is not None:
+            return True
         has_mutations=db.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' "
             "AND name='tumblr_post_mutations'").fetchone()
