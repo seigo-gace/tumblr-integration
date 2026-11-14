@@ -152,6 +152,37 @@ class AppServeTests(unittest.TestCase):
             self.assertTrue(json.loads(raw)["cancelled"])
             self.assertEqual(server.httpd.scheduler.list()[0]["state"],"cancelled")
 
+    def test_catalog_action_http_cannot_bypass_bridge_confirmation(self):
+        class Existing:
+            def __init__(self):self.calls=[]
+            def perform(self,action,target,payload):
+                self.calls.append((action,target))
+                return {"verified":True}
+        from tumblrkit.assistant import Assistant
+        from tumblrkit.bridge import Bridge
+        owner=Existing()
+        assistant=Assistant(bridge=Bridge({"engagement":owner}),providers=[])
+        release=build_release(APP,self.tmp,SHA_A)
+        with AppServer(release,TOKEN,assistant=assistant) as server:
+            base=f"http://127.0.0.1:{server.port}"
+            payload={"catalog_action":"engagement.01","selected_target":"blog:123"}
+            def submit(data):
+                status,raw,_=fetch(base+"/assistant",TOKEN,method="POST",
+                    data=json.dumps(data).encode("utf-8"),
+                    headers={"Content-Type":"application/json"})
+                return status,json.loads(raw)
+            status,proposal=submit(payload)
+            self.assertEqual(status,200)
+            self.assertEqual(proposal["state"],"confirmation_required")
+            self.assertEqual(owner.calls,[])
+            status,finished=submit({"confirm":True,"request_id":proposal["request_id"]})
+            self.assertEqual(status,200)
+            self.assertEqual(finished["state"],"completed")
+            self.assertEqual(owner.calls,[("engagement.like","blog:123")])
+            status,missing=submit({"catalog_action":"campaign.07","selected_target":"campaign"})
+            self.assertEqual(status,200)
+            self.assertEqual(missing["state"],"not_connected")
+
     def test_owner_can_read_exact_original_79_action_catalog(self):
         release=build_release(APP,self.tmp,SHA_A)
         with AppServer(release,TOKEN) as server:
