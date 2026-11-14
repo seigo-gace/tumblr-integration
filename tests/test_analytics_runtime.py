@@ -145,6 +145,21 @@ class AnalyticsRuntimeTests(unittest.TestCase):
             adapter.perform("analytics.get_summary", "all", {})
         self.assertFalse(missing.exists())
 
+    def test_campaign_entry_winner_and_claim_counts_are_local_not_notifications(self):
+        from tumblrkit.campaign_runtime import CampaignContest
+        db=connect(str(self.folder/"contest-ledger.sqlite3"))
+        self.addCleanup(db.close)
+        owner=CampaignContest(db,clock=lambda:self.now,eligibility=lambda *_:True)
+        owner.create("lottery","Prize",deadline=self.now+60,winners=1,claim_seconds=120)
+        owner.enter("lottery","alice")
+        self.now+=61
+        result=owner.draw("lottery")
+        owner.claim("lottery",result.winners[0])
+        report=AnalyticsAdapter(self.store,clock=lambda:self.now,campaign_db=db).perform(
+            "analytics.get_summary","all",{})
+        self.assertEqual([r["value"] for r in report["rows"]][-3:],[1,1,1])
+        self.assertIn("通知未確認",report["rows"][-2]["label"])
+
     def test_verified_follower_snapshot_appears_in_summary_only_for_owner(self):
         from tumblrkit.follower_analytics import FollowerAnalytics
         class LocalTransport:
