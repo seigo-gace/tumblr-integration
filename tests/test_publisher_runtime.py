@@ -206,6 +206,32 @@ class PublisherRuntimeTests(unittest.TestCase):
             "tumblr.publish_draft",self.draft["id"],{})["verified"])
         self.assertEqual(len(self.provider.posts),1)
 
+    def test_explicit_schedule_reconcile_reads_only_known_post_id(self):
+        self.provider.mismatch=True
+        with self.assertRaisesRegex(ValueError,"tumblr_publish_readback_unverified"):
+            self.publisher.perform("tumblr.publish_draft",self.draft["id"],{})
+        self.provider.mismatch=False
+        before=len(self.provider.posts)
+        result=self.publisher.reconcile_published_draft(self.draft["id"])
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["provider_post_id"],self.provider.id)
+        self.assertEqual(len(self.provider.posts),before)
+        self.assertEqual(self.budget.costs,[2,1])
+        with sqlite3.connect(self.drafts.path) as db:
+            self.assertEqual(db.execute(
+                "SELECT state FROM tumblr_publish_receipts WHERE draft_id=?",
+                (self.draft["id"],)).fetchone()[0],"verified")
+
+    def test_reconcile_reserved_unknown_result_refuses_second_send(self):
+        self.provider.failed="tumblr_publish_uncertain"
+        with self.assertRaisesRegex(ValueError,"tumblr_publish_uncertain"):
+            self.publisher.perform("tumblr.publish_draft",self.draft["id"],{})
+        self.provider.failed=None
+        with self.assertRaisesRegex(ValueError,"tumblr_publish_reconcile_required"):
+            self.publisher.reconcile_published_draft(self.draft["id"])
+        self.assertEqual(self.provider.posts,[])
+        self.assertEqual(self.budget.costs,[2])
+
     def test_malformed_post_envelope_never_retries_a_possible_publication(self):
         class BadEnvelope(OfflinePost):
             def post_json(self,path,bearer,body,budget):
