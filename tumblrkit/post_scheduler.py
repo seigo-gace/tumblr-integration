@@ -118,6 +118,40 @@ class ScheduledPublisher:
                  "state":r[3],"provider_post_id":r[4],
                  "expected_digest":r[5]} for r in rows]
 
+    def reconcile(self, schedule_id):
+        """Recover a known provider post ID via readback, without another POST."""
+        if not isinstance(schedule_id,str) or not schedule_id:
+            raise ValueError("schedule_id_invalid")
+        publisher=self.publisher
+        if publisher is not None and not hasattr(publisher,"perform") and callable(publisher):
+            publisher=publisher()
+        recover=getattr(publisher,"reconcile_published_draft",None)
+        if not callable(recover):
+            return {"state":"not_connected"}
+        with closing(self.drafts._connect()) as db:
+            row=db.execute(
+                "SELECT draft_id,state FROM scheduled_publications "
+                "WHERE schedule_id=?",(schedule_id,)).fetchone()
+        if row is None or row[1] not in ("needs_reconcile","sending"):
+            raise ValueError("schedule_not_reconcilable")
+        # A failed/uncertain readback leaves state unchanged and does NOT send.
+        result=recover(row[0])
+        if not isinstance(result,dict) or result.get("verified") is not True:
+            return {"state":"needs_reconcile","schedule_id":schedule_id}
+        post_id=result.get("provider_post_id")
+        if not isinstance(post_id,str) or not post_id:
+            return {"state":"needs_reconcile","schedule_id":schedule_id}
+        with closing(self.drafts._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            updated=db.execute(
+                "UPDATE scheduled_publications SET state='verified',post_id=?,updated_at=? "
+                "WHERE schedule_id=? AND draft_id=? "
+                "AND state IN ('needs_reconcile','sending')",
+                (post_id,int(self.clock()),schedule_id,row[0])).rowcount
+            db.commit()
+        return {"state":"verified" if updated else "not_reconciled",
+                "schedule_id":schedule_id,"provider_post_id":post_id}
+
     def dispatch_due(self):
         """Send one due item, once; must be called by the adopted owner runner."""
         publisher = self.publisher
