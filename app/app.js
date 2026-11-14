@@ -834,6 +834,51 @@
   // Reuse the six-goal chat surface for locally implemented owner modules.
   // These controls do not claim that external Tumblr/GATE/MPB is verified.
   function ownerModulePanel(section,goals){
+    if(goals.includes("集計")){
+      const panel=document.createElement("details");
+      panel.className="result-view";
+      const heading=document.createElement("summary");
+      heading.textContent="Tumblrフォロワーの実測履歴";
+      panel.appendChild(heading);
+      const controls=document.createElement("div");
+      controls.className="draft-actions";
+      const history=document.createElement("button");
+      history.type="button";history.textContent="保存済み履歴を見る";
+      const snapshot=document.createElement("button");
+      snapshot.type="button";snapshot.textContent="現在数を1回取得";
+      history.addEventListener("click",async function(){
+        history.disabled=true;
+        try{
+          const response=await fetch("/analytics/followers",{credentials:"same-origin"});
+          if(!response.ok)throw new Error("history_unavailable");
+          const data=await response.json();
+          display("Tumblr公式認証で取得済みの履歴（ローカル記録）\\n"+
+                  JSON.stringify(data.rows,null,2),"system");
+        }catch(error){
+          display("フォロワー履歴を取得できません。Tumblr連携状態を確認してください。","system");
+        }finally{history.disabled=false;}
+      });
+      snapshot.addEventListener("click",async function(){
+        if(!window.confirm("所有Tumblrアカウントの公式APIを1回だけ呼び出し、フォロワー数を記録しますか？"))return;
+        snapshot.disabled=true;
+        try{
+          const response=await fetch("/analytics/followers",{
+            method:"POST",credentials:"same-origin",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({action:"snapshot"})});
+          if(!response.ok)throw new Error("snapshot_unavailable");
+          const result=await response.json();
+          if(result.verified!==true)throw new Error("snapshot_not_verified");
+          display("公式Tumblr認証で確認したフォロワー数："+result.followers+
+                  "。日別記録を保存しました。","system");
+        }catch(error){
+          display("公式Tumblrから確認できませんでした。推測値は記録していません。","system");
+        }finally{snapshot.disabled=false;}
+      });
+      controls.append(history,snapshot);
+      panel.appendChild(controls);
+      section.appendChild(panel);
+    }
     const items=[
       {goal:"キャンペーン",heading:"キャンペーン管理",endpoint:"/campaigns",
        actions:["list","create","entries","outcomes","reschedule","draw","promote","close"]},
