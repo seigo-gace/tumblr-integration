@@ -9,6 +9,7 @@ import json
 import hashlib
 import os
 import socket
+import sqlite3
 import re
 import uuid
 from urllib.error import HTTPError, URLError
