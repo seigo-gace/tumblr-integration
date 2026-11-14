@@ -382,7 +382,8 @@ class MediaSave:
         with closing(self._open()) as db:
             row=db.execute("SELECT state,output_name,output_bytes FROM media_save_jobs WHERE id=?",
                            (job_id,)).fetchone()
-        if not row or row[0]!="completed" or row[1]!=job_id+".mp4":
+        if not row or row[0]!="completed" or row[1] not in {
+                job_id+extension for extension in (".mp4",".jpg",".png",".gif",".webp")}:
             raise MediaError("MEDIA_JOB_NOT_READY")
         root=self._directory()
         path=root/row[1]
