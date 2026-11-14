@@ -738,6 +738,11 @@ class _Handler(BaseHTTPRequestHandler):
                         response={"outcomes":owner.outcomes(data["campaign_id"])}
                     elif action=="notices" and set(data)=={"action","campaign_id"}:
                         response={"notices":owner.notification_history(data["campaign_id"])}
+                    elif action=="issue_claim" and set(data)=={"action","campaign_id","applicant_id"}:
+                        response=owner.issue_claim_ticket(data["campaign_id"],data["applicant_id"])
+                    elif action=="redeem_claim" and set(data)=={"action","campaign_id","applicant_id","claim_ticket"}:
+                        response=owner.redeem_claim_ticket(
+                            data["campaign_id"],data["applicant_id"],data["claim_ticket"])
                     elif action=="promote" and set(data)=={"action","campaign_id"}:
                         response={"promoted":owner.promote_expired(data["campaign_id"])}
                     elif action=="close" and set(data)=={"action","campaign_id"}:
