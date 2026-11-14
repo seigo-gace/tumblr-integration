@@ -122,6 +122,41 @@ class CampaignRuntimeTests(unittest.TestCase):
         self.assertEqual(self.owner.notification_history("launch")[0]["state"],"verified")
         self.assertEqual(self.owner.pending_notifications("launch"),[])
 
+    def test_one_time_claim_ticket_never_persists_plaintext_or_redeems_twice(self):
+        self.owner.enter("launch","alice")
+        self.now=1100
+        draw=self.owner.draw("launch")
+        ticket=self.owner.issue_claim_ticket("launch",draw.winners[0])
+        self.assertFalse(ticket["sent"])
+        self.assertTrue(ticket["disclosed_once"])
+        import sqlite3
+        with sqlite3.connect(str(self.path)) as db:
+            row=db.execute(
+                "SELECT ticket_digest FROM campaign_claim_tickets WHERE campaign_id=?",
+                ("launch",)).fetchone()
+        self.assertNotEqual(ticket["claim_ticket"],row[0])
+        with self.assertRaisesRegex(ValueError,"campaign_ticket_already_issued"):
+            self.owner.issue_claim_ticket("launch",draw.winners[0])
+        with self.assertRaisesRegex(ValueError,"campaign_claim_ticket_invalid"):
+            self.owner.redeem_claim_ticket("launch",draw.winners[0],"invalid_claim_ticket_123456789012")
+        receipt=self.owner.redeem_claim_ticket(
+            "launch",draw.winners[0],ticket["claim_ticket"])
+        self.assertEqual(receipt["status"],"claimed")
+        with self.assertRaisesRegex(ValueError,"campaign_claim_ticket_consumed"):
+            self.owner.redeem_claim_ticket(
+                "launch",draw.winners[0],ticket["claim_ticket"])
+        self.assertEqual([r["state"] for r in self.owner.outcomes("launch")].count("claimed"),1)
+
+    def test_expired_claim_ticket_never_converts_to_claimed(self):
+        self.owner.enter("launch","alice")
+        self.now=1100
+        winner=self.owner.draw("launch").winners[0]
+        ticket=self.owner.issue_claim_ticket("launch",winner)
+        self.now=ticket["expires_at"]
+        with self.assertRaisesRegex(ValueError,"campaign_claim_not_available"):
+            self.owner.redeem_claim_ticket("launch",winner,ticket["claim_ticket"])
+        self.assertEqual(self.owner.entries("launch")[0]["status"],"winner")
+
     def test_deadline_can_change_only_before_draw_and_entries_have_status(self):
         revised=self.owner.change_deadline("launch",1200)
         self.assertEqual(revised["deadline"],1200)
