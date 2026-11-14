@@ -1135,6 +1135,80 @@
       return res.json();
     });
   }
+  async function showScheduleList(){
+    try{
+      const data=await draftRequest("/schedules","GET");
+      if(!data||!Array.isArray(data.schedules))throw new Error("schedule_list_invalid");
+      const section=document.createElement("section");
+      section.className="result-view";
+      const heading=document.createElement("h3");
+      heading.textContent="予約投稿一覧";
+      section.appendChild(heading);
+      if(!data.schedules.length){
+        const empty=document.createElement("p");
+        empty.textContent="予約済みの投稿はありません。";
+        section.appendChild(empty);
+      }
+      data.schedules.forEach(function(entry){
+        const wrapper=document.createElement("div");
+        wrapper.className="draft-actions";
+        const date=new Date(entry.publish_at*1000);
+        const label=document.createElement("span");
+        label.textContent=(Number.isFinite(date.getTime())?date.toLocaleString("ja-JP"):"日時不明")+
+          " / "+({pending:"予約中",sending:"送信結果確認中",
+                   needs_reconcile:"結果不明・再送禁止",
+                   verified:"投稿確認済み",cancelled:"取消済み"})[entry.state];
+        wrapper.appendChild(label);
+        if(entry.state==="pending"){
+          const input=document.createElement("input");
+          input.type="datetime-local";
+          input.setAttribute("aria-label","予約日時の変更");
+          const change=document.createElement("button");
+          change.type="button";change.textContent="日時を変更";
+          change.addEventListener("click",async function(){
+            const at=Math.floor(new Date(input.value).getTime()/1000);
+            if(!Number.isSafeInteger(at)||at<=Math.floor(Date.now()/1000)){
+              display("変更先には未来の日時を指定してください。","system");
+              return;
+            }
+            change.disabled=true;
+            try{
+              const rows=await draftRequest("/drafts?offset=0&limit=100","GET");
+              const original=rows.drafts.find(row=>row.id===entry.draft_id);
+              if(!original)throw new Error("draft_not_in_current_page");
+              await draftRequest("/schedules","POST",{
+                action:"reschedule",schedule_id:entry.schedule_id,
+                publish_at:at,expected_digest:original.text_digest});
+              refreshDrafts();
+            }catch(error){
+              display("予約日時を変更できませんでした。下書きと予約状態を確認してください。","system");
+            }finally{change.disabled=false;}
+          });
+          const cancel=document.createElement("button");
+          cancel.type="button";cancel.textContent="予約を取消";
+          cancel.addEventListener("click",async function(){
+            if(!window.confirm("この予約投稿を取り消しますか？"))return;
+            cancel.disabled=true;
+            try{
+              const result=await draftRequest("/schedules","POST",{
+                action:"cancel",schedule_id:entry.schedule_id});
+              if(result.cancelled!==true)throw new Error("already_started");
+              refreshDrafts();
+            }catch(error){
+              display("予約は送信処理開始済みか、取消できない状態です。","system");
+            }finally{cancel.disabled=false;}
+          });
+          wrapper.append(input,change,cancel);
+        }
+        section.appendChild(wrapper);
+      });
+      draftList.appendChild(section);
+    }catch(error){
+      const notice=document.createElement("p");
+      notice.textContent="予約一覧を読み取れませんでした。";
+      draftList.appendChild(notice);
+    }
+  }
   function refreshDrafts(){
     if(draftBusy) return Promise.resolve();
     draftBusy=true;
@@ -1301,6 +1375,7 @@
       next.addEventListener("click",function(){draftOffset+=100;refreshDrafts();});
       pagination.append(previous,count,next);
       draftList.appendChild(pagination);
+      showScheduleList();
     },function(){
       draftNotice("下書き一覧を取得できません。未認証、または保存先に接続できません。");
     }).finally(function(){draftBusy=false;showDrafts.disabled=false;});
