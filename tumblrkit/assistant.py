@@ -271,7 +271,7 @@ class Assistant:
         return providers_from_env(os.environ, self.transport)
 
     def turn(self, message="", confirm=False, request_id=None, draft=False, abort=False,
-             goals=None, selected_action=None, selected_target=None):
+             goals=None, selected_action=None, selected_target=None, catalog_action=None):
         if abort:
             self.pending.clear()
             return self._pack("aborted", "中断しました。実行していません。", False)
@@ -297,6 +297,20 @@ class Assistant:
                 or any(not isinstance(goal,str) or goal not in GOALS for goal in goals)
                 or len(set(goals))!=len(goals)):
             return self._pack("invalid_goals", "目的の選択が不正です。実行していません。", False, recovery=True)
+        if catalog_action is not None:
+            from tumblrkit.action_catalog import resolve_bridge_action
+            try:
+                action,target=resolve_bridge_action(catalog_action,selected_target or "")
+            except ValueError as exc:
+                if str(exc)=="catalog_action_not_connected":
+                    return self._pack("not_connected",
+                        "この79操作は元設計にありますが、実行先が未接続です。"
+                        "実行済みとは表示しません。",False,recovery=True)
+                return self._pack("invalid_tool",
+                    "元の操作IDか対象が不正です。実行していません。",False,recovery=True)
+            # Reuse exact selected action gate (same target constraints).
+            return self.turn(message="",goals=goals,
+                             selected_action=action,selected_target=target)
         if selected_action is not None:
             saved_discovery=(selected_action=="tumblr.discover" and
                              isinstance(selected_target,str) and
