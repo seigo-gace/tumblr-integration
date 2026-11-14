@@ -515,7 +515,7 @@ class MediaSave:
                 with open(partial,"rb") as digest_stream:
                     digest=hashlib.file_digest(digest_stream,"sha256").hexdigest()
                 os.replace(partial,output)
-                with closing(self._open()) as db:
+            with closing(self._open()) as db:
                 db.execute("UPDATE media_save_jobs SET state='completed',source_bytes=?,"
                            "output_bytes=?,output_name=?,source_method=?,sha256=?,updated_at=? WHERE id=?",
                            (size,output_bytes,output.name,method,digest,int(time.time()),job_id))
