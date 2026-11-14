@@ -38,6 +38,8 @@ class ActionCatalogTests(unittest.TestCase):
         from tumblrkit.bridge import Bridge
         class FakeOwner:
             def __init__(self):self.calls=[]
+            def preview(self,action,target):
+                return {"blog":"owner","title":"保存済み候補"}
             def perform(self,action,target,payload):
                 self.calls.append((action,target,payload))
                 return {"verified":True}
