@@ -122,6 +122,29 @@ class AnalyticsRuntimeTests(unittest.TestCase):
         self.assertEqual(absent["campaign_basis"],"not_connected")
         self.assertEqual(len(absent["rows"]),8)
 
+    def test_persistent_campaign_source_reopens_after_previous_connection_closes(self):
+        path = self.folder / "drafts.sqlite3"
+        db = connect(str(path))
+        create_campaign(db, "persist", "Existing private owner ledger", {})
+        link = CoreLinkStore(db).create("persist", "post")
+        CoreLinkStore(db).mark("entry", "entry", link)
+        db.close()
+        report = AnalyticsAdapter(self.store, clock=lambda:self.now,
+                                  campaign_db_path=path).perform(
+                                      "analytics.get_summary", "all", {})
+        self.assertEqual(report["campaign_basis"],
+                         "local_campaign_records_not_external_conversion")
+        self.assertEqual([x["value"] for x in report["rows"]][-4:], [1,0,0,0])
+        self.assertTrue(path.is_file())
+
+    def test_nonexistent_campaign_source_is_not_created_by_reporting(self):
+        missing = self.folder / "missing.sqlite3"
+        adapter = AnalyticsAdapter(self.store, clock=lambda:self.now,
+                                   campaign_db_path=missing)
+        with self.assertRaisesRegex(ValueError, "analytics_campaign_source_unavailable"):
+            adapter.perform("analytics.get_summary", "all", {})
+        self.assertFalse(missing.exists())
+
     def test_partial_campaign_schema_does_not_fabricate_zeroes(self):
         db=connect(str(self.folder/"campaign-missing.sqlite3"))
         self.addCleanup(db.close)
