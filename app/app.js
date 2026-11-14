@@ -991,6 +991,78 @@
       details.appendChild(form);section.appendChild(details);
     });
   }
+  async function ownerCatalogPanel(section,goals){
+    const groups={
+      "巡回":["discovery","engagement"],
+      "投稿":["publisher"],
+      "キャンペーン":["campaign"],
+      "紹介":["referral"],
+      "集計":["analytics"],
+      "メディア":["media","library"],
+    };
+    try{
+      const response=await fetch("/action-catalog",{credentials:"same-origin"});
+      if(!response.ok)throw new Error("catalog_unavailable");
+      const data=await response.json();
+      if(data.status!=="design_index"||data.total!==79||
+         !Array.isArray(data.actions)||data.actions.length!==79)
+        throw new Error("catalog_mismatch");
+      const selected=new Set(goals.flatMap(goal=>groups[goal]||[]));
+      const actions=data.actions.filter(item=>selected.has(item.domain));
+      if(!actions.length)return;
+      const details=document.createElement("details");
+      details.className="result-view";
+      const heading=document.createElement("summary");
+      heading.textContent="正式79操作カタログ（選択目的のみ・実装状態を区別）";
+      details.appendChild(heading);
+      const select=document.createElement("select");
+      select.setAttribute("aria-label","元設計の操作ID");
+      actions.forEach(function(item){
+        const option=document.createElement("option");
+        option.value=item.id;
+        option.textContent=item.id+" "+item.name+
+          (item.bridge_action&&item.adapter_bound?"":"（接続確認が必要）");
+        select.appendChild(option);
+      });
+      const input=document.createElement("input");
+      input.maxLength=64;
+      input.setAttribute("aria-label","対象ID・検索タグ");
+      input.placeholder="対象ID・検索タグ";
+      const button=document.createElement("button");
+      button.type="button";
+      button.textContent="選んだ操作の内容を確認";
+      const status=document.createElement("p");
+      const refresh=function(){
+        const item=actions.find(x=>x.id===select.value);
+        const connected=Boolean(item&&item.bridge_action&&item.adapter_bound);
+        input.hidden=!item?.requires_target;
+        button.disabled=!connected;
+        status.textContent=connected
+          ? "既存操作へ接続可能。実行結果は別途読戻して確認します。"
+          : "この操作は元設計にありますが、現在の実行先は未接続です。";
+      };
+      select.addEventListener("change",refresh);
+      button.addEventListener("click",function(){
+        const item=actions.find(x=>x.id===select.value);
+        if(!item||!item.bridge_action||!item.adapter_bound)return;
+        const target=item.requires_target?input.value.trim():"";
+        if(item.requires_target&&!target){
+          display("対象を入力してください。まだ操作していません。","system");
+          input.focus();return;
+        }
+        button.disabled=true;
+        post({catalog_action:item.id,selected_target:target})
+          .finally(function(){refresh();});
+      });
+      refresh();
+      details.append(select,input,button,status);
+      section.appendChild(details);
+    }catch(error){
+      const status=document.createElement("p");
+      status.textContent="元79操作カタログを確認できませんでした。既存操作の利用には影響しません。";
+      section.appendChild(status);
+    }
+  }
   function renderPlan(plan){
     if(!plan||plan.evidence!=="existing_bridge_registry"||
        !Array.isArray(plan.goals)||!Array.isArray(plan.recommendations))return;
@@ -1088,6 +1160,7 @@
       section.appendChild(note);
     }
     ownerModulePanel(section,plan.goals);
+    ownerCatalogPanel(section,plan.goals);
     messages.appendChild(section);
     messages.scrollTop=messages.scrollHeight;
   }
