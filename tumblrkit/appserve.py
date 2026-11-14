@@ -586,6 +586,8 @@ class _Handler(BaseHTTPRequestHandler):
                     result=scheduler.reschedule(data["schedule_id"],data["publish_at"],data["expected_digest"])
                 elif action=="cancel" and set(data)=={"action","schedule_id"}:
                     result={"cancelled":scheduler.cancel(data["schedule_id"])}
+                elif action=="reconcile" and set(data)=={"action","schedule_id"}:
+                    result=scheduler.reconcile(data["schedule_id"])
                 else:
                     raise ValueError("schedule_request_invalid")
             except (ValueError,TypeError,UnicodeError,json.JSONDecodeError) as exc:
