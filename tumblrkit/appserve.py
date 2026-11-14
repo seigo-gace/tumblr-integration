@@ -365,6 +365,22 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, '<!doctype html><html lang="ja"><meta charset="utf-8"><title>Tumblr連携</title><p>Tumblrの本人確認が完了しました。</p><a href="/">操作画面に戻る</a></html>', "text/html; charset=utf-8")
             return
+        if parts.path == "/analytics/followers":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            try:
+                from tumblrkit.follower_analytics import FollowerAnalytics
+                reader=self.server.assistant.bridge.adapters.get("tumblr")
+                result=FollowerAnalytics(reader,self.server.discovery_store).history()
+            except ValueError as exc:
+                self._json(409,{"error":str(exc) if str(exc).startswith("analytics_") else "analytics_history_unavailable"})
+                return
+            except (OSError,sqlite3.Error):
+                self._json(503,{"error":"analytics_store_unavailable"})
+                return
+            self._json(200,result)
+            return
         if parts.path == "/schedules":
             if not _authorized(self):
                 self._unauthorized()
@@ -563,6 +579,31 @@ class _Handler(BaseHTTPRequestHandler):
         parts = urlsplit(self.path)
         if parts.query:
             self._send(400, "bad request\n", "text/plain; charset=utf-8")
+            return
+        if parts.path == "/analytics/followers":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            bearer_ok=self.headers.get("Authorization","").startswith("Bearer ") and _authorized(self)
+            if (self.headers.get("Origin") and not _same_origin(self)) or (not self.headers.get("Origin") and not bearer_ok):
+                self._send(403,"origin rejected\\n","text/plain; charset=utf-8")
+                return
+            try:
+                from tumblrkit.follower_analytics import FollowerAnalytics
+                if self.headers.get("Content-Type","").split(";",1)[0].strip().lower()!="application/json":
+                    raise ValueError("analytics_request_invalid")
+                data=json.loads(self._read_body(512).decode("utf-8"))
+                if data!={"action":"snapshot"}:
+                    raise ValueError("analytics_request_invalid")
+                reader=self.server.assistant.bridge.adapters.get("tumblr")
+                result=FollowerAnalytics(reader,self.server.discovery_store).snapshot()
+            except ValueError as exc:
+                self._json(409,{"error":str(exc) if str(exc).startswith("analytics_") else "analytics_snapshot_unavailable"})
+                return
+            except (OSError,sqlite3.Error):
+                self._json(503,{"error":"analytics_store_unavailable"})
+                return
+            self._json(200,result)
             return
         if parts.path == "/schedules":
             if not _authorized(self):
