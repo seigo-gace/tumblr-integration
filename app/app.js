@@ -1173,12 +1173,11 @@
             }
             change.disabled=true;
             try{
-              const rows=await draftRequest("/drafts?offset=0&limit=100","GET");
-              const original=rows.drafts.find(row=>row.id===entry.draft_id);
-              if(!original)throw new Error("draft_not_in_current_page");
+              if(!/^[0-9a-f]{64}$/.test(entry.expected_digest||""))
+                throw new Error("schedule_digest_missing");
               await draftRequest("/schedules","POST",{
                 action:"reschedule",schedule_id:entry.schedule_id,
-                publish_at:at,expected_digest:original.text_digest});
+                publish_at:at,expected_digest:entry.expected_digest});
               refreshDrafts();
             }catch(error){
               display("予約日時を変更できませんでした。下書きと予約状態を確認してください。","system");
