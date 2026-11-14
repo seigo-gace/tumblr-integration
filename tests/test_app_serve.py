@@ -207,6 +207,46 @@ class AppServeTests(unittest.TestCase):
             self.assertEqual(status,409,raw)
             self.assertIn(b"analytics_oauth_not_connected",raw)
 
+    def test_owner_campaign_and_referral_use_existing_verified_gate_adapter(self):
+        release=build_release(APP,self.tmp,SHA_A)
+        class ExistingGate:
+            def __init__(self):self.calls=[]
+            def perform(self,action,target,payload):
+                self.calls.append((action,target))
+                return {"verified":action=="telegram.check_membership" and
+                        target=="123:42"}
+        gate=ExistingGate()
+        with AppServer(release,TOKEN,telegram_adapter=gate) as server:
+            base=f"http://127.0.0.1:{server.port}"
+            def submit(path,payload):
+                status,raw,_=fetch(base+path,TOKEN,method="POST",
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type":"application/json"})
+                return status,json.loads(raw)
+            import time
+            status,created=submit("/campaigns",{
+                "action":"create","campaign_id":"gate-campaign",
+                "prize":"賞品","deadline":int(time.time())+3600,
+                "winners":1,"claim_seconds":3600,"gate_topic_id":"123"})
+            self.assertEqual(status,200,created)
+            status,denied=submit("/campaigns",{
+                "action":"enter","campaign_id":"gate-campaign","applicant_id":"77"})
+            self.assertEqual(status,409)
+            status,accepted=submit("/campaigns",{
+                "action":"enter","campaign_id":"gate-campaign","applicant_id":"42"})
+            self.assertEqual(status,200,accepted)
+            self.assertEqual(accepted["state"],"entered")
+            status,referral=submit("/referrals",{
+                "action":"issue","campaign_id":"gate-campaign","referrer_id":"10"})
+            self.assertEqual(status,200,referral)
+            status,verified=submit("/referrals",{
+                "action":"confirm","campaign_id":"gate-campaign",
+                "member_id":"42","referral_code":referral["referral_code"]})
+            self.assertEqual(status,200,verified)
+            self.assertEqual(verified["state"],"verified")
+            self.assertIn(("telegram.check_membership","123:42"),gate.calls)
+            self.assertIn(("telegram.check_membership","123:77"),gate.calls)
+
     def test_owner_campaign_management_uses_existing_private_db(self):
         release=build_release(APP, self.tmp, SHA_A)
         with AppServer(release,TOKEN) as server:
