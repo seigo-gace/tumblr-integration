@@ -969,8 +969,9 @@ class AppServer:
             else:
                 tumblr_reader = adapter_from_env()
             from tumblrkit.analytics_runtime import AnalyticsAdapter
-            analytics=AnalyticsAdapter(DiscoveryStore(
-                self.oauth_folder / "discovery.sqlite3"))
+            analytics=AnalyticsAdapter(
+                DiscoveryStore(self.oauth_folder / "discovery.sqlite3"),
+                campaign_db_path=self.release.resolve().parent.parent / "data" / "drafts.sqlite3")
             adapters={"analytics": analytics}
             if telegram_adapter is None:
                 from tumblrkit.telegram_bridge_client import telegram_owner_from_env
@@ -1012,6 +1013,11 @@ class AppServer:
         converter=Transcoder(str(tools_dir / "ffprobe"),str(tools_dir / "ffmpeg"))
         self.httpd.media_save = MediaSave(self.httpd.discovery_store,media_root,transcoder=converter)
         self.httpd.draft_store = DraftStore(self.release.resolve().parent.parent / "data" / "drafts.sqlite3")
+        # Campaign/Referral schema is kept in the existing private drafts DB.
+        # There is no new database or second posting service.
+        from tumblrkit.core import connect as campaign_connect
+        campaign_db = campaign_connect(str(self.httpd.draft_store.path))
+        campaign_db.close()
         # Assistant and the owner UI must use the same durable draft records.
         self.httpd.assistant.draft_store = self.httpd.draft_store
         self.httpd.attachment_store = AttachmentStore(self.release.resolve().parent.parent / "data")
