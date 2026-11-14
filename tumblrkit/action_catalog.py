@@ -82,3 +82,37 @@ def lookup(action_id):
     if item is None:
         raise ValueError("catalog_action_unlisted")
     return item
+
+
+# Only these *already implemented* Bridge contracts can be resolved from
+# the original catalog. Other actions are still design-only and fail closed.
+BRIDGE_ROUTES = {
+    "discovery.02": ("tumblr.discover", "followers"),
+    "discovery.03": ("tumblr.discover", "following"),
+    "discovery.05": ("tumblr.discover", None),
+    "publisher.07": ("tumblr.publish_draft", None),
+    "publisher.10": ("tumblr.edit_post", None),
+    "publisher.11": ("tumblr.delete_post", None),
+    "publisher.12": ("tumblr.reconcile_post", None),
+    "engagement.01": ("engagement.like", None),
+    "engagement.03": ("engagement.reblog", None),
+    "engagement.05": ("engagement.follow", None),
+    "analytics.01": ("analytics.get_summary", "today"),
+    "analytics.02": ("analytics.get_summary", "week"),
+    "analytics.03": ("analytics.get_summary", "month"),
+}
+
+
+def resolve_bridge_action(action_id, target=""):
+    """Return only an existing fixed Bridge action, never fabricate one."""
+    lookup(action_id)
+    if action_id not in BRIDGE_ROUTES:
+        raise ValueError("catalog_action_not_connected")
+    action, fixed = BRIDGE_ROUTES[action_id]
+    if fixed is not None:
+        return action, fixed
+    if not isinstance(target,str) or not target.strip() or len(target)>64:
+        raise ValueError("catalog_target_required")
+    if action_id=="discovery.05":
+        return action,"tag:"+target.strip()
+    return action,target.strip()
