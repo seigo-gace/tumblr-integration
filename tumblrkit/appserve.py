@@ -396,15 +396,24 @@ class _Handler(BaseHTTPRequestHandler):
             if not _authorized(self):
                 self._unauthorized()
                 return
-            from tumblrkit.action_catalog import CATALOG
-            # Original 79 entries are planning metadata. Never mark them as
-            # executable merely because their IDs appear in this list.
+            from tumblrkit.action_catalog import CATALOG, BRIDGE_ROUTES
+            # Adapter presence only means there is a real Bridge owner. It
+            # never asserts external Tumblr/GATE execution or credentials.
+            adapters=self.server.assistant.bridge.adapters
             self._json(200, {"source":"tumblr-chat-ux-catalog.zip",
                              "status":"design_index",
                              "total":len(CATALOG),
                              "actions":[{"id":a.action_id,"domain":a.domain,
                                          "name":a.name,"confirmation":a.confirmation,
-                                         "output_type":a.output_type}
+                                         "output_type":a.output_type,
+                                         "bridge_action":BRIDGE_ROUTES[a.action_id][0]
+                                           if a.action_id in BRIDGE_ROUTES else None,
+                                         "adapter_bound":(
+                                           BRIDGE_ROUTES[a.action_id][0].split(".",1)[0] in adapters
+                                           if a.action_id in BRIDGE_ROUTES else False),
+                                         "requires_target":(
+                                           BRIDGE_ROUTES[a.action_id][1] is None
+                                           if a.action_id in BRIDGE_ROUTES else False)}
                                         for a in CATALOG]})
             return
         if parts.path == "/campaigns":
