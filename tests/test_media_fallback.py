@@ -180,7 +180,7 @@ class MediaFallbackTests(unittest.TestCase):
                         '{"type":"video","poster":"unused"}]',"one:123"))
         extractor=DummyFallback()
         with self.assertRaisesRegex(MediaError,"MEDIA_SELECTION_INVALID"):
-            self.worker(extractor).save("one:123",0,True)
+            self.worker(extractor).save("one:123",1,True)
         self.assertEqual(extractor.calls,[])
 
     def test_direct_not_available_uses_ytdlp_and_preserves_post_identity(self):
