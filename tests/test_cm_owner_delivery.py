@@ -55,6 +55,33 @@ class CMOwnerDeliveryTests(unittest.TestCase):
         self.assertEqual([x["id"] for x in self.cm.select("100")],
                          ["c1", "c2", "c3"])
 
+    def test_persistent_store_reopens_per_operation(self):
+        path = Path(self.temp.name) / "drafts.sqlite3"
+        import sqlite3
+        with sqlite3.connect(path) as db:
+            stored = CMRegistry(db)
+            stored.add("persisted", "永続CM", "https://example.org/persisted")
+        calls = []
+        def transport(payload):
+            calls.append(payload)
+            if payload["action"] == "lookup":
+                return {"verified": False}
+            if payload["action"] == "publish":
+                return {"verified": True, "message_id": "91"}
+            if payload["action"] == "readback":
+                rows = next(x["cm_buttons"] for x in calls if x["action"] == "publish")
+                return {"verified": True, "inline_keyboard": rows}
+        owner = LocalTelegramOwner(self.token, transport=transport,
+                                   cm_store_path=path)
+        result = owner.perform("telegram.publish_announcement", "100",
+                               {"text": "本文", "operation_key": "persistent-op"})
+        self.assertTrue(result["verified"])
+        with sqlite3.connect(path) as db:
+            self.assertEqual(CMRegistry(db).select("100")[0]["id"], "persisted")
+            self.assertTrue(CMRegistry(db).is_advanced(
+                "100", "persistent-op", ["persisted"]))
+        self.assertEqual(calls[1]["cm_buttons"][0][0]["text"], "PR / 永続CM")
+
     def test_missing_keyboard_does_not_claim_success_or_advance(self):
         result = self.deliver(keyboard=False)
         self.assertEqual(result.state, "unverified")
