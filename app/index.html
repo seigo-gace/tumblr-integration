@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light"><title>TGtumbler | Tumblr操作</title>
+<link rel="stylesheet" href="./styles.css"></head>
+<body><main class="layout">
+<section class="workspace" aria-label="操作チャット">
+
+<div class="workspace-heading"><h1 id="selected-title">Assistant</h1><button id="show-library" type="button" title="保存した候補を閲覧">ライブラリ</button><button id="tumblr-connect" type="button" title="Tumblrアカウントを連携">Tumblr連携</button><span id="oauth-status" class="oauth-status" role="status">Tumblr：状態確認中</span><span id="connection" class="visually-hidden" role="status">外部接続：未設定</span><span id="selected-description" hidden>AI Assistant</span><span id="revision" data-commit="__TUMBLR_COMMIT__" hidden>__TUMBLR_COMMIT__</span></div>
+<div id="messages" class="messages" role="log" aria-live="polite"></div>
+<form id="chat-form"><label class="visually-hidden" for="instruction">やりたいこと</label><div class="composer"><label for="attachments" class="attach-button" title="写真・ファイルを添付" aria-label="写真・ファイルを添付">＋</label><input id="attachments" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,.txt,.pdf,.docx,.xlsx,.pptx,.zip" class="visually-hidden"><textarea id="instruction" rows="2" placeholder="メッセージを入力" required maxlength="2000"></textarea><button id="send" type="submit" aria-label="送信">送信</button></div><div id="attachment-list" class="attachment-list" aria-live="polite"></div></form>
+<section class="draft-workspace" aria-label="下書き管理"><div class="draft-header"><h2 class="visually-hidden">下書き</h2><div class="draft-actions"><button id="save-draft" type="button">入力を保存</button><button id="show-drafts" type="button">保存一覧を表示</button></div></div><div id="draft-list" class="draft-list" aria-live="polite"></div></section>
+<div id="assist" class="assist" hidden><span>補助・復旧</span><button type="button" id="retry">再試行</button><button type="button" id="draft">下書きを残す</button><button type="button" id="abort">中断</button><button type="button" id="confirm" hidden>この内容で実行する</button></div>
+<section class="goals" aria-label="6目的ショートカット">
+  <div class="goals-heading"><h2>操作ショートカット</h2><button id="clear-goals" type="button">解除</button></div>
+  <div class="goal-grid" id="goal-grid" role="group" aria-label="操作目的">
+    <button class="goal" type="button" data-goal="巡回" aria-pressed="false">巡回</button>
+    <button class="goal" type="button" data-goal="投稿" aria-pressed="false">投稿</button>
+    <button class="goal" type="button" data-goal="キャンペーン" aria-pressed="false">キャンペーン</button>
+    <button class="goal" type="button" data-goal="紹介" aria-pressed="false">紹介</button>
+    <button class="goal" type="button" data-goal="集計" aria-pressed="false">集計</button>
+    <button class="goal" type="button" data-goal="メディア" aria-pressed="false">メディア</button>
+  </div>
+  <p id="goal-selection" class="goal-selection" aria-live="polite"></p>
+</section>
+
+</section></main><script src="./app.js" defer></script></body></html>
