@@ -179,7 +179,7 @@ class MediaFallbackTests(unittest.TestCase):
                        ('[{"type":"image","url":"https://64.media.tumblr.com/poster.jpg"},'
                         '{"type":"video","poster":"unused"}]',"one:123"))
         extractor=DummyFallback()
-        with self.assertRaisesRegex(MediaError,"MEDIA_SELECTION_INVALID"):
+        with self.assertRaisesRegex(MediaError,"MEDIA_INDEX_INVALID"):
             self.worker(extractor).save("one:123",1,True)
         self.assertEqual(extractor.calls,[])
 
