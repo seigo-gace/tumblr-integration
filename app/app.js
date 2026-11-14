@@ -1206,6 +1206,50 @@
                 selected_target:draft.id}).finally(function(){publish.disabled=false;});
         });
         controls.append(load,publish,remove);
+        if(draft.publish_state==="local" && draft.locked!==true &&
+           /^[0-9a-f]{64}$/.test(draft.text_digest||"")){
+          const schedule=document.createElement("button");
+          schedule.type="button";
+          schedule.textContent="予約投稿";
+          schedule.setAttribute("aria-label","この下書きの予約日時を指定");
+          schedule.addEventListener("click",function(){
+            const wrapper=document.createElement("div");
+            wrapper.className="draft-actions";
+            const when=document.createElement("input");
+            when.type="datetime-local";
+            when.setAttribute("aria-label","予約日時");
+            when.required=true;
+            const set=document.createElement("button");
+            set.type="button";
+            set.textContent="この日時で予約";
+            const cancel=document.createElement("button");
+            cancel.type="button";
+            cancel.textContent="閉じる";
+            cancel.addEventListener("click",function(){wrapper.remove();});
+            set.addEventListener("click",async function(){
+              const timestamp=Math.floor(new Date(when.value).getTime()/1000);
+              if(!Number.isSafeInteger(timestamp)||timestamp<=Math.floor(Date.now()/1000)){
+                display("未来の予約日時を指定してください。まだ予約していません。","system");
+                return;
+              }
+              set.disabled=true;
+              try{
+                const saved=await draftRequest("/schedules","POST",{
+                  action:"queue",draft_id:draft.id,publish_at:timestamp,
+                  expected_digest:draft.text_digest});
+                display("予約を保存しました。ID："+saved.schedule_id+
+                        "。送信結果は予約一覧で確認できます。","system");
+                wrapper.remove();
+                refreshDrafts();
+              }catch(error){
+                display("予約を保存できませんでした。本文の変更や既存予約を確認してください。","system");
+              }finally{set.disabled=false;}
+            });
+            wrapper.append(when,set,cancel);
+            item.appendChild(wrapper);
+          });
+          controls.appendChild(schedule);
+        }
         if(draft.publish_state==="published"&&draft.provider_post_id){
           const deletePost=document.createElement("button");
           deletePost.type="button";
