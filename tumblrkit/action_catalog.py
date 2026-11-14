@@ -86,6 +86,48 @@ def lookup(action_id):
 
 # Only these *already implemented* Bridge contracts can be resolved from
 # the original catalog. Other actions are still design-only and fail closed.
+# Actions already owned by a local screen/API (not a Bridge dispatch).
+# These are navigation entries only; they do not create external receipts.
+OWNER_UI_ROUTES = {
+    "account.01": "oauth_status",
+    "account.02": "oauth_connect",
+    "account.03": "oauth_connect",
+    "account.04": "oauth_status",
+    "discovery.01": "discovery",
+    "discovery.07": "discovery",
+    "library.01": "library",
+    "library.02": "library",
+    "library.03": "library",
+    "library.04": "library",
+    "library.05": "library",
+    "library.06": "library",
+    "library.08": "library",
+    "media.01": "library",
+    "media.02": "library",
+    "media.03": "library",
+    "media.04": "media_history",
+    "media.05": "media_history",
+    "media.06": "media_history",
+    "media.07": "media_history",
+    "publisher.08": "drafts",
+    "publisher.09": "drafts",
+    "campaign.01": "campaign",
+    "campaign.04": "campaign",
+    "campaign.06": "campaign",
+    "campaign.07": "campaign",
+    "campaign.09": "campaign",
+    "campaign.10": "campaign",
+    "campaign.11": "campaign",
+    "campaign.12": "campaign",
+    "referral.01": "referral",
+    "referral.05": "referral",
+    "referral.08": "referral",
+    "referral.09": "referral",
+    "analytics.05": "analytics",
+    "analytics.07": "analytics",
+    "analytics.08": "analytics",
+}
+
 BRIDGE_ROUTES = {
     "discovery.02": ("tumblr.discover", "followers"),
     "discovery.03": ("tumblr.discover", "following"),
