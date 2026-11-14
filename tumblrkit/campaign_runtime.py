@@ -153,9 +153,11 @@ class CampaignContest:
                     "UPDATE campaign_contests SET state='drawn',drawn_at=? WHERE campaign_id=?",
                     (now,campaign_id))
             rows = self.db.execute(
-                "SELECT applicant_id,status FROM campaign_entries "
+                "SELECT applicant_id,rank FROM campaign_entries "
                 "WHERE campaign_id=? ORDER BY rank",(campaign_id,)).fetchall()
-        winners = tuple(item for item,status in rows if status in ("winner","claimed"))
+        # The original random draw never changes after claims, expiry or
+        # waitlist promotions. Promotions are tracked as separate outcomes.
+        winners = tuple(item for item,rank in rows if rank < count)
         return CampaignDrawResult(campaign_id,commitment,count,len(rows),winners)
 
     def _outcome(self,campaign_id,applicant_id,state,now):
