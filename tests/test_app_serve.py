@@ -167,6 +167,25 @@ class AppServeTests(unittest.TestCase):
             self.assertNotIn("verified",data)
             self.assertNotIn("executed",data)
 
+    def test_follower_history_and_snapshot_require_owner_oauth(self):
+        release=build_release(APP,self.tmp,SHA_A)
+        with AppServer(release,TOKEN) as server:
+            base=f"http://127.0.0.1:{server.port}"
+            self.assertEqual(fetch(base+"/analytics/followers")[0],401)
+            status,raw,_=fetch(base+"/analytics/followers",TOKEN)
+            self.assertEqual(status,409,raw)
+            self.assertIn(b"analytics_oauth_not_connected",raw)
+            data=json.dumps({"action":"snapshot"}).encode("utf-8")
+            self.assertEqual(fetch(base+"/analytics/followers",method="POST",
+                                   data=data,headers={"Content-Type":"application/json"})[0],401)
+            self.assertEqual(fetch(base+"/analytics/followers",TOKEN,method="POST",
+                                   data=data,headers={"Content-Type":"application/json",
+                                                     "Origin":"https://unrelated.example"})[0],403)
+            status,raw,_=fetch(base+"/analytics/followers",TOKEN,method="POST",
+                               data=data,headers={"Content-Type":"application/json"})
+            self.assertEqual(status,409,raw)
+            self.assertIn(b"analytics_oauth_not_connected",raw)
+
     def test_owner_campaign_management_uses_existing_private_db(self):
         release=build_release(APP, self.tmp, SHA_A)
         with AppServer(release,TOKEN) as server:
