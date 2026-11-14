@@ -454,49 +454,68 @@ class MediaSave:
             if path.exists():
                 path.unlink()
         try:
-            # The public direct CDN source remains the first route. Only
-            # known "not available" / unsupported cases advance to the post
-            # extractors, never auth denials, 429, excess size or unsafe URLs.
-            size=None
-            method="direct"
-            if has_direct:
-                try:
-                    size=self.downloader.probe(url)
-                    if not isinstance(size,int) or size<1 or size>MAX_SOURCE_BYTES:
-                        raise MediaError("MEDIA_SIZE_EXCEEDED")
-                    self._space(size+MAX_OUTPUT_BYTES)
-                    got=self.downloader.fetch(url,source,size)
-                    if got!=size:
-                        raise MediaError("MEDIA_SIZE_CHANGED")
-                except MediaError as exc:
-                    if str(exc) not in ("MEDIA_HTTP_UNAVAILABLE","MEDIA_LENGTH_UNKNOWN",
-                                        "MEDIA_TYPE_UNSUPPORTED","MEDIA_HEAD_UNSUPPORTED"):
-                        raise
-                    if source.exists():
-                        source.unlink()
-                    size=None
-            if size is None:
-                # Reserve both bounded extractor attempts together, once for
-                # this explicitly confirmed operation, across Gserver restarts.
-                # Never bypass the read budget when provider capacity is gone.
-                TumblrReadBudget(self.store.path.parent / "tumblr-api-budget.sqlite3").reserve(2)
-                self._space(MAX_SOURCE_BYTES+MAX_OUTPUT_BYTES)
-                try:
-                    result=self.extractor.fetch(post_url,blog,post_id,source)
-                except ExtractionFailure as exc:
-                    raise MediaError(str(exc)) from None
-                size=result["bytes"]
-                method=result["method"]
-                if not isinstance(size,int) or size<=0 or size>MAX_SOURCE_BYTES:
+            if has_direct=="image":
+                # Images are copied byte-for-byte only with explicit owner
+                # permission. Never invoke video extraction or FFmpeg here.
+                size=self.image_downloader.probe(url)
+                if type(size) is not int or not 0<size<=MAX_IMAGE_BYTES:
                     raise MediaError("MEDIA_SIZE_EXCEEDED")
-            os.chmod(source,0o600)
-            output_bytes=self.transcoder.convert(source,partial)
-            os.chmod(partial,0o600)
-            self._space(output_bytes)
-            with open(partial,"rb") as digest_stream:
-                digest=hashlib.file_digest(digest_stream,"sha256").hexdigest()
-            os.replace(partial,output)
-            with closing(self._open()) as db:
+                self._space(size)
+                got=self.image_downloader.fetch(url,source,size)
+                if got!=size:
+                    raise MediaError("MEDIA_SIZE_CHANGED")
+                os.chmod(source,0o600)
+                extension=_image_extension(source)
+                output=self.root/(job_id+extension)
+                with open(source,"rb") as digest_stream:
+                    digest=hashlib.file_digest(digest_stream,"sha256").hexdigest()
+                os.replace(source,output)
+                output_bytes=size
+                method="direct-image"
+            else:
+                # The public direct CDN source remains the first route. Only
+                # known "not available" / unsupported cases advance to the post
+                # extractors, never auth denials, 429, excess size or unsafe URLs.
+                size=None
+                method="direct"
+                if has_direct:
+                    try:
+                        size=self.downloader.probe(url)
+                        if not isinstance(size,int) or size<1 or size>MAX_SOURCE_BYTES:
+                            raise MediaError("MEDIA_SIZE_EXCEEDED")
+                        self._space(size+MAX_OUTPUT_BYTES)
+                        got=self.downloader.fetch(url,source,size)
+                        if got!=size:
+                            raise MediaError("MEDIA_SIZE_CHANGED")
+                    except MediaError as exc:
+                        if str(exc) not in ("MEDIA_HTTP_UNAVAILABLE","MEDIA_LENGTH_UNKNOWN",
+                                            "MEDIA_TYPE_UNSUPPORTED","MEDIA_HEAD_UNSUPPORTED"):
+                            raise
+                        if source.exists():
+                            source.unlink()
+                        size=None
+                if size is None:
+                    # Reserve both bounded extractor attempts together, once for
+                    # this explicitly confirmed operation, across Gserver restarts.
+                    # Never bypass the read budget when provider capacity is gone.
+                    TumblrReadBudget(self.store.path.parent / "tumblr-api-budget.sqlite3").reserve(2)
+                    self._space(MAX_SOURCE_BYTES+MAX_OUTPUT_BYTES)
+                    try:
+                        result=self.extractor.fetch(post_url,blog,post_id,source)
+                    except ExtractionFailure as exc:
+                        raise MediaError(str(exc)) from None
+                    size=result["bytes"]
+                    method=result["method"]
+                    if not isinstance(size,int) or size<=0 or size>MAX_SOURCE_BYTES:
+                        raise MediaError("MEDIA_SIZE_EXCEEDED")
+                os.chmod(source,0o600)
+                output_bytes=self.transcoder.convert(source,partial)
+                os.chmod(partial,0o600)
+                self._space(output_bytes)
+                with open(partial,"rb") as digest_stream:
+                    digest=hashlib.file_digest(digest_stream,"sha256").hexdigest()
+                os.replace(partial,output)
+                with closing(self._open()) as db:
                 db.execute("UPDATE media_save_jobs SET state='completed',source_bytes=?,"
                            "output_bytes=?,output_name=?,source_method=?,sha256=?,updated_at=? WHERE id=?",
                            (size,output_bytes,output.name,method,digest,int(time.time()),job_id))
