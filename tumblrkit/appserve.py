@@ -396,7 +396,7 @@ class _Handler(BaseHTTPRequestHandler):
             if not _authorized(self):
                 self._unauthorized()
                 return
-            from tumblrkit.action_catalog import CATALOG, BRIDGE_ROUTES
+            from tumblrkit.action_catalog import CATALOG, BRIDGE_ROUTES, OWNER_UI_ROUTES
             # Adapter presence only means there is a real Bridge owner. It
             # never asserts external Tumblr/GATE execution or credentials.
             adapters=self.server.assistant.bridge.adapters
@@ -406,6 +406,7 @@ class _Handler(BaseHTTPRequestHandler):
                              "actions":[{"id":a.action_id,"domain":a.domain,
                                          "name":a.name,"confirmation":a.confirmation,
                                          "output_type":a.output_type,
+                                         "owner_ui":OWNER_UI_ROUTES.get(a.action_id),
                                          "bridge_action":BRIDGE_ROUTES[a.action_id][0]
                                            if a.action_id in BRIDGE_ROUTES else None,
                                          "adapter_bound":(
