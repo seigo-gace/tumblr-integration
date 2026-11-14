@@ -143,6 +143,28 @@ class AnalyticsAdapter:
                                    "アプリ記録済み特典付与レコード数",
                                    "MPB結果照合済み告知レコード数",
                                ),(clicks,members,tiers,announcements))]
+                # Campaign application/draw/claim events are local outcomes;
+                # a recorded lottery result is not a delivered notification.
+                if {"campaign_entries","campaign_outcomes"}.issubset(present):
+                    period_clause="" if cutoff is None else " AND {column}>=?"
+                    period_args=() if cutoff is None else (cutoff,)
+                    entered=db.execute(
+                        "SELECT COUNT(*) FROM campaign_entries WHERE 1=1"+
+                        period_clause.format(column="entered_at"),period_args).fetchone()[0]
+                    winners=db.execute(
+                        "SELECT COUNT(*) FROM campaign_outcomes WHERE state='winner'"+
+                        period_clause.format(column="created_at"),period_args).fetchone()[0]
+                    claimed=db.execute(
+                        "SELECT COUNT(*) FROM campaign_outcomes WHERE state='claimed'"+
+                        period_clause.format(column="created_at"),period_args).fetchone()[0]
+                    campaign_rows.extend([
+                        {"label":label,"value":count,"period":period,"url":""}
+                        for label,count in zip((
+                            "キャンペーン応募台帳件数",
+                            "抽選・繰上り当選判定件数（通知未確認）",
+                            "キャンペーン受取済み件数",
+                        ),(entered,winners,claimed))
+                    ])
         finally:
             if opened is not None:
                 opened.close()
