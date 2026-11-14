@@ -240,6 +240,49 @@ class AppServeTests(unittest.TestCase):
             self.assertEqual(status,409,raw)
             self.assertIn(b"analytics_oauth_not_connected",raw)
 
+    def test_claim_ticket_is_owner_only_one_time_and_never_in_listing(self):
+        release=build_release(APP,self.tmp,SHA_A)
+        with AppServer(release,TOKEN) as server:
+            base=f"http://127.0.0.1:{server.port}"
+            from tumblrkit.core import connect
+            from tumblrkit.campaign_runtime import CampaignContest
+            from contextlib import closing
+            with closing(connect(str(server.httpd.draft_store.path))) as db:
+                manager=CampaignContest(db,clock=lambda:1000,eligibility=lambda *_:True)
+                manager.create("lottery","Prize",deadline=1100,winners=1)
+                manager.enter("lottery","42")
+                manager.clock=lambda:1100
+                manager.draw("lottery")
+                # App API uses real system clock, so the stored claim deadline
+                # must represent a future moment for this offline HTTP test.
+                db.execute(
+                    "UPDATE campaign_entries SET claim_deadline=? "
+                    "WHERE campaign_id=?",(4_000_000_000,"lottery"))
+                db.commit()
+            body={"action":"issue_claim","campaign_id":"lottery","applicant_id":"42"}
+            encoded=json.dumps(body).encode("utf-8")
+            headers={"Content-Type":"application/json"}
+            self.assertEqual(fetch(base+"/campaigns",method="POST",
+                                   data=encoded,headers=headers)[0],401)
+            status,raw,_=fetch(base+"/campaigns",TOKEN,method="POST",
+                               data=encoded,headers=headers)
+            self.assertEqual(status,200,raw)
+            ticket=json.loads(raw)["claim_ticket"]
+            status,raw,_=fetch(base+"/campaigns",TOKEN,method="POST",
+                data=json.dumps({"action":"entries","campaign_id":"lottery"}).encode(),
+                headers=headers)
+            self.assertEqual(status,200)
+            self.assertNotIn(ticket,raw.decode())
+            redeemed={"action":"redeem_claim","campaign_id":"lottery",
+                      "applicant_id":"42","claim_ticket":ticket}
+            status,raw,_=fetch(base+"/campaigns",TOKEN,method="POST",
+                data=json.dumps(redeemed).encode(),headers=headers)
+            self.assertEqual(status,200,raw)
+            self.assertEqual(json.loads(raw)["status"],"claimed")
+            status,raw,_=fetch(base+"/campaigns",TOKEN,method="POST",
+                data=json.dumps(redeemed).encode(),headers=headers)
+            self.assertEqual(status,400)
+
     def test_owner_notification_view_is_local_and_not_delivered(self):
         release=build_release(APP,self.tmp,SHA_A)
         with AppServer(release,TOKEN) as server:
