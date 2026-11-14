@@ -31,6 +31,7 @@ from tumblrkit.media_extract import ExtractorFallback, ExtractionFailure, verifi
 from tumblrkit.api_safety import TumblrReadBudget
 
 MAX_SOURCE_BYTES=128*1024*1024
+MAX_IMAGE_BYTES=32*1024*1024
 MAX_OUTPUT_BYTES=256*1024*1024
 MIN_DISK_FREE_BYTES=512*1024*1024
 MAX_TOTAL_SAVED_BYTES=1024*1024*1024
@@ -108,12 +109,15 @@ class PinnedHTTPS(http.client.HTTPSConnection):
         raise MediaError("MEDIA_CONNECT_UNAVAILABLE") from last
 
 class SafeDownloader:
+    MIME_TYPES=("video/mp4","video/webm","video/quicktime","application/octet-stream")
+    MAX_BYTES=MAX_SOURCE_BYTES
+
     def _call(self,url,method):
         parsed=_media_url(url)
         conn=PinnedHTTPS(parsed.hostname,timeout=HTTP_TIMEOUT,context=ssl.create_default_context())
         path=parsed.path+("?" + parsed.query if parsed.query else "")
         conn.request(method,path,headers={
-            "Accept":"video/mp4,video/webm,video/quicktime,application/octet-stream",
+            "Accept":",".join(self.MIME_TYPES),
             "User-Agent":"TGtumbler-MediaSave/1.0",
             "Connection":"close",
         })
@@ -127,7 +131,7 @@ class SafeDownloader:
                 raise MediaError("MEDIA_HEAD_UNSUPPORTED")
             raise MediaError("MEDIA_HTTP_UNAVAILABLE")
         kind=response.getheader("Content-Type","").split(";",1)[0].strip().lower()
-        if kind not in ("video/mp4","video/webm","video/quicktime","application/octet-stream"):
+        if kind not in self.MIME_TYPES:
             conn.close()
             raise MediaError("MEDIA_TYPE_UNSUPPORTED")
         length=response.getheader("Content-Length")
@@ -135,7 +139,7 @@ class SafeDownloader:
             conn.close()
             raise MediaError("MEDIA_LENGTH_UNKNOWN")
         size=int(length)
-        if size<=0 or size>MAX_SOURCE_BYTES:
+        if size<=0 or size>self.MAX_BYTES:
             conn.close()
             raise MediaError("MEDIA_SIZE_EXCEEDED")
         return conn,response,size
@@ -157,11 +161,11 @@ class SafeDownloader:
         try:
             with open(destination,"xb") as file:
                 while True:
-                    chunk=response.read(min(65536,MAX_SOURCE_BYTES+1-downloaded))
+                    chunk=response.read(min(65536,self.MAX_BYTES+1-downloaded))
                     if not chunk:
                         break
                     downloaded+=len(chunk)
-                    if downloaded>expected_size or downloaded>MAX_SOURCE_BYTES:
+                    if downloaded>expected_size or downloaded>self.MAX_BYTES:
                         raise MediaError("MEDIA_SIZE_EXCEEDED")
                     file.write(chunk)
                 file.flush()
@@ -171,6 +175,26 @@ class SafeDownloader:
         if downloaded!=expected_size:
             raise MediaError("MEDIA_SIZE_CHANGED")
         return downloaded
+
+class SafeImageDownloader(SafeDownloader):
+    """Reuse the same DNS-pinned, authenticated TLS download safety boundary."""
+    MIME_TYPES=("image/jpeg","image/png","image/gif","image/webp")
+    MAX_BYTES=MAX_IMAGE_BYTES
+
+
+def _image_extension(path):
+    with open(path,"rb") as source:
+        head=source.read(16)
+    if head.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+        return ".png"
+    if head[:3]==b"\\xff\\xd8\\xff":
+        return ".jpg"
+    if head[:6] in (b"GIF87a",b"GIF89a"):
+        return ".gif"
+    if head[:4]==b"RIFF" and head[8:12]==b"WEBP":
+        return ".webp"
+    raise MediaError("MEDIA_IMAGE_FORMAT_INVALID")
+
 
 def _bound_child():
     """Limit FFmpeg/ffprobe even for malformed, compressed or hostile inputs."""
