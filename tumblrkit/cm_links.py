@@ -114,13 +114,22 @@ class CMRegistry:
             if prior:
                 if prior[0] != destination:
                     raise ValueError('cm_operation_conflict')
-                ids = json.loads(prior[1])
-                links = {item['id']: item for item in self.list_links()}
-                return [links[i] for i in ids if i in links]
+                items = json.loads(prior[1])
+                active = {item["id"]: item for item in self.list_links()
+                          if item["enabled"] and
+                          (item["destination"] is None or item["destination"] == destination)}
+                if items and isinstance(items[0], str):
+                    items = [{"id": item, "label": active[item]["label"],
+                              "url": active[item]["url"]} for item in items if item in active]
+                if any(item["id"] not in active or
+                       active[item["id"]]["label"] != item["label"] or
+                       active[item["id"]]["url"] != item["url"] for item in items):
+                    raise ValueError("cm_selection_stale")
+                return items
             chosen = self.select(destination)
             self.db.execute(
                 'INSERT INTO cm_operation_choices VALUES(?,?,?)',
-                (operation_key, destination, json.dumps([x['id'] for x in chosen])))
+                (operation_key, destination, json.dumps(chosen, ensure_ascii=False)))
             return chosen
 
     def is_advanced(self, destination, operation_key, chosen_ids):
@@ -160,8 +169,16 @@ class CMRegistry:
                 if prior != (destination, encoded):
                     raise ValueError("cm_operation_conflict")
                 return False
-            current = [entry["id"] for entry in self.select(destination)]
-            if current != ids:
+            pinned = self.db.execute(
+                "SELECT destination,chosen_ids FROM cm_operation_choices WHERE operation_key=?",
+                (operation_key,)).fetchone()
+            if pinned is not None:
+                snapshots = json.loads(pinned[1])
+                pinned_ids = [item["id"] if isinstance(item, dict) else item
+                              for item in snapshots]
+                if pinned[0] != destination or pinned_ids != ids:
+                    raise ValueError("cm_selection_stale")
+            elif [entry["id"] for entry in self.select(destination)] != ids:
                 raise ValueError("cm_selection_stale")
             if ids:
                 self.db.execute(
