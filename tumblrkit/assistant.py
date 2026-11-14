@@ -465,7 +465,7 @@ class Assistant:
             text = label + "。プレビュー: " + action + " を " + target + " に対して行う操作です。まだ実行していません。"
             expected_digest=None
             cm_disabled = (action=="telegram.publish_announcement" and
-                           re.search(r"(?m)^\\s*CM(?:なし|非表示)\\s*$", cleaned or "") is not None)
+                           re.search(r"(?m)^\s*CM(?:なし|非表示)\s*$", cleaned or "") is not None)
             if action=="telegram.publish_announcement":
                 expected_digest=body.group(1).strip()
                 text=("Telegram告知の投稿前確認。\n投稿先："+target+
