@@ -5,6 +5,7 @@ shipping addresses. The caller must inject *trusted* eligibility checks. A draw
 is committed once; its seed and ranking never change on repeated requests.
 """
 import hashlib
+import hmac
 import json
 import secrets
 import time
@@ -45,6 +46,17 @@ CREATE TABLE IF NOT EXISTS campaign_outcomes(
  event_id TEXT NOT NULL UNIQUE,
  created_at INTEGER NOT NULL,
  PRIMARY KEY(campaign_id,applicant_id,state),
+ FOREIGN KEY(campaign_id,applicant_id)
+ REFERENCES campaign_entries(campaign_id,applicant_id)
+);
+CREATE TABLE IF NOT EXISTS campaign_claim_tickets(
+ campaign_id TEXT NOT NULL,
+ applicant_id TEXT NOT NULL,
+ ticket_digest TEXT NOT NULL,
+ issued_at INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL,
+ redeemed_at INTEGER,
+ PRIMARY KEY(campaign_id,applicant_id),
  FOREIGN KEY(campaign_id,applicant_id)
  REFERENCES campaign_entries(campaign_id,applicant_id)
 );
@@ -268,6 +280,67 @@ class CampaignContest:
                 (campaign_id,applicant_id))
             self._outcome(campaign_id,applicant_id,"claimed",now)
         return "claimed"
+
+    def issue_claim_ticket(self,campaign_id,applicant_id):
+        """Owner-private, one-time claim capability; never store plaintext token."""
+        self._ident(campaign_id)
+        self._ident(applicant_id)
+        now=int(self.clock())
+        with self.db:
+            row=self.db.execute(
+                "SELECT status,claim_deadline FROM campaign_entries "
+                "WHERE campaign_id=? AND applicant_id=?",
+                (campaign_id,applicant_id)).fetchone()
+            if not row or row[0]!="winner" or row[1] is None or now>=row[1]:
+                raise ValueError("campaign_claim_not_available")
+            present=self.db.execute(
+                "SELECT 1 FROM campaign_claim_tickets "
+                "WHERE campaign_id=? AND applicant_id=?",(campaign_id,applicant_id)).fetchone()
+            if present:
+                raise ValueError("campaign_ticket_already_issued")
+            ticket=secrets.token_urlsafe(32)
+            digest=hashlib.sha256(ticket.encode("ascii")).hexdigest()
+            self.db.execute(
+                "INSERT INTO campaign_claim_tickets VALUES(?,?,?,?,?,NULL)",
+                (campaign_id,applicant_id,digest,now,row[1]))
+        return {"claim_ticket":ticket,"expires_at":row[1],
+                "disclosed_once":True,"sent":False}
+
+    def redeem_claim_ticket(self,campaign_id,applicant_id,ticket):
+        """Exact one-time credential proves possession, not Telegram identity."""
+        self._ident(campaign_id)
+        self._ident(applicant_id)
+        if (not isinstance(ticket,str) or not 30<=len(ticket)<=100
+                or not ticket.isascii()):
+            raise ValueError("campaign_claim_ticket_invalid")
+        now=int(self.clock())
+        digest=hashlib.sha256(ticket.encode("ascii")).hexdigest()
+        with self.db:
+            row=self.db.execute(
+                "SELECT t.ticket_digest,t.expires_at,t.redeemed_at,e.status "
+                "FROM campaign_claim_tickets t JOIN campaign_entries e "
+                "ON e.campaign_id=t.campaign_id AND e.applicant_id=t.applicant_id "
+                "WHERE t.campaign_id=? AND t.applicant_id=?",
+                (campaign_id,applicant_id)).fetchone()
+            if not row or not hmac.compare_digest(row[0],digest):
+                raise ValueError("campaign_claim_ticket_invalid")
+            if row[2] is not None:
+                raise ValueError("campaign_claim_ticket_consumed")
+            if now>=row[1] or row[3]!="winner":
+                raise ValueError("campaign_claim_not_available")
+            changed=self.db.execute(
+                "UPDATE campaign_entries SET status='claimed' "
+                "WHERE campaign_id=? AND applicant_id=? AND status='winner'",
+                (campaign_id,applicant_id)).rowcount
+            if changed!=1:
+                raise ValueError("campaign_claim_not_available")
+            self.db.execute(
+                "UPDATE campaign_claim_tickets SET redeemed_at=? "
+                "WHERE campaign_id=? AND applicant_id=?",
+                (now,campaign_id,applicant_id))
+            self._outcome(campaign_id,applicant_id,"claimed",now)
+        return {"status":"claimed","campaign_id":campaign_id,
+                "applicant_id":applicant_id,"at":now}
 
     def promote_expired(self,campaign_id):
         """Expire unclaimed winners and promote the next ranked entry once."""
