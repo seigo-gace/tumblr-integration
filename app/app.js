@@ -884,9 +884,9 @@
     }
     const items=[
       {goal:"キャンペーン",heading:"キャンペーン管理",endpoint:"/campaigns",
-       actions:["list","create","entries","outcomes","reschedule","draw","promote","close"]},
+       actions:["list","create","enter","entries","outcomes","reschedule","draw","promote","close"]},
       {goal:"紹介",heading:"紹介管理",endpoint:"/referrals",
-       actions:["issue","report","revoke"]},
+       actions:["issue","confirm","report","revoke"]},
     ];
     items.filter(item=>goals.includes(item.goal)).forEach(function(item){
       const details=document.createElement("details");
@@ -901,18 +901,21 @@
       item.actions.forEach(function(action){
         const opt=document.createElement("option");opt.value=action;
         opt.textContent=({
-          list:"一覧",create:"新規作成",entries:"応募者を見る",
+          list:"一覧",create:"新規作成",enter:"GATE確認済み応募を登録",entries:"応募者を見る",
           outcomes:"抽選結果を見る",reschedule:"締切を変更",
           draw:"抽選を実行",promote:"期限切れ・繰上り",close:"企画を終了",
-          issue:"紹介コードを発行",report:"紹介実績を見る",revoke:"紹介を停止"
+          issue:"紹介コードを発行",confirm:"GATE確認済み紹介を記録",report:"紹介実績を見る",revoke:"紹介を停止"
         })[action]||action;selector.appendChild(opt);
       });
       form.appendChild(selector);
       const fieldDefs=item.goal==="キャンペーン"
         ? [["campaign_id","キャンペーンID"],["prize","賞品・タイトル"],
            ["deadline","締切（日時）"],["winners","当選数"],
-           ["claim_seconds","受取期限（秒）"]]
-        : [["campaign_id","キャンペーンID"],["referrer_id","紹介者ID"]];
+           ["claim_seconds","受取期限（秒）"],
+           ["gate_topic_id","GATE確認先Topic ID（応募時に必要）"],
+           ["applicant_id","応募ユーザーID"]]
+        : [["campaign_id","キャンペーンID"],["referrer_id","紹介者ID"],
+           ["member_id","参加ユーザーID"],["referral_code","紹介コード"]];
       const fields={};
       fieldDefs.forEach(function(def){
         const wrapper=document.createElement("label");
@@ -929,8 +932,10 @@
         const action=selector.value;
         const visible=new Set(action==="list"?[]
           : action==="create"
-          ? ["campaign_id","prize","deadline","winners","claim_seconds"]
+          ? ["campaign_id","prize","deadline","winners","claim_seconds","gate_topic_id"]
           : action==="reschedule"?["campaign_id","deadline"]
+          : action==="enter"?["campaign_id","applicant_id"]
+          : action==="confirm"?["campaign_id","member_id","referral_code"]
           : item.goal==="紹介"&&action!=="report"
             ? ["campaign_id","referrer_id"]:["campaign_id"]);
         for(const [name,input] of Object.entries(fields)){
