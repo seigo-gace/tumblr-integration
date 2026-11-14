@@ -38,17 +38,6 @@ CREATE TABLE IF NOT EXISTS campaign_entries(
  PRIMARY KEY(campaign_id,applicant_id),
  UNIQUE(campaign_id,rank)
 );
-CREATE TABLE IF NOT EXISTS campaign_notifications(
- event_id TEXT PRIMARY KEY,
- campaign_id TEXT NOT NULL,
- applicant_id TEXT NOT NULL,
- outcome TEXT NOT NULL,
- state TEXT NOT NULL CHECK(state IN
- ('pending','sending','verified','needs_reconcile')),
- provider_receipt TEXT,
- updated_at INTEGER NOT NULL,
- FOREIGN KEY(event_id) REFERENCES campaign_outcomes(event_id)
-);
 CREATE TABLE IF NOT EXISTS campaign_outcomes(
  campaign_id TEXT NOT NULL,
  applicant_id TEXT NOT NULL,
@@ -315,80 +304,6 @@ class CampaignContest:
                     promoted.append(next_id)
         return promoted
 
-    def prepare_notifications(self,campaign_id):
-        """Create durable per-outcome notifications. This does NOT send messages."""
-        self._ident(campaign_id)
-        now=int(self.clock())
-        with self.db:
-            rows=self.db.execute(
-                "SELECT event_id,applicant_id,state FROM campaign_outcomes "
-                "WHERE campaign_id=? ORDER BY created_at,event_id",
-                (campaign_id,)).fetchall()
-            for event_id,applicant_id,state in rows:
-                self.db.execute(
-                    "INSERT OR IGNORE INTO campaign_notifications "
-                    "(event_id,campaign_id,applicant_id,outcome,state,updated_at) "
-                    "VALUES(?,?,?,?,?,?)",
-                    (event_id,campaign_id,applicant_id,state,"pending",now))
-        return {"prepared":len(rows),"sent":False,"status":"pending"}
-
-    def pending_notifications(self,campaign_id):
-        self._ident(campaign_id)
-        return [
-            {"event_id":r[0],"applicant_id":r[1],
-             "outcome":r[2],"state":r[3],
-             "provider_receipt":r[4]}
-            for r in self.db.execute(
-                "SELECT event_id,applicant_id,outcome,state,provider_receipt "
-                "FROM campaign_notifications WHERE campaign_id=? "
-                "ORDER BY updated_at,event_id",(campaign_id,)).fetchall()
-        ]
-
-    def deliver_notice(self,event_id,notifier):
-        """Use one injected owner notifier with real provider readback.
-
-        No Bot transport or secret is built here. A callback that merely
-        accepts or queues a notice must not mark it as delivered.
-        """
-        if not isinstance(event_id,str) or len(event_id)!=64 or any(
-                c not in "0123456789abcdef" for c in event_id):
-            raise ValueError("campaign_notice_id_invalid")
-        if notifier is None:
-            return {"status":"not_connected","verified":False}
-        now=int(self.clock())
-        with self.db:
-            reserved=self.db.execute(
-                "UPDATE campaign_notifications SET state='sending',updated_at=? "
-                "WHERE event_id=? AND state='pending'",
-                (now,event_id)).rowcount
-            row=self.db.execute(
-                "SELECT campaign_id,applicant_id,outcome,state FROM campaign_notifications "
-                "WHERE event_id=?",(event_id,)).fetchone()
-        if row is None:
-            raise ValueError("campaign_notice_missing")
-        if reserved!=1:
-            return {"status":row[3],"verified":row[3]=="verified"}
-        # Never replay a potentially sent notice by changing operation ID.
-        try:
-            receipt=notifier.deliver(
-                event_id=event_id,campaign_id=row[0],applicant_id=row[1],
-                outcome=row[2])
-            verified=(isinstance(receipt,dict) and receipt.get("verified") is True
-                      and isinstance(receipt.get("receipt_id"),str)
-                      and bool(receipt["receipt_id"]))
-        except Exception:
-            receipt=None
-            verified=False
-        with self.db:
-            self.db.execute(
-                "UPDATE campaign_notifications SET state=?,provider_receipt=?,updated_at=? "
-                "WHERE event_id=? AND state='sending'",
-                ("verified" if verified else "needs_reconcile",
-                 receipt["receipt_id"] if verified else None,
-                 int(self.clock()),event_id))
-        return {"status":"verified" if verified else "needs_reconcile",
-                "verified":verified}
-
     def close(self,campaign_id):
         self._ident(campaign_id)
         with self.db:
@@ -404,6 +319,20 @@ class CampaignContest:
         if state and state[0]=="closed":
             return "already_closed"
         raise ValueError("campaign_not_drawn")
+
+    def notification_history(self,campaign_id):
+        """Return owner-only existing notification ledger, not proof of DM delivery."""
+        self._ident(campaign_id)
+        return [
+            {"event_id":r[0],"applicant_id":r[1],
+             "outcome":r[2],"state":r[3],"message_ref":r[4]}
+            for r in self.db.execute(
+                "SELECT n.event_id,o.applicant_id,o.state,n.state,n.message_ref "
+                "FROM campaign_notifications n JOIN campaign_outcomes o "
+                "ON o.event_id=n.event_id "
+                "WHERE o.campaign_id=? ORDER BY o.created_at,n.event_id",
+                (campaign_id,)).fetchall()
+        ]
 
     def pending_notifications(self,campaign_id):
         """Read-only delivery work for existing MPB; never invent a Bot DM."""
