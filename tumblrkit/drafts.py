@@ -1,5 +1,6 @@
 """Local drafts owned only by the Tumblr operation app. No external API."""
 import os
+import hashlib
 import sqlite3
 import time
 import uuid
@@ -53,6 +54,7 @@ class DraftStore:
                 status,post_id,current=self._published_info(db,ident,text)
                 result.append({
                     "id":ident,"text":text,"updated":updated,
+                    "text_digest":hashlib.sha256(text.encode("utf-8")).hexdigest(),
                     "locked":self._has_publish_receipt(db,ident),
                     "publish_state":status,"provider_post_id":post_id,
                     "current_text":current,
