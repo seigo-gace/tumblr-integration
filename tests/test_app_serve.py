@@ -167,6 +167,27 @@ class AppServeTests(unittest.TestCase):
             self.assertNotIn("verified",data)
             self.assertNotIn("executed",data)
 
+    def test_saved_image_is_downloaded_with_original_safe_mime(self):
+        release=build_release(APP,self.tmp,SHA_A)
+        with AppServer(release,TOKEN) as server:
+            base=f"http://127.0.0.1:{server.port}"
+            ident="a"*32
+            output=server.httpd.media_save.root/(ident+".png")
+            output.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n"+b"image-only")
+            output.chmod(0o600)
+            class ExistingMedia:
+                def file(self,job_id):
+                    if job_id!=ident:
+                        raise ValueError("invalid")
+                    return output
+            server.httpd.media_save=ExistingMedia()
+            self.assertEqual(fetch(base+"/media/file/"+ident)[0],401)
+            status,body,headers=fetch(base+"/media/file/"+ident,TOKEN)
+            self.assertEqual(status,200)
+            self.assertEqual(headers["Content-Type"],"image/png")
+            self.assertIn(ident+".png",headers["Content-Disposition"])
+            self.assertTrue(body.startswith(b"\\x89PNG"))
+
     def test_follower_history_and_snapshot_require_owner_oauth(self):
         release=build_release(APP,self.tmp,SHA_A)
         with AppServer(release,TOKEN) as server:
