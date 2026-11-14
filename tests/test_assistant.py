@@ -121,6 +121,29 @@ class AssistantTests(unittest.TestCase):
             request_id=preview["request_id"])["executed"])
         self.assertEqual(len(owner.calls),1)
 
+    def test_cm_preview_shows_footer_and_pins_confirmation_operation(self):
+        class CMOwner:
+            def __init__(self):
+                self.preview_calls = []
+                self.publish_calls = []
+            def preview_cm(self, destination, operation):
+                self.preview_calls.append((destination, operation))
+                return [{"id": "a", "label": "案内", "url": "https://example.org"}]
+            def perform(self, action, target, payload):
+                self.publish_calls.append((action, target, payload))
+                return {"verified": True, "status": "published"}
+        owner = CMOwner()
+        assistant = Assistant(bridge=Bridge({"telegram": owner}), providers=[])
+        preview = assistant.turn("告知 対象: 100\n本文: 新しい案内")
+        self.assertEqual(preview["state"], "confirmation_required")
+        self.assertIn("PR / 案内", preview["text"])
+        self.assertEqual(owner.preview_calls, [("100", preview["request_id"])])
+        self.assertEqual(owner.publish_calls, [])
+        result = assistant.turn(confirm=True, request_id=preview["request_id"])
+        self.assertEqual(result["state"], "completed")
+        self.assertEqual(owner.publish_calls[0][2]["operation_key"],
+                         preview["request_id"])
+
     def test_telegram_announcement_needs_body_and_existing_owner(self):
         class ExistingTelegram:
             def perform(self, *_):
