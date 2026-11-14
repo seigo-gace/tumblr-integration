@@ -464,12 +464,16 @@ class Assistant:
             label = "AIの提案" if ai else "既存ツール索引の候補であり、AIの判断ではありません"
             text = label + "。プレビュー: " + action + " を " + target + " に対して行う操作です。まだ実行していません。"
             expected_digest=None
+            cm_disabled = (action=="telegram.publish_announcement" and
+                           re.search(r"(?m)^\\s*CM(?:なし|非表示)\\s*$", cleaned or "") is not None)
             if action=="telegram.publish_announcement":
                 expected_digest=body.group(1).strip()
                 text=("Telegram告知の投稿前確認。\n投稿先："+target+
                       "\n本文：\n"+expected_digest+"\n確認後、既存MPBで投稿します。")
                 cm_preview = getattr(self.bridge.adapters.get("telegram"), "preview_cm", None)
-                if callable(cm_preview):
+                if cm_disabled:
+                    text += "\n掲載予定CM：なし（指定により非表示）"
+                elif callable(cm_preview):
                     try:
                         cm_items = cm_preview(target, request_id)
                     except (ValueError, OSError, sqlite3.Error):
@@ -519,7 +523,7 @@ class Assistant:
                           "\n投稿ID："+intent["post_id"]+
                           "\n現在の本文：\n"+intent["current_text"]+
                           "\n削除後は元へ戻せません。確認まで実行しません。")
-            self.pending[request_id] = (action, target, expected_digest)
+            self.pending[request_id] = (action, target, expected_digest, cm_disabled)
             return self._pack("confirmation_required", text + omitted + question, False, request_id=request_id, action=action, provider=provider)
         result = self.bridge.dispatch(ActionRequest(uuid.uuid4().hex, action, target))
         return self._from_bridge(result, provider)
@@ -528,7 +532,7 @@ class Assistant:
         item = self.pending.get(request_id or "")
         if not item:
             return self._pack("failed", "確認できる提案がありません。実行していません。", False, recovery=True)
-        action, target, expected_digest = item
+        action, target, expected_digest, cm_disabled = item
         if action=="tumblr.publish_draft":
             tumblr=self.bridge.adapters.get("tumblr")
             publisher=getattr(tumblr,"publisher",None)
@@ -547,6 +551,8 @@ class Assistant:
             "tumblr.publish_draft","tumblr.edit_post","tumblr.delete_post") else {}
         if action=="telegram.publish_announcement":
             payload={"text":expected_digest}
+            if cm_disabled:
+                payload["cm_disabled"] = True
         if action in ("tumblr.edit_post","tumblr.delete_post"):
             tumblr=self.bridge.adapters.get("tumblr")
             publisher=getattr(tumblr,"publisher",None)
