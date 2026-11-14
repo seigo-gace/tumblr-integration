@@ -262,10 +262,12 @@ class Transcoder:
         return size
 
 class MediaSave:
-    def __init__(self,discovery_store,root,downloader=None,transcoder=None,extractor=None):
+    def __init__(self,discovery_store,root,downloader=None,transcoder=None,extractor=None,
+                 image_downloader=None):
         self.store=discovery_store
         self.root=Path(root)
         self.downloader=downloader or SafeDownloader()
+        self.image_downloader=image_downloader or SafeImageDownloader()
         self.transcoder=transcoder or Transcoder()
         self.extractor=extractor or ExtractorFallback(self.root.parent / 'media-extractors' / 'bin')
         self.lock=threading.Lock()
@@ -321,6 +323,9 @@ class MediaSave:
             if selected is not None and selected["type"]=="video":
                 _media_url(selected["url"])
                 return post_id,selected["url"],post_url,blog,True
+            if selected is not None and selected["type"]=="image":
+                _media_url(selected["url"])
+                return post_id,selected["url"],post_url,blog,"image"
             # Invalid direct video URLs cannot be used as an excuse to
             # extract through the post fallback; that is not proof that a
             # safe source is absent.
@@ -426,7 +431,7 @@ class MediaSave:
                                "error_code='MEDIA_INTERRUPTED' WHERE id=?",(previous[0],))
                 existing=db.execute("SELECT COALESCE(SUM(output_bytes),0) FROM media_save_jobs"
                                   " WHERE state='completed'").fetchone()[0]
-                if existing+MAX_OUTPUT_BYTES>MAX_TOTAL_SAVED_BYTES:
+                if existing+(MAX_IMAGE_BYTES if has_direct=="image" else MAX_OUTPUT_BYTES)>MAX_TOTAL_SAVED_BYTES:
                     db.execute("ROLLBACK")
                     raise MediaError("MEDIA_QUOTA_EXCEEDED")
                 job_id=previous[0] if previous else uuid.uuid4().hex
