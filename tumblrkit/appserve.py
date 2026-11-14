@@ -974,7 +974,8 @@ class AppServer:
             adapters={"analytics": analytics}
             if telegram_adapter is None:
                 from tumblrkit.telegram_bridge_client import telegram_owner_from_env
-                telegram_adapter = telegram_owner_from_env()
+                telegram_adapter = telegram_owner_from_env(
+                    cm_store_path=self.release.resolve().parent.parent / "data" / "drafts.sqlite3")
             if telegram_adapter is not None:
                 adapters["telegram"] = telegram_adapter
             if tumblr_reader:
