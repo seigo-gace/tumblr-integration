@@ -675,6 +675,9 @@ class _Handler(BaseHTTPRequestHandler):
                         response=owner.confirm(data["campaign_id"],data["member_id"],data["referral_code"])
                     else:
                         raise ValueError("referral_request_invalid")
+            except PermissionError:
+                self._json(409,{"error":"referral_gate_not_verified"})
+                return
             except (ValueError,TypeError,UnicodeError,json.JSONDecodeError) as exc:
                 self._json(400,{"error":str(exc) if str(exc).startswith("referral_") else "referral_request_invalid"})
                 return
@@ -730,6 +733,9 @@ class _Handler(BaseHTTPRequestHandler):
                         response={"state":owner.close(data["campaign_id"])}
                     else:
                         raise ValueError("campaign_request_invalid")
+            except PermissionError:
+                self._json(409,{"error":"campaign_eligibility_not_verified"})
+                return
             except (ValueError,TypeError,OverflowError,UnicodeError,json.JSONDecodeError) as exc:
                 self._json(400,{"error":str(exc) if str(exc).startswith("campaign_") else "campaign_request_invalid"})
                 return
