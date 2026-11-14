@@ -467,6 +467,20 @@ class Assistant:
                 expected_digest=body.group(1).strip()
                 text=("Telegram告知の投稿前確認。\n投稿先："+target+
                       "\n本文：\n"+expected_digest+"\n確認後、既存MPBで投稿します。")
+                cm_preview = getattr(self.bridge.adapters.get("telegram"), "preview_cm", None)
+                if callable(cm_preview):
+                    try:
+                        cm_items = cm_preview(target)
+                    except (ValueError, OSError, sqlite3.Error):
+                        return self._pack("failed",
+                            "CM台帳を確認できません。投稿前の確認を行っていません。",
+                            False, recovery=True, action=action, provider=provider)
+                    if cm_items:
+                        text += "\n掲載予定CM（本文ではなくURLボタン）：\n" + "\n".join(
+                            "PR / " + item["label"] for item in cm_items)
+                    else:
+                        text += "\n掲載予定CM：なし"
+
             if engagement_preview is not None:
                 operation={"engagement.like":"いいね",
                            "engagement.reblog":"リブログ",
