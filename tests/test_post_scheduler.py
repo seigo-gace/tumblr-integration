@@ -57,9 +57,26 @@ class ScheduledPublisherTests(unittest.TestCase):
         self.assertEqual(self.owner.dispatch_due()["state"],"idle")
         self.assertEqual(self.remote.calls,[])
 
-    def test_draft_change_at_due_time_cancels_without_posting(self):
+    def test_schedule_locks_draft_until_cancelled(self):
         item=self.owner.queue(self.draft["id"],1200,self.digest)
-        self.drafts.update(self.draft["id"],"編集後",self.draft["text"])
+        self.assertTrue(self.drafts.list()[0]["locked"])
+        with self.assertRaisesRegex(ValueError,"DRAFT_PUBLISH_LOCKED"):
+            self.drafts.update(self.draft["id"],"編集後",self.draft["text"])
+        with self.assertRaisesRegex(ValueError,"DRAFT_PUBLISH_LOCKED"):
+            self.drafts.delete(self.draft["id"])
+        self.assertTrue(self.owner.cancel(item["schedule_id"]))
+        self.assertFalse(self.drafts.list()[0]["locked"])
+        self.assertEqual(self.drafts.update(
+            self.draft["id"],"編集後",self.draft["text"])["text"],"編集後")
+
+    def test_unexpected_draft_change_at_due_time_cancels_without_posting(self):
+        import sqlite3
+        item=self.owner.queue(self.draft["id"],1200,self.digest)
+        # A corrupted/offline DB edit remains detectable even though the
+        # normal owner DraftStore forbids editing an active reservation.
+        with sqlite3.connect(str(self.path)) as db:
+            db.execute("UPDATE operation_drafts SET text='破損' WHERE id=?",
+                       (self.draft["id"],))
         self.now=1201
         self.assertEqual(self.owner.dispatch_due()["state"],"draft_changed")
         self.assertEqual(self.owner.list()[0]["state"],"cancelled")
