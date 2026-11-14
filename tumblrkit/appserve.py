@@ -365,6 +365,21 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, '<!doctype html><html lang="ja"><meta charset="utf-8"><title>Tumblr連携</title><p>Tumblrの本人確認が完了しました。</p><a href="/">操作画面に戻る</a></html>', "text/html; charset=utf-8")
             return
+        if parts.path == "/campaigns":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            try:
+                from tumblrkit.core import connect as campaign_connect
+                from tumblrkit.campaign_runtime import CampaignContest
+                from contextlib import closing
+                with closing(campaign_connect(str(self.server.draft_store.path))) as db:
+                    campaigns = CampaignContest(db).list_campaigns()
+            except (ValueError,sqlite3.Error,OSError):
+                self._json(503, {"error":"campaign_store_unavailable"})
+                return
+            self._json(200, {"campaigns":campaigns})
+            return
         if parts.path == "/media/jobs":
             if not _authorized(self):
                 self._unauthorized()
@@ -522,6 +537,49 @@ class _Handler(BaseHTTPRequestHandler):
         parts = urlsplit(self.path)
         if parts.query:
             self._send(400, "bad request\n", "text/plain; charset=utf-8")
+            return
+        if parts.path == "/campaigns":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            bearer_ok = self.headers.get("Authorization","").startswith("Bearer ") and _authorized(self)
+            if (self.headers.get("Origin") and not _same_origin(self)) or (not self.headers.get("Origin") and not bearer_ok):
+                self._send(403, "origin rejected\\n", "text/plain; charset=utf-8")
+                return
+            try:
+                from contextlib import closing
+                from tumblrkit.core import connect as campaign_connect
+                from tumblrkit.campaign_runtime import CampaignContest
+                if self.headers.get("Content-Type","").split(";",1)[0].strip().lower()!="application/json":
+                    raise ValueError("campaign_request_invalid")
+                data=json.loads(self._read_body(4096).decode("utf-8"))
+                if not isinstance(data,dict) or not isinstance(data.get("action"),str):
+                    raise ValueError("campaign_request_invalid")
+                action=data["action"]
+                with closing(campaign_connect(str(self.server.draft_store.path))) as db:
+                    owner=CampaignContest(db)
+                    if action=="create" and set(data)=={"action","campaign_id","prize","deadline","winners","claim_seconds"}:
+                        response=owner.create(data["campaign_id"],data["prize"],
+                                              deadline=data["deadline"],winners=data["winners"],
+                                              claim_seconds=data["claim_seconds"])
+                    elif action=="draw" and set(data)=={"action","campaign_id"}:
+                        result=owner.draw(data["campaign_id"])
+                        response={"campaign_id":result.campaign_id,"commitment":result.commitment,
+                                  "winners":list(result.winners),"participants":result.participants,
+                                  "winner_count":result.winner_count}
+                    elif action=="promote" and set(data)=={"action","campaign_id"}:
+                        response={"promoted":owner.promote_expired(data["campaign_id"])}
+                    elif action=="close" and set(data)=={"action","campaign_id"}:
+                        response={"state":owner.close(data["campaign_id"])}
+                    else:
+                        raise ValueError("campaign_request_invalid")
+            except (ValueError,TypeError,OverflowError,UnicodeError,json.JSONDecodeError) as exc:
+                self._json(400,{"error":str(exc) if str(exc).startswith("campaign_") else "campaign_request_invalid"})
+                return
+            except (OSError,sqlite3.Error):
+                self._json(503,{"error":"campaign_store_unavailable"})
+                return
+            self._json(200,response)
             return
         if parts.path == "/oauth/configure":
             if not _authorized(self):
@@ -1017,6 +1075,8 @@ class AppServer:
         # There is no new database or second posting service.
         from tumblrkit.core import connect as campaign_connect
         campaign_db = campaign_connect(str(self.httpd.draft_store.path))
+        from tumblrkit.campaign_runtime import CampaignContest
+        CampaignContest(campaign_db)
         campaign_db.close()
         # Assistant and the owner UI must use the same durable draft records.
         self.httpd.assistant.draft_store = self.httpd.draft_store
