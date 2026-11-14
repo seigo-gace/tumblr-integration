@@ -879,7 +879,8 @@
       });
       const updateFields=function(){
         const action=selector.value;
-        const visible=new Set(action==="create"
+        const visible=new Set(action==="list"?[]
+          : action==="create"
           ? ["campaign_id","prize","deadline","winners","claim_seconds"]
           : action==="reschedule"?["campaign_id","deadline"]
           : item.goal==="紹介"&&action!=="report"
