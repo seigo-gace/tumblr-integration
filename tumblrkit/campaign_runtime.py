@@ -44,6 +44,13 @@ CREATE TABLE IF NOT EXISTS campaign_outcomes(
  FOREIGN KEY(campaign_id,applicant_id)
  REFERENCES campaign_entries(campaign_id,applicant_id)
 );
+CREATE TABLE IF NOT EXISTS campaign_notifications(
+ event_id TEXT PRIMARY KEY REFERENCES campaign_outcomes(event_id),
+ state TEXT NOT NULL CHECK(state IN
+ ('pending','sending','verified','needs_reconcile')),
+ message_ref TEXT,
+ updated_at INTEGER NOT NULL
+);
 """
 
 
@@ -192,6 +199,10 @@ class CampaignContest:
         self.db.execute(
             "INSERT OR IGNORE INTO campaign_outcomes VALUES(?,?,?,?,?)",
             (campaign_id,applicant_id,state,event_id,now))
+        self.db.execute(
+            "INSERT OR IGNORE INTO campaign_notifications"
+            "(event_id,state,updated_at) VALUES(?,'pending',?)",
+            (event_id,now))
 
     def claim(self,campaign_id,applicant_id):
         self._ident(campaign_id)
@@ -265,6 +276,56 @@ class CampaignContest:
         if state and state[0]=="closed":
             return "already_closed"
         raise ValueError("campaign_not_drawn")
+
+    def pending_notifications(self,campaign_id):
+        """Read-only delivery work for existing MPB; never invent a Bot DM."""
+        self._ident(campaign_id)
+        return [{"event_id":r[0],"applicant_id":r[1],"outcome":r[2]}
+                for r in self.db.execute(
+                    "SELECT n.event_id,o.applicant_id,o.state "
+                    "FROM campaign_notifications n JOIN campaign_outcomes o "
+                    "ON o.event_id=n.event_id "
+                    "WHERE o.campaign_id=? AND n.state='pending' "
+                    "ORDER BY o.created_at,n.event_id",(campaign_id,))]
+
+    def dispatch_notification(self, event_id, messenger):
+        """Existing owner transport must deliver + readback. No blind replay."""
+        if not isinstance(event_id,str) or len(event_id)!=64:
+            raise ValueError("campaign_event_invalid")
+        if messenger is None:
+            raise ValueError("campaign_messenger_not_connected")
+        now=int(self.clock())
+        with self.db:
+            selected=self.db.execute(
+                "SELECT o.campaign_id,o.applicant_id,o.state "
+                "FROM campaign_notifications n JOIN campaign_outcomes o "
+                "ON o.event_id=n.event_id WHERE n.event_id=? AND n.state='pending'",
+                (event_id,)).fetchone()
+            if not selected:
+                raise ValueError("campaign_notification_not_pending")
+            changed=self.db.execute(
+                "UPDATE campaign_notifications SET state='sending',updated_at=? "
+                "WHERE event_id=? AND state='pending'",(now,event_id)).rowcount
+            if changed!=1:
+                raise ValueError("campaign_notification_not_pending")
+        campaign_id,applicant_id,outcome=selected
+        reference=None
+        verified=False
+        try:
+            response=messenger.publish(event_id,campaign_id,applicant_id,outcome)
+            reference=response.get("message_ref") if isinstance(response,dict) else None
+            if isinstance(reference,str) and reference:
+                verified=messenger.readback(event_id,reference) is True
+        except Exception:
+            verified=False
+        with self.db:
+            self.db.execute(
+                "UPDATE campaign_notifications SET state=?,message_ref=?,updated_at=? "
+                "WHERE event_id=? AND state='sending'",
+                ("verified" if verified else "needs_reconcile",reference,now,event_id))
+        return {"event_id":event_id,
+                "state":"verified" if verified else "needs_reconcile",
+                "message_ref":reference}
 
     def list_campaigns(self):
         """Owner-only management data; never expose the private draw seed."""
