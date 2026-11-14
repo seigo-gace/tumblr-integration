@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS campaign_contests(
  state TEXT NOT NULL CHECK(state IN ('open','drawn','closed')),
  drawn_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS campaign_gate_topics(
+ campaign_id TEXT PRIMARY KEY REFERENCES campaign_contests(campaign_id),
+ posting_topic_id TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS campaign_entries(
  campaign_id TEXT NOT NULL REFERENCES campaign_contests(campaign_id),
  applicant_id TEXT NOT NULL,
@@ -63,6 +67,35 @@ class CampaignDrawResult:
     winners: tuple[str, ...]
 
 
+class GateEligibility:
+    """Use the existing MPB/GATE member contract; never trust browser booleans."""
+    def __init__(self, db, telegram_owner):
+        self.db=db
+        self.telegram_owner=telegram_owner
+
+    def __call__(self,campaign_id,telegram_user_id):
+        if self.telegram_owner is None:
+            return False
+        if (not isinstance(telegram_user_id,str)
+                or not telegram_user_id.isascii()
+                or not telegram_user_id.isdecimal()
+                or not 1<=len(telegram_user_id)<=13
+                or telegram_user_id[0]=="0"):
+            return False
+        row=self.db.execute(
+            "SELECT posting_topic_id FROM campaign_gate_topics WHERE campaign_id=?",
+            (campaign_id,)).fetchone()
+        if not row:
+            return False
+        try:
+            result=self.telegram_owner.perform(
+                "telegram.check_membership",
+                row[0]+":"+telegram_user_id,{})
+        except (OSError,ValueError,TypeError,PermissionError):
+            return False
+        return isinstance(result,dict) and result.get("verified") is True
+
+
 class CampaignContest:
     def __init__(self, db, *, clock=None, eligibility=None):
         self.db = db
@@ -79,7 +112,7 @@ class CampaignContest:
             raise ValueError("campaign_identifier_invalid")
         return value
 
-    def create(self, campaign_id, prize, *, deadline, winners, claim_seconds=86400):
+    def create(self, campaign_id, prize, *, deadline, winners, claim_seconds=86400, gate_topic_id=None):
         self._ident(campaign_id)
         if not isinstance(prize, str) or not 1 <= len(prize.strip()) <= 200:
             raise ValueError("campaign_prize_invalid")
@@ -88,6 +121,12 @@ class CampaignContest:
                 type(winners) is not int or not 1 <= winners <= 10000 or
                 type(claim_seconds) is not int or not 60 <= claim_seconds <= 2592000):
             raise ValueError("campaign_terms_invalid")
+        if gate_topic_id is not None and (
+                not isinstance(gate_topic_id,str) or
+                not gate_topic_id.isascii() or
+                not gate_topic_id.isdecimal() or
+                not 1<=len(gate_topic_id)<=13 or gate_topic_id[0]=="0"):
+            raise ValueError("campaign_gate_topic_invalid")
         seed = secrets.token_hex(32)
         commitment = hashlib.sha256(bytes.fromhex(seed)).hexdigest()
         with self.db:
@@ -97,6 +136,10 @@ class CampaignContest:
                 "INSERT INTO campaign_contests VALUES(?,?,?,?,?,?,?,?,?)",
                 (campaign_id,prize.strip(),deadline,winners,claim_seconds,
                  seed,commitment,"open",None))
+            if gate_topic_id is not None:
+                self.db.execute(
+                    "INSERT INTO campaign_gate_topics VALUES(?,?)",
+                    (campaign_id,gate_topic_id))
         return {"campaign_id":campaign_id,"seed_commitment":commitment,
                 "deadline":deadline,"winners":winners}
 
