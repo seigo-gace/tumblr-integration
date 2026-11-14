@@ -99,6 +99,28 @@ class CMOwnerDeliveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "cm_selection_stale"):
             self.cm.select_for_operation("100", "stale")
 
+    def test_explicit_cm_disabled_keeps_existing_text_only_delivery(self):
+        calls = []
+        def transport(payload):
+            calls.append(payload)
+            if payload["action"] == "lookup":
+                return {"verified": False}
+            if payload["action"] == "publish":
+                return {"verified": True, "message_id": "90"}
+            if payload["action"] == "readback":
+                return {"verified": True}
+            raise AssertionError(payload)
+        owner = LocalTelegramOwner(self.token, transport=transport,
+                                   cm_registry=self.cm)
+        result = owner.perform("telegram.publish_announcement", "100",
+                               {"text": "CM非掲載", "operation_key": "no-cm",
+                                "cm_disabled": True})
+        self.assertTrue(result["verified"])
+        publish = next(x for x in calls if x["action"] == "publish")
+        self.assertNotIn("cm_buttons", publish)
+        self.assertEqual([x["id"] for x in self.cm.select("100")],
+                         ["c0", "c1", "c2"])
+
     def test_missing_keyboard_does_not_claim_success_or_advance(self):
         result = self.deliver(keyboard=False)
         self.assertEqual(result.state, "unverified")
