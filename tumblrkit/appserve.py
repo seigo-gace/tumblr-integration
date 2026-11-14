@@ -451,10 +451,15 @@ class _Handler(BaseHTTPRequestHandler):
                 filename=parts.path.rsplit("/",1)[1]
                 file=self.server.media_save.file(filename)
                 size=file.stat().st_size
+                kinds={".mp4":"video/mp4",".jpg":"image/jpeg",
+                       ".png":"image/png",".gif":"image/gif",".webp":"image/webp"}
+                mime=kinds.get(file.suffix)
+                if mime is None:
+                    raise MediaError("MEDIA_FILE_UNSAFE")
                 self.send_response(200)
-                self.send_header("Content-Type","video/mp4")
+                self.send_header("Content-Type",mime)
                 self.send_header("Content-Length",str(size))
-                self.send_header("Content-Disposition",'attachment; filename="'+filename+'.mp4"')
+                self.send_header("Content-Disposition",'attachment; filename="'+file.name+'"')
                 self.send_header("Cache-Control","no-store")
                 self.send_header("X-Content-Type-Options","nosniff")
                 self.send_header("Referrer-Policy","no-referrer")
@@ -780,7 +785,8 @@ class _Handler(BaseHTTPRequestHandler):
                                "MEDIA_ALL_METHODS_EXHAUSTED","MEDIA_PROVIDER_REFUSED",
                                "MEDIA_EXTRACTOR_AMBIGUOUS","MEDIA_POST_INVALID","MEDIA_EXTRACTOR_FAILED",
                                "MEDIA_EXTRACTOR_UNSAFE_FILE","MEDIA_LENGTH_UNKNOWN",
-                               "MEDIA_SIZE_EXCEEDED","MEDIA_SIZE_CHANGED","MEDIA_DESTINATION_UNSAFE",
+                               "MEDIA_SIZE_EXCEEDED","MEDIA_SIZE_CHANGED","MEDIA_IMAGE_FORMAT_INVALID",
+                               "MEDIA_DESTINATION_UNSAFE",
                                "MEDIA_CONNECT_UNAVAILABLE","MEDIA_PROBE_FAILED","MEDIA_PROBE_UNAVAILABLE",
                                "MEDIA_CONVERSION_FAILED","MEDIA_CONVERSION_UNAVAILABLE",
                                "MEDIA_OUTPUT_NOT_MP4","MEDIA_OUTPUT_SIZE_EXCEEDED","MEDIA_PROCESS_FAILED"):
