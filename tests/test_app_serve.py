@@ -155,6 +155,8 @@ class AppServeTests(unittest.TestCase):
     def test_catalog_action_http_cannot_bypass_bridge_confirmation(self):
         class Existing:
             def __init__(self):self.calls=[]
+            def preview(self,action,target):
+                return {"blog":"owner","title":"保存済み候補"}
             def perform(self,action,target,payload):
                 self.calls.append((action,target))
                 return {"verified":True}
