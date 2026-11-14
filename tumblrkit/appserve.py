@@ -365,6 +365,17 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, '<!doctype html><html lang="ja"><meta charset="utf-8"><title>Tumblr連携</title><p>Tumblrの本人確認が完了しました。</p><a href="/">操作画面に戻る</a></html>', "text/html; charset=utf-8")
             return
+        if parts.path == "/schedules":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            try:
+                data=self.server.scheduler.list()
+            except (sqlite3.Error,OSError,ValueError):
+                self._json(503,{"error":"schedule_store_unavailable"})
+                return
+            self._json(200,{"schedules":data})
+            return
         if parts.path == "/action-catalog":
             if not _authorized(self):
                 self._unauthorized()
@@ -379,6 +390,38 @@ class _Handler(BaseHTTPRequestHandler):
                                          "name":a.name,"confirmation":a.confirmation,
                                          "output_type":a.output_type}
                                         for a in CATALOG]})
+            return
+        if parts.path == "/schedules":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            bearer_ok=self.headers.get("Authorization","").startswith("Bearer ") and _authorized(self)
+            if (self.headers.get("Origin") and not _same_origin(self)) or (not self.headers.get("Origin") and not bearer_ok):
+                self._send(403,"origin rejected\\n","text/plain; charset=utf-8")
+                return
+            try:
+                if self.headers.get("Content-Type","").split(";",1)[0].strip().lower()!="application/json":
+                    raise ValueError("schedule_request_invalid")
+                data=json.loads(self._read_body(4096).decode("utf-8"))
+                if not isinstance(data,dict):
+                    raise ValueError("schedule_request_invalid")
+                action=data.get("action")
+                scheduler=self.server.scheduler
+                if action=="queue" and set(data)=={"action","draft_id","publish_at","expected_digest"}:
+                    result=scheduler.queue(data["draft_id"],data["publish_at"],data["expected_digest"])
+                elif action=="reschedule" and set(data)=={"action","schedule_id","publish_at","expected_digest"}:
+                    result=scheduler.reschedule(data["schedule_id"],data["publish_at"],data["expected_digest"])
+                elif action=="cancel" and set(data)=={"action","schedule_id"}:
+                    result={"cancelled":scheduler.cancel(data["schedule_id"])}
+                else:
+                    raise ValueError("schedule_request_invalid")
+            except (ValueError,TypeError,UnicodeError,json.JSONDecodeError) as exc:
+                self._json(400,{"error":str(exc) if str(exc).startswith("schedule_") else "schedule_request_invalid"})
+                return
+            except (OSError,sqlite3.Error):
+                self._json(503,{"error":"schedule_store_unavailable"})
+                return
+            self._json(200,result)
             return
         if parts.path == "/campaigns":
             if not _authorized(self):
@@ -1094,6 +1137,11 @@ class AppServer:
         CampaignContest(campaign_db)
         campaign_db.close()
         # Assistant and the owner UI must use the same durable draft records.
+        from tumblrkit.post_scheduler import ScheduledPublisher
+        self.httpd.scheduler=ScheduledPublisher(
+            self.httpd.draft_store,
+            publisher=lambda: getattr(
+                self.httpd.assistant.bridge.adapters.get("tumblr"),"publisher",None))
         self.httpd.assistant.draft_store = self.httpd.draft_store
         self.httpd.attachment_store = AttachmentStore(self.release.resolve().parent.parent / "data")
         if self.ticket:
@@ -1103,9 +1151,24 @@ class AppServer:
         self.port = self.httpd.server_address[1]
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.thread.start()
+        # One bounded owner-app timer. No new worker service or Bot.
+        # Items are submitted only after explicit owner scheduling.
+        self.scheduler_stop=threading.Event()
+        def process_schedules():
+            while not self.scheduler_stop.wait(15):
+                try:
+                    self.httpd.scheduler.dispatch_due()
+                except (sqlite3.Error,OSError,ValueError):
+                    # The persistent schedule remains visible for reconciliation.
+                    pass
+        self.scheduler_thread=threading.Thread(target=process_schedules,daemon=True)
+        self.scheduler_thread.start()
+
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        self.scheduler_stop.set()
+        self.scheduler_thread.join(timeout=3)
         self.httpd.shutdown()
         self.httpd.server_close()
         self.thread.join(timeout=3)
