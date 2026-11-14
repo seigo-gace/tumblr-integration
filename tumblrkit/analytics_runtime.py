@@ -1,6 +1,6 @@
 """Real owner-only analytics over the *existing* Discovery/Library SQLite state.
 
-This is not Tumblr follower analytics, GATE conversion or a provider estimate.
+Follower observations are read exclusively from persisted OAuth-confirmed snapshots;\nnever infer Tumblr follower counts or GATE conversion.
 Only observed, already persisted candidate and Library state is reported.
 """
 import time
@@ -20,14 +20,14 @@ class AnalyticsAdapter:
         "month": (30 * 86400, "過去30日間"),
     }
 
-    def __init__(self, discovery_store, clock=None, campaign_db=None, campaign_db_path=None):
+    def __init__(self, discovery_store, clock=None, campaign_db=None, campaign_db_path=None, owner_blog=None):
         self.store = discovery_store
         self.clock = clock or time.time
         # Explicit owner-owned campaign ledger only. Without this injection
         # campaign totals remain unmeasured, never guessed from Discovery.
         if campaign_db is not None and campaign_db_path is not None:
             raise ValueError('analytics_campaign_source_ambiguous')
-        self.campaign_db = campaign_db
+        self.owner_blog = owner_blog\n        self.campaign_db = campaign_db
         self.campaign_db_path = Path(campaign_db_path) if campaign_db_path is not None else None
 
     def perform(self, action, target, payload):
@@ -77,6 +77,26 @@ class AnalyticsAdapter:
                     observed=db.execute(
                         statement+" AND updated_at>=?",(kind,cutoff)).fetchone()[0]
                 engagement.append(observed)
+        follower_rows=[]
+        if self.owner_blog:
+            with closing(self.store._open()) as db:
+                exists=db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' "
+                    "AND name='analytics_follower_snapshots'").fetchone()
+                if exists:
+                    query=("SELECT followers,day,observed_at FROM analytics_follower_snapshots "
+                           "WHERE blog=?")
+                    params=(self.owner_blog,)
+                    if cutoff is not None:
+                        query+=" AND observed_at>=?"
+                        params+=(cutoff,)
+                    query+=" ORDER BY observed_at DESC LIMIT 1"
+                    latest=db.execute(query,params).fetchone()
+                    if latest:
+                        follower_rows=[{"label":"Tumblr認証済みフォロワー数（最終観測）",
+                                        "value":latest[0],
+                                        "period":latest[1],
+                                        "url":""}]
         campaign_rows=[]
         campaign_db = self.campaign_db
         opened = None
@@ -141,12 +161,12 @@ class AnalyticsAdapter:
             "rows": [
                 {"label": label, "value": count, "period": period, "url": ""}
                 for label, count in zip(labels, (*row,*engagement))
-            ] + campaign_rows,
+            ] + campaign_rows + follower_rows,
             "campaign_basis": ("local_campaign_records_not_external_conversion"
                                if (self.campaign_db is not None or self.campaign_db_path is not None) else "not_connected"),
             "engagement_basis":"official_oauth_readback_receipts",
             "not_measured": [
-                "Tumblrフォロワー数", "Tumblr反応総数",
-                "Telegram参加転換率", "キャンペーン成果",
+                *(["Tumblrフォロワー数"] if not follower_rows else []),
+                "Tumblr反応総数", "Telegram参加転換率", "キャンペーン成果",
             ],
         }
