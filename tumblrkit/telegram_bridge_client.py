@@ -38,6 +38,13 @@ class LocalTelegramOwner:
                 raise ValueError("telegram_owner_unavailable")
             return json.load(response)
 
+    def preview_cm(self, destination):
+        """Read-only preview of CM selection; never advance the cursor."""
+        if self.cm_store_path is None:
+            return self.cm_registry.select(destination) if self.cm_registry else []
+        with closing(sqlite3.connect(self.cm_store_path, timeout=3)) as db:
+            return CMRegistry(db).select(destination)
+
     def perform(self, action, target, payload):
         if action == "telegram.check_membership":
             # The owner identity must come from the private app configuration.
