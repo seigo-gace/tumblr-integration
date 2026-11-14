@@ -198,6 +198,32 @@ class PublisherAdapter:
                      "url":"https://"+self.blog+".tumblr.com/post/"+post_id}],
         }
 
+    def reconcile_published_draft(self, draft_id):
+        """Owner-initiated readback ONLY; never repeats an uncertain POST.
+
+        A reserved receipt without a provider post ID cannot safely be
+        resolved by guessing or another publication attempt.
+        """
+        draft=self.drafts.get(draft_id)
+        digest=hashlib.sha256(draft["text"].encode("utf-8")).hexdigest()
+        with closing(self.drafts._connect()) as db:
+            db.execute(PUBLISH_SCHEMA)
+            row=db.execute(
+                "SELECT digest,state,post_id FROM tumblr_publish_receipts "
+                "WHERE draft_id=?",(draft_id,)).fetchone()
+        if not row or row[0]!=digest:
+            raise ValueError("tumblr_publish_reconcile_missing")
+        _,state,post_id=row
+        if state not in ("sent","verified") or not post_id:
+            raise ValueError("tumblr_publish_reconcile_required")
+        # Exactly one read request through the already adopted provider
+        # budget and owner-scoped token; no write or retry.
+        self.budget.reserve(1)
+        bearer=self.token_provider()
+        result=self._readback(post_id,draft["text"],bearer)
+        self._set_state(draft_id,"verified",post_id)
+        return result
+
     def perform(self,action,target,payload):
         if action!="tumblr.publish_draft":
             raise ValueError("tumblr_publish_action_invalid")
