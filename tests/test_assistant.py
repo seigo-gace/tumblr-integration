@@ -144,6 +144,24 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(owner.publish_calls[0][2]["operation_key"],
                          preview["request_id"])
 
+    def test_cm_none_is_confirmed_without_preview_or_cm_buttons(self):
+        class OptionalCM:
+            def __init__(self):
+                self.calls = []
+            def preview_cm(self, *_):
+                raise AssertionError("CM preview must be skipped")
+            def perform(self, action, target, payload):
+                self.calls.append((action, target, payload))
+                return {"verified": True}
+        owner = OptionalCM()
+        assistant = Assistant(bridge=Bridge({"telegram": owner}), providers=[])
+        preview = assistant.turn("告知 対象: 100\nCMなし\n本文: テスト")
+        self.assertEqual(preview["state"], "confirmation_required")
+        self.assertIn("CM：なし", preview["text"].replace("掲載予定", ""))
+        result = assistant.turn(confirm=True, request_id=preview["request_id"])
+        self.assertEqual(result["state"], "completed")
+        self.assertTrue(owner.calls[0][2]["cm_disabled"])
+
     def test_telegram_announcement_needs_body_and_existing_owner(self):
         class ExistingTelegram:
             def perform(self, *_):
