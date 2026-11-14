@@ -596,6 +596,41 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._json(200,result)
             return
+        if parts.path == "/referrals":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            bearer_ok=self.headers.get("Authorization","").startswith("Bearer ") and _authorized(self)
+            if (self.headers.get("Origin") and not _same_origin(self)) or (not self.headers.get("Origin") and not bearer_ok):
+                self._send(403,"origin rejected\\n","text/plain; charset=utf-8")
+                return
+            try:
+                from contextlib import closing
+                from tumblrkit.core import connect as campaign_connect
+                from tumblrkit.referral_runtime import ReferralManager
+                if self.headers.get("Content-Type","").split(";",1)[0].strip().lower()!="application/json":
+                    raise ValueError("referral_request_invalid")
+                data=json.loads(self._read_body(4096).decode("utf-8"))
+                if not isinstance(data,dict):
+                    raise ValueError("referral_request_invalid")
+                with closing(campaign_connect(str(self.server.draft_store.path))) as db:
+                    owner=ReferralManager(db)
+                    if data.get("action")=="issue" and set(data)=={"action","campaign_id","referrer_id"}:
+                        response=owner.issue(data["campaign_id"],data["referrer_id"])
+                    elif data.get("action")=="revoke" and set(data)=={"action","campaign_id","referrer_id"}:
+                        response={"state":owner.revoke(data["campaign_id"],data["referrer_id"])}
+                    elif data.get("action")=="report" and set(data)=={"action","campaign_id"}:
+                        response=owner.report(data["campaign_id"])
+                    else:
+                        raise ValueError("referral_request_invalid")
+            except (ValueError,TypeError,UnicodeError,json.JSONDecodeError) as exc:
+                self._json(400,{"error":str(exc) if str(exc).startswith("referral_") else "referral_request_invalid"})
+                return
+            except (sqlite3.Error,OSError):
+                self._json(503,{"error":"referral_store_unavailable"})
+                return
+            self._json(200,response)
+            return
         if parts.path == "/campaigns":
             if not _authorized(self):
                 self._unauthorized()
