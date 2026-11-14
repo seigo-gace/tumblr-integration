@@ -93,6 +93,31 @@ class CampaignContest:
         return {"campaign_id":campaign_id,"seed_commitment":commitment,
                 "deadline":deadline,"winners":winners}
 
+    def change_deadline(self, campaign_id, deadline):
+        """Owner can amend an open campaign, not rewrite a completed draw."""
+        self._ident(campaign_id)
+        now=int(self.clock())
+        if type(deadline) is not int or deadline <= now:
+            raise ValueError("campaign_deadline_invalid")
+        with self.db:
+            changed=self.db.execute(
+                "UPDATE campaign_contests SET deadline=? "
+                "WHERE campaign_id=? AND state='open' AND deadline>?",
+                (deadline,campaign_id,now)).rowcount
+        if changed!=1:
+            raise ValueError("campaign_deadline_locked")
+        return {"campaign_id":campaign_id,"deadline":deadline}
+
+    def entries(self, campaign_id):
+        self._ident(campaign_id)
+        return [{"applicant_id":r[0],"status":r[1],
+                 "entered_at":r[2],"rank":r[3],
+                 "claim_deadline":r[4]}
+                for r in self.db.execute(
+                    "SELECT applicant_id,status,entered_at,rank,claim_deadline "
+                    "FROM campaign_entries WHERE campaign_id=? "
+                    "ORDER BY entered_at,applicant_id",(campaign_id,))]
+
     def enter(self, campaign_id, applicant_id):
         """Only trusted eligibility adapters may accept entries."""
         self._ident(campaign_id)
