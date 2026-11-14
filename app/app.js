@@ -1022,7 +1022,8 @@
         const option=document.createElement("option");
         option.value=item.id;
         option.textContent=item.id+" "+item.name+
-          (item.bridge_action&&item.adapter_bound?"":"（接続確認が必要）");
+          (item.bridge_action&&item.adapter_bound?"（既存Bridge）":
+           item.owner_ui?"（既存運営画面）":"（未接続）");
         select.appendChild(option);
       });
       const input=document.createElement("input");
@@ -1036,16 +1037,39 @@
       const refresh=function(){
         const item=actions.find(x=>x.id===select.value);
         const connected=Boolean(item&&item.bridge_action&&item.adapter_bound);
-        input.hidden=!item?.requires_target;
-        button.disabled=!connected;
+        const local=Boolean(item?.owner_ui);
+        input.hidden=!connected||!item?.requires_target;
+        button.disabled=!connected&&!local;
+        button.textContent=connected?"既存操作の内容を確認":"既存画面を開く";
         status.textContent=connected
-          ? "既存操作へ接続可能。実行結果は別途読戻して確認します。"
-          : "この操作は元設計にありますが、現在の実行先は未接続です。";
+          ? "既存Bridgeへ接続。実行結果は別途読戻して確認します。"
+          : local?"既存の運営画面で操作します。外部操作の成功は未確認です。"
+          : "元設計にはありますが、現在の実行先は未接続です。";
       };
       select.addEventListener("change",refresh);
       button.addEventListener("click",function(){
         const item=actions.find(x=>x.id===select.value);
-        if(!item||!item.bridge_action||!item.adapter_bound)return;
+        if(!item)return;
+        if(!(item.bridge_action&&item.adapter_bound)&&item.owner_ui){
+          if(item.owner_ui==="library"){showLibrary();return;}
+          if(item.owner_ui==="media_history"){mediaHistory(0);return;}
+          if(item.owner_ui==="drafts"){refreshDrafts();return;}
+          if(item.owner_ui==="oauth_status"){showOAuthStatus();connect.focus();return;}
+          if(item.owner_ui==="oauth_connect"){connect.focus();
+            display("画面上部のTumblr連携を押してください。認可は自動開始しません。","system");
+            return;}
+          const matching=Array.from(section.querySelectorAll("details")).find(function(d){
+            const summary=d.querySelector("summary");
+            if(!summary||d===details)return false;
+            return (item.owner_ui==="campaign"&&summary.textContent.includes("キャンペーン管理"))||
+              (item.owner_ui==="referral"&&summary.textContent.includes("紹介管理"))||
+              (item.owner_ui==="analytics"&&summary.textContent.includes("フォロワー"));
+          });
+          if(matching){matching.open=true;matching.scrollIntoView({block:"nearest"});return;}
+          display("この操作は既存の目的別画面から使用してください。","system");
+          return;
+        }
+        if(!item.bridge_action||!item.adapter_bound)return;
         const target=item.requires_target?input.value.trim():"";
         if(item.requires_target&&!target){
           display("対象を入力してください。まだ操作していません。","system");
