@@ -831,6 +831,112 @@
   }
   // Plans come from the authenticated server's bounded action contract.
   // A visible choice and an explicit target are required before dispatch.
+  // Reuse the six-goal chat surface for locally implemented owner modules.
+  // These controls do not claim that external Tumblr/GATE/MPB is verified.
+  function ownerModulePanel(section,goals){
+    const items=[
+      {goal:"キャンペーン",heading:"キャンペーン管理",endpoint:"/campaigns",
+       actions:["list","create","entries","outcomes","reschedule","draw","promote","close"]},
+      {goal:"紹介",heading:"紹介管理",endpoint:"/referrals",
+       actions:["issue","report","revoke"]},
+    ];
+    items.filter(item=>goals.includes(item.goal)).forEach(function(item){
+      const details=document.createElement("details");
+      details.className="result-view";
+      const summary=document.createElement("summary");
+      summary.textContent=item.heading+"（内部台帳・実機未検証）";
+      details.appendChild(summary);
+      const form=document.createElement("form");
+      form.className="draft-actions";
+      const selector=document.createElement("select");
+      selector.setAttribute("aria-label",item.heading+"の操作");
+      item.actions.forEach(function(action){
+        const opt=document.createElement("option");opt.value=action;
+        opt.textContent=({
+          list:"一覧",create:"新規作成",entries:"応募者を見る",
+          outcomes:"抽選結果を見る",reschedule:"締切を変更",
+          draw:"抽選を実行",promote:"期限切れ・繰上り",close:"企画を終了",
+          issue:"紹介コードを発行",report:"紹介実績を見る",revoke:"紹介を停止"
+        })[action]||action;selector.appendChild(opt);
+      });
+      form.appendChild(selector);
+      const fieldDefs=item.goal==="キャンペーン"
+        ? [["campaign_id","キャンペーンID"],["prize","賞品・タイトル"],
+           ["deadline","締切（日時）"],["winners","当選数"],
+           ["claim_seconds","受取期限（秒）"]]
+        : [["campaign_id","キャンペーンID"],["referrer_id","紹介者ID"]];
+      const fields={};
+      fieldDefs.forEach(function(def){
+        const wrapper=document.createElement("label");
+        wrapper.textContent=def[1];
+        const input=document.createElement("input");
+        input.setAttribute("aria-label",def[1]);
+        input.type=def[0]==="deadline"?"datetime-local":
+          ["winners","claim_seconds"].includes(def[0])?"number":"text";
+        if(input.type==="number")input.min="1";
+        wrapper.appendChild(input);form.appendChild(wrapper);
+        fields[def[0]]=input;
+      });
+      const updateFields=function(){
+        const action=selector.value;
+        const visible=new Set(action==="create"
+          ? ["campaign_id","prize","deadline","winners","claim_seconds"]
+          : action==="reschedule"?["campaign_id","deadline"]
+          : item.goal==="紹介"&&action!=="report"
+            ? ["campaign_id","referrer_id"]:["campaign_id"]);
+        for(const [name,input] of Object.entries(fields)){
+          input.parentElement.hidden=!visible.has(name);
+          input.required=visible.has(name);
+        }
+      };
+      selector.addEventListener("change",updateFields);
+      updateFields();
+      const submit=document.createElement("button");submit.type="submit";
+      submit.textContent="内容を確認して操作";
+      form.appendChild(submit);
+      form.addEventListener("submit",async function(event){
+        event.preventDefault();
+        submit.disabled=true;
+        try{
+          const action=selector.value;
+          let result;
+          if(action==="list"){
+            const response=await fetch(item.endpoint,{credentials:"same-origin"});
+            if(!response.ok)throw new Error("request_failed");
+            result=await response.json();
+          }else{
+            const payload={action:action};
+            for(const [name,input] of Object.entries(fields)){
+              if(input.parentElement.hidden)continue;
+              let value=input.value.trim();
+              if(!value)throw new Error("field_missing");
+              if(name==="deadline"){
+                value=Math.floor(new Date(value).getTime()/1000);
+                if(!Number.isSafeInteger(value))throw new Error("field_invalid");
+              }else if(name==="winners"||name==="claim_seconds"){
+                value=Number(value);
+                if(!Number.isSafeInteger(value))throw new Error("field_invalid");
+              }
+              payload[name]=value;
+            }
+            const response=await fetch(item.endpoint,{
+              method:"POST",credentials:"same-origin",
+              headers:{"Content-Type":"application/json"},
+              body:JSON.stringify(payload)});
+            if(!response.ok)throw new Error("request_"+response.status);
+            result=await response.json();
+          }
+          // The owner ledger response is explicit; no fabricated external success.
+          display(item.heading+"：内部記録を取得しました。\n"+
+                  JSON.stringify(result,null,2),"system");
+        }catch(error){
+          display(item.heading+"：入力または台帳の確認に失敗しました。"+
+                  "外部サービスへの操作は行っていません。","system");
+        }finally{submit.disabled=false;}
+      });
+      details.appendChild(form);section.appendChild(details);
+    });
+  }
   function renderPlan(plan){
     if(!plan||plan.evidence!=="existing_bridge_registry"||
        !Array.isArray(plan.goals)||!Array.isArray(plan.recommendations))return;
@@ -927,6 +1033,7 @@
       note.textContent="未接続の目的："+plan.not_connected_goals.join("・")+"。実装済みとは表示しません。";
       section.appendChild(note);
     }
+    ownerModulePanel(section,plan.goals);
     messages.appendChild(section);
     messages.scrollTop=messages.scrollHeight;
   }
