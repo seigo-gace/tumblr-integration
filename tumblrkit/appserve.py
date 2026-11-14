@@ -1171,7 +1171,8 @@ class AppServer:
             from tumblrkit.analytics_runtime import AnalyticsAdapter
             analytics=AnalyticsAdapter(
                 DiscoveryStore(self.oauth_folder / "discovery.sqlite3"),
-                campaign_db_path=self.release.resolve().parent.parent / "data" / "drafts.sqlite3")
+                campaign_db_path=self.release.resolve().parent.parent / "data" / "drafts.sqlite3",
+                owner_blog=getattr(tumblr_reader,"blog",None))
             adapters={"analytics": analytics}
             if telegram_adapter is None:
                 from tumblrkit.telegram_bridge_client import telegram_owner_from_env
