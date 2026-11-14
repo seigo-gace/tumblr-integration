@@ -1,6 +1,7 @@
 """Real owner-only analytics over the *existing* Discovery/Library SQLite state.
 
-Follower observations are read exclusively from persisted OAuth-confirmed snapshots;\nnever infer Tumblr follower counts or GATE conversion.
+Follower observations are read exclusively from persisted OAuth-confirmed snapshots;
+never infer Tumblr follower counts or GATE conversion.
 Only observed, already persisted candidate and Library state is reported.
 """
 import time
@@ -27,7 +28,8 @@ class AnalyticsAdapter:
         # campaign totals remain unmeasured, never guessed from Discovery.
         if campaign_db is not None and campaign_db_path is not None:
             raise ValueError('analytics_campaign_source_ambiguous')
-        self.owner_blog = owner_blog\n        self.campaign_db = campaign_db
+        self.owner_blog = owner_blog
+        self.campaign_db = campaign_db
         self.campaign_db_path = Path(campaign_db_path) if campaign_db_path is not None else None
 
     def perform(self, action, target, payload):
