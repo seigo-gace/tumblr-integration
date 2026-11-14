@@ -77,7 +77,8 @@ class LocalTelegramOwner:
                 raise ValueError("announcement_text_required")
             if not isinstance(operation, str) or not operation:
                 raise ValueError("announcement_operation_key_required")
-            cm_selection = registry.select_for_operation(target, operation) if registry else []
+            cm_selection = (registry.select_for_operation(target, operation)
+                            if registry and payload.get("cm_disabled") is not True else [])
             cm_rows = append_cm_buttons([], cm_selection) if cm_selection else []
             # Existing MPB operation ledger is the recovery source. Check it
             # first, so a retry after a lost response only reads the post.
