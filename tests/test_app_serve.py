@@ -207,6 +207,35 @@ class AppServeTests(unittest.TestCase):
             self.assertEqual(status,409,raw)
             self.assertIn(b"analytics_oauth_not_connected",raw)
 
+    def test_owner_notification_view_is_local_and_not_delivered(self):
+        release=build_release(APP,self.tmp,SHA_A)
+        with AppServer(release,TOKEN) as server:
+            base=f"http://127.0.0.1:{server.port}"
+            from tumblrkit.core import connect
+            from tumblrkit.campaign_runtime import CampaignContest
+            from contextlib import closing
+            dbpath=str(server.httpd.draft_store.path)
+            with closing(connect(dbpath)) as db:
+                clock=[1000]
+                manager=CampaignContest(
+                    db,clock=lambda:clock[0],eligibility=lambda *_:True)
+                manager.create("local-notice","Prize",deadline=1100,winners=1)
+                manager.enter("local-notice","42")
+                clock[0]=1100
+                manager.draw("local-notice")
+            payload={"action":"notices","campaign_id":"local-notice"}
+            status,raw,_=fetch(base+"/campaigns",TOKEN,method="POST",
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type":"application/json"})
+            self.assertEqual(status,200,raw)
+            notices=json.loads(raw)["notices"]
+            self.assertEqual(len(notices),1)
+            self.assertEqual(notices[0]["state"],"pending")
+            self.assertIsNone(notices[0]["message_ref"])
+            self.assertEqual(fetch(base+"/campaigns",method="POST",
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type":"application/json"})[0],401)
+
     def test_owner_campaign_and_referral_use_existing_verified_gate_adapter(self):
         release=build_release(APP,self.tmp,SHA_A)
         class ExistingGate:
