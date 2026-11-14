@@ -185,9 +185,9 @@ class SafeImageDownloader(SafeDownloader):
 def _image_extension(path):
     with open(path,"rb") as source:
         head=source.read(16)
-    if head.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
         return ".png"
-    if head[:3]==b"\\xff\\xd8\\xff":
+    if head[:3]==b"\xff\xd8\xff":
         return ".jpg"
     if head[:6] in (b"GIF87a",b"GIF89a"):
         return ".gif"
