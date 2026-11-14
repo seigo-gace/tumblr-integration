@@ -50,7 +50,6 @@ class ScheduledPublisher:
         schedule_id=uuid.uuid4().hex
         now=int(self.clock())
         with closing(self.drafts._connect()) as db:
-            db.execute(SCHEMA)
             db.execute("BEGIN IMMEDIATE")
             try:
                 row=db.execute("SELECT text FROM operation_drafts WHERE id=?",
