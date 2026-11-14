@@ -884,7 +884,7 @@
     }
     const items=[
       {goal:"キャンペーン",heading:"キャンペーン管理",endpoint:"/campaigns",
-       actions:["list","create","enter","entries","outcomes","notices","prepare_notices","reschedule","draw","promote","close"]},
+       actions:["list","create","enter","entries","outcomes","notices","reschedule","draw","promote","close"]},
       {goal:"紹介",heading:"紹介管理",endpoint:"/referrals",
        actions:["issue","confirm","report","revoke"]},
     ];
@@ -902,7 +902,7 @@
         const opt=document.createElement("option");opt.value=action;
         opt.textContent=({
           list:"一覧",create:"新規作成",enter:"GATE確認済み応募を登録",entries:"応募者を見る",
-          outcomes:"抽選結果を見る",notices:"通知結果を確認",prepare_notices:"当落通知を台帳に準備",reschedule:"締切を変更",
+          outcomes:"抽選結果を見る",notices:"通知台帳を確認",reschedule:"締切を変更",
           draw:"抽選を実行",promote:"期限切れ・繰上り",close:"企画を終了",
           issue:"紹介コードを発行",confirm:"GATE確認済み紹介を記録",report:"紹介実績を見る",revoke:"紹介を停止"
         })[action]||action;selector.appendChild(opt);
