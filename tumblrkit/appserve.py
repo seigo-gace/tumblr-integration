@@ -727,10 +727,8 @@ class _Handler(BaseHTTPRequestHandler):
                         response={"entries":owner.entries(data["campaign_id"])}
                     elif action=="outcomes" and set(data)=={"action","campaign_id"}:
                         response={"outcomes":owner.outcomes(data["campaign_id"])}
-                    elif action=="prepare_notices" and set(data)=={"action","campaign_id"}:
-                        response=owner.prepare_notifications(data["campaign_id"])
                     elif action=="notices" and set(data)=={"action","campaign_id"}:
-                        response={"notices":owner.pending_notifications(data["campaign_id"])}
+                        response={"notices":owner.notification_history(data["campaign_id"])}
                     elif action=="promote" and set(data)=={"action","campaign_id"}:
                         response={"promoted":owner.promote_expired(data["campaign_id"])}
                     elif action=="close" and set(data)=={"action","campaign_id"}:
