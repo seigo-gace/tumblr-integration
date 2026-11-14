@@ -1156,6 +1156,7 @@ class _Handler(BaseHTTPRequestHandler):
             goals=payload.get("goals", []),
             selected_action=payload.get("selected_action"),
             selected_target=payload.get("selected_target"),
+            catalog_action=payload.get("catalog_action"),
         ))
 
 
