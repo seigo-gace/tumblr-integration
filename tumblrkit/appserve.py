@@ -660,6 +660,12 @@ class _Handler(BaseHTTPRequestHandler):
                         response={"campaign_id":result.campaign_id,"commitment":result.commitment,
                                   "winners":list(result.winners),"participants":result.participants,
                                   "winner_count":result.winner_count}
+                    elif action=="reschedule" and set(data)=={"action","campaign_id","deadline"}:
+                        response=owner.change_deadline(data["campaign_id"],data["deadline"])
+                    elif action=="entries" and set(data)=={"action","campaign_id"}:
+                        response={"entries":owner.entries(data["campaign_id"])}
+                    elif action=="outcomes" and set(data)=={"action","campaign_id"}:
+                        response={"outcomes":owner.outcomes(data["campaign_id"])}
                     elif action=="promote" and set(data)=={"action","campaign_id"}:
                         response={"promoted":owner.promote_expired(data["campaign_id"])}
                     elif action=="close" and set(data)=={"action","campaign_id"}:
