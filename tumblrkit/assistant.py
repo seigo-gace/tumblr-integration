@@ -471,7 +471,7 @@ class Assistant:
                 cm_preview = getattr(self.bridge.adapters.get("telegram"), "preview_cm", None)
                 if callable(cm_preview):
                     try:
-                        cm_items = cm_preview(target)
+                        cm_items = cm_preview(target, request_id)
                     except (ValueError, OSError, sqlite3.Error):
                         return self._pack("failed",
                             "CM台帳を確認できません。投稿前の確認を行っていません。",
