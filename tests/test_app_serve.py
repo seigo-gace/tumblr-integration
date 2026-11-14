@@ -95,6 +95,37 @@ class AppServeTests(unittest.TestCase):
             status, _, _ = fetch(base + "/styles.css?token=" + TOKEN)
             self.assertEqual(status, 400)
 
+    def test_owner_campaign_management_uses_existing_private_db(self):
+        release=build_release(APP, self.tmp, SHA_A)
+        with AppServer(release,TOKEN) as server:
+            base=f"http://127.0.0.1:{server.port}"
+            self.assertEqual(fetch(base+"/campaigns")[0],401)
+            payload={"action":"create","campaign_id":"cm-campaign",
+                     "prize":"景品","deadline":4_000_000_000,
+                     "winners":1,"claim_seconds":3600}
+            status,raw,_=fetch(
+                base+"/campaigns",TOKEN,method="POST",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type":"application/json"})
+            self.assertEqual(status,200,raw)
+            self.assertIn("seed_commitment",json.loads(raw))
+            status,raw,_=fetch(base+"/campaigns",TOKEN)
+            self.assertEqual(status,200,raw)
+            record=json.loads(raw)["campaigns"]
+            self.assertEqual(record[0]["campaign_id"],"cm-campaign")
+            self.assertNotIn("seed",record[0])
+            self.assertEqual(record[0]["entries"],0)
+            self.assertTrue((self.tmp/"data"/"drafts.sqlite3").is_file())
+            status,_,_=fetch(base+"/campaigns",method="POST",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type":"application/json"})
+            self.assertEqual(status,401)
+            status,_,_=fetch(base+"/campaigns",TOKEN,method="POST",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type":"application/json",
+                         "Origin":"https://forged.example"})
+            self.assertEqual(status,403)
+
     def test_session_cookie_opens_the_screen_once(self):
         build_release(APP, self.tmp, SHA_A)
         with AppServer(self.tmp / "current", TOKEN) as server:
