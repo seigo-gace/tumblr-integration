@@ -241,6 +241,22 @@ class CampaignContest:
             return "already_closed"
         raise ValueError("campaign_not_drawn")
 
+    def list_campaigns(self):
+        """Owner-only management data; never expose the private draw seed."""
+        rows = self.db.execute(
+            "SELECT c.campaign_id,c.prize,c.deadline,c.winner_count,"
+            "c.claim_seconds,c.seed_commitment,c.state,"
+            "(SELECT COUNT(*) FROM campaign_entries e "
+            "WHERE e.campaign_id=c.campaign_id) "
+            "FROM campaign_contests c ORDER BY c.deadline,c.campaign_id"
+        ).fetchall()
+        return [
+            {"campaign_id":r[0],"prize":r[1],"deadline":r[2],
+             "winner_count":r[3],"claim_seconds":r[4],
+             "commitment":r[5],"state":r[6],"entries":r[7]}
+            for r in rows
+        ]
+
     def outcomes(self,campaign_id):
         self._ident(campaign_id)
         return [dict(applicant_id=r[0],state=r[1],event_id=r[2])
