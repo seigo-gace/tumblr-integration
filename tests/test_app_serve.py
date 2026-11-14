@@ -173,7 +173,7 @@ class AppServeTests(unittest.TestCase):
             base=f"http://127.0.0.1:{server.port}"
             ident="a"*32
             output=server.httpd.media_save.root/(ident+".png")
-            output.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n"+b"image-only")
+            output.write_bytes(b"\x89PNG\r\n\x1a\n"+b"image-only")
             output.chmod(0o600)
             class ExistingMedia:
                 def file(self,job_id):
@@ -186,7 +186,7 @@ class AppServeTests(unittest.TestCase):
             self.assertEqual(status,200)
             self.assertEqual(headers["Content-Type"],"image/png")
             self.assertIn(ident+".png",headers["Content-Disposition"])
-            self.assertTrue(body.startswith(b"\\x89PNG"))
+            self.assertTrue(body.startswith(b"\x89PNG"))
 
     def test_follower_history_and_snapshot_require_owner_oauth(self):
         release=build_release(APP,self.tmp,SHA_A)
