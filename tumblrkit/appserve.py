@@ -697,7 +697,7 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 from contextlib import closing
                 from tumblrkit.core import connect as campaign_connect
-                from tumblrkit.campaign_runtime import CampaignContest
+                from tumblrkit.campaign_runtime import CampaignContest, GateEligibility
                 if self.headers.get("Content-Type","").split(";",1)[0].strip().lower()!="application/json":
                     raise ValueError("campaign_request_invalid")
                 data=json.loads(self._read_body(4096).decode("utf-8"))
