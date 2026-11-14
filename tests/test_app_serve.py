@@ -95,6 +95,35 @@ class AppServeTests(unittest.TestCase):
             status, _, _ = fetch(base + "/styles.css?token=" + TOKEN)
             self.assertEqual(status, 400)
 
+    def test_owner_referral_management_never_issues_public_join_url(self):
+        release=build_release(APP,self.tmp,SHA_A)
+        with AppServer(release,TOKEN) as server:
+            base=f"http://127.0.0.1:{server.port}"
+            from tumblrkit.core import connect,create_campaign
+            from contextlib import closing
+            with closing(connect(str(server.httpd.draft_store.path))) as db:
+                create_campaign(db,"recruit","Campaign",{})
+            request={"action":"issue","campaign_id":"recruit","referrer_id":"alice"}
+            self.assertEqual(fetch(base+"/referrals",method="POST",
+                                   data=json.dumps(request).encode(),
+                                   headers={"Content-Type":"application/json"})[0],401)
+            def submit(body):
+                return fetch(base+"/referrals",TOKEN,method="POST",
+                             data=json.dumps(body).encode(),
+                             headers={"Content-Type":"application/json"})
+            status,raw,_=submit(request)
+            self.assertEqual(status,200,raw)
+            result=json.loads(raw)
+            self.assertTrue(result["referral_code"])
+            self.assertNotIn("url",result)
+            status,raw,_=submit({"action":"report","campaign_id":"recruit"})
+            self.assertEqual(status,200,raw)
+            self.assertEqual(json.loads(raw)["referrers"][0]["verified_members"],0)
+            status,raw,_=submit({"action":"revoke","campaign_id":"recruit","referrer_id":"alice"})
+            self.assertEqual(status,200,raw)
+            self.assertEqual(json.loads(raw)["state"],"revoked")
+            self.assertEqual(submit(request)[0],400)
+
     def test_owner_schedules_existing_draft_without_provider_call(self):
         import time
         release=build_release(APP,self.tmp,SHA_A)
