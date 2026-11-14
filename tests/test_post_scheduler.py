@@ -91,6 +91,43 @@ class ScheduledPublisherTests(unittest.TestCase):
                          lambda:self.now).dispatch_due()["state"],"idle")
         self.assertEqual(self.owner.list()[0]["state"],"needs_reconcile")
 
+    def test_uncertain_schedule_reconciles_by_readback_without_reposting(self):
+        class ReadbackPublisher(FakePublisher):
+            def __init__(self):
+                super().__init__()
+                self.readbacks=[]
+            def reconcile_published_draft(self,draft_id):
+                self.readbacks.append(draft_id)
+                return {"verified":True,"provider_post_id":"987"}
+        first=FakePublisher(False)
+        self.owner.publisher=first
+        item=self.owner.queue(self.draft["id"],1200,self.digest)
+        self.now=1201
+        self.assertEqual(self.owner.dispatch_due()["state"],"needs_reconcile")
+        self.assertEqual(len(first.calls),1)
+        recovery=ReadbackPublisher()
+        reopened=ScheduledPublisher(self.drafts,recovery,lambda:self.now)
+        result=reopened.reconcile(item["schedule_id"])
+        self.assertEqual(result["state"],"verified")
+        self.assertEqual(recovery.readbacks,[self.draft["id"]])
+        self.assertEqual(recovery.calls,[])
+        self.assertEqual(reopened.list()[0]["provider_post_id"],"987")
+        self.assertEqual(reopened.dispatch_due()["state"],"idle")
+        with self.assertRaisesRegex(ValueError,"schedule_not_reconcilable"):
+            reopened.reconcile(item["schedule_id"])
+
+    def test_unknown_schedule_cannot_claim_success_from_unverified_readback(self):
+        class Unverified(FakePublisher):
+            def reconcile_published_draft(self,draft_id):
+                return {"verified":False,"provider_post_id":"987"}
+        self.owner.publisher=FakePublisher(False)
+        item=self.owner.queue(self.draft["id"],1200,self.digest)
+        self.now=1201
+        self.owner.dispatch_due()
+        reopened=ScheduledPublisher(self.drafts,Unverified(),lambda:self.now)
+        self.assertEqual(reopened.reconcile(item["schedule_id"])["state"],"needs_reconcile")
+        self.assertEqual(reopened.list()[0]["state"],"needs_reconcile")
+
     def test_scheduling_needs_exact_draft_digest(self):
         with self.assertRaisesRegex(ValueError,"schedule_draft_changed"):
             self.owner.queue(self.draft["id"],1200,"a"*64)
