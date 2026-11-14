@@ -82,6 +82,23 @@ class CMOwnerDeliveryTests(unittest.TestCase):
                 "100", "persistent-op", ["persisted"]))
         self.assertEqual(calls[1]["cm_buttons"][0][0]["text"], "PR / 永続CM")
 
+    def test_preview_and_publish_keep_original_selection_after_other_post(self):
+        original = self.cm.select_for_operation("100", "later")
+        first = self.cm.select_for_operation("100", "earlier")
+        self.cm.advance_after_delivery(
+            "100", "earlier", [x["id"] for x in first], verified=True)
+        self.assertEqual(self.cm.select_for_operation("100", "later"), original)
+        self.assertTrue(self.cm.advance_after_delivery(
+            "100", "later", [x["id"] for x in original], verified=True))
+        self.assertEqual([x["id"] for x in self.cm.select("100")],
+                         ["c2", "c3", "c0"])
+
+    def test_stopped_cm_cannot_be_published_from_old_preview(self):
+        self.cm.select_for_operation("100", "stale")
+        self.cm.set_enabled("c0", False)
+        with self.assertRaisesRegex(ValueError, "cm_selection_stale"):
+            self.cm.select_for_operation("100", "stale")
+
     def test_missing_keyboard_does_not_claim_success_or_advance(self):
         result = self.deliver(keyboard=False)
         self.assertEqual(result.state, "unverified")
