@@ -413,7 +413,7 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             try:
                 from tumblrkit.core import connect as campaign_connect
-                from tumblrkit.campaign_runtime import CampaignContest
+                from tumblrkit.campaign_runtime import CampaignContest, GateEligibility
                 from contextlib import closing
                 with closing(campaign_connect(str(self.server.draft_store.path))) as db:
                     campaigns = CampaignContest(db).list_campaigns()
@@ -656,19 +656,23 @@ class _Handler(BaseHTTPRequestHandler):
                 from contextlib import closing
                 from tumblrkit.core import connect as campaign_connect
                 from tumblrkit.referral_runtime import ReferralManager
+                from tumblrkit.campaign_runtime import GateEligibility
                 if self.headers.get("Content-Type","").split(";",1)[0].strip().lower()!="application/json":
                     raise ValueError("referral_request_invalid")
                 data=json.loads(self._read_body(4096).decode("utf-8"))
                 if not isinstance(data,dict):
                     raise ValueError("referral_request_invalid")
                 with closing(campaign_connect(str(self.server.draft_store.path))) as db:
-                    owner=ReferralManager(db)
+                    gate=GateEligibility(db,self.server.assistant.bridge.adapters.get("telegram"))
+                    owner=ReferralManager(db,gate=gate)
                     if data.get("action")=="issue" and set(data)=={"action","campaign_id","referrer_id"}:
                         response=owner.issue(data["campaign_id"],data["referrer_id"])
                     elif data.get("action")=="revoke" and set(data)=={"action","campaign_id","referrer_id"}:
                         response={"state":owner.revoke(data["campaign_id"],data["referrer_id"])}
                     elif data.get("action")=="report" and set(data)=={"action","campaign_id"}:
                         response=owner.report(data["campaign_id"])
+                    elif data.get("action")=="confirm" and set(data)=={"action","campaign_id","member_id","referral_code"}:
+                        response=owner.confirm(data["campaign_id"],data["member_id"],data["referral_code"])
                     else:
                         raise ValueError("referral_request_invalid")
             except (ValueError,TypeError,UnicodeError,json.JSONDecodeError) as exc:
@@ -698,11 +702,17 @@ class _Handler(BaseHTTPRequestHandler):
                     raise ValueError("campaign_request_invalid")
                 action=data["action"]
                 with closing(campaign_connect(str(self.server.draft_store.path))) as db:
-                    owner=CampaignContest(db)
-                    if action=="create" and set(data)=={"action","campaign_id","prize","deadline","winners","claim_seconds"}:
+                    gate=GateEligibility(db,self.server.assistant.bridge.adapters.get("telegram"))
+                    owner=CampaignContest(db,eligibility=gate)
+                    create_fields={"action","campaign_id","prize","deadline","winners","claim_seconds"}
+                    if action=="create" and (set(data)==create_fields or
+                                            set(data)==create_fields|{"gate_topic_id"}):
                         response=owner.create(data["campaign_id"],data["prize"],
                                               deadline=data["deadline"],winners=data["winners"],
-                                              claim_seconds=data["claim_seconds"])
+                                              claim_seconds=data["claim_seconds"],
+                                              gate_topic_id=data.get("gate_topic_id"))
+                    elif action=="enter" and set(data)=={"action","campaign_id","applicant_id"}:
+                        response={"state":owner.enter(data["campaign_id"],data["applicant_id"])}
                     elif action=="draw" and set(data)=={"action","campaign_id"}:
                         result=owner.draw(data["campaign_id"])
                         response={"campaign_id":result.campaign_id,"commitment":result.commitment,
