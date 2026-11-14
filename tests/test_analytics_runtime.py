@@ -145,6 +145,29 @@ class AnalyticsRuntimeTests(unittest.TestCase):
             adapter.perform("analytics.get_summary", "all", {})
         self.assertFalse(missing.exists())
 
+    def test_verified_follower_snapshot_appears_in_summary_only_for_owner(self):
+        from tumblrkit.follower_analytics import FollowerAnalytics
+        class LocalTransport:
+            def get(self,path,token):
+                self_request=(path,token)
+                assert self_request==("/v2/user/info","offline-token")
+                return {"meta":{"status":200},"response":{"user":{"blogs":[
+                    {"name":"owner","followers":42}]}}}
+        class Owner:
+            blog="owner"
+            transport=LocalTransport()
+            token_provider=lambda self:"offline-token"
+        follower=FollowerAnalytics(Owner(),self.store,clock=lambda:self.now)
+        self.assertTrue(follower.snapshot()["verified"])
+        report=AnalyticsAdapter(self.store,clock=lambda:self.now,owner_blog="owner").perform(
+            "analytics.get_summary","week",{})
+        self.assertEqual(report["rows"][-1]["value"],42)
+        self.assertNotIn("Tumblrフォロワー数",report["not_measured"])
+        unrelated=AnalyticsAdapter(self.store,clock=lambda:self.now,owner_blog="other").perform(
+            "analytics.get_summary","week",{})
+        self.assertEqual(len(unrelated["rows"]),8)
+        self.assertIn("Tumblrフォロワー数",unrelated["not_measured"])
+
     def test_partial_campaign_schema_does_not_fabricate_zeroes(self):
         db=connect(str(self.folder/"campaign-missing.sqlite3"))
         self.addCleanup(db.close)
