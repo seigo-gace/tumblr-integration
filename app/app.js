@@ -1199,6 +1199,27 @@
           });
           wrapper.append(input,change,cancel);
         }
+        if(entry.state==="needs_reconcile"||entry.state==="sending"){
+          const reconcile=document.createElement("button");
+          reconcile.type="button";
+          reconcile.textContent="投稿結果を確認（再投稿しない）";
+          reconcile.addEventListener("click",async function(){
+            reconcile.disabled=true;
+            try{
+              const result=await draftRequest("/schedules","POST",{
+                action:"reconcile",schedule_id:entry.schedule_id});
+              if(result.state==="verified"){
+                display("既存の投稿IDとの読戻しを確認しました。再投稿はしていません。","system");
+                refreshDrafts();
+              }else{
+                display("投稿結果を確定できません。重複投稿防止のため再送しません。","system");
+              }
+            }catch(error){
+              display("照合できませんでした。元の予約と投稿台帳は保持しています。","system");
+            }finally{reconcile.disabled=false;}
+          });
+          wrapper.appendChild(reconcile);
+        }
         section.appendChild(wrapper);
       });
       draftList.appendChild(section);
