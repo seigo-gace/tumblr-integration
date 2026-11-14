@@ -119,7 +119,10 @@ class ScheduledPublisher:
 
     def dispatch_due(self):
         """Send one due item, once; must be called by the adopted owner runner."""
-        if self.publisher is None:
+        publisher = self.publisher
+        if publisher is not None and not hasattr(publisher,"perform") and callable(publisher):
+            publisher = publisher()
+        if publisher is None:
             return {"state":"not_connected"}
         now=int(self.clock())
         with closing(self.drafts._connect()) as db:
@@ -150,7 +153,7 @@ class ScheduledPublisher:
                 raise
         # No automatic retry even if the provider threw before returning.
         try:
-            result=self.publisher.perform(
+            result=publisher.perform(
                 "tumblr.publish_draft",draft_id,{"expected_digest":digest})
             verified=isinstance(result,dict) and result.get("verified") is True
             post_id=result.get("provider_post_id") if verified else None
