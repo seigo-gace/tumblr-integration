@@ -21,7 +21,7 @@ class TelegramOwnerBridgeTests(unittest.TestCase):
         if payload["action"] == "lookup":
             return {"ok": True, "verified": False}
         if payload["action"] == "readback":
-            return {"ok": True, "verified": True}
+            return {"ok": True, "verified": True, "inline_keyboard": []}
         return {"ok": True, "verified": True, "message_id": "987"}
 
     def test_existing_member_and_post_use_one_owner_connection(self):
@@ -88,7 +88,7 @@ class TelegramOwnerBridgeTests(unittest.TestCase):
             if payload["action"] == "lookup":
                 return {"ok": True, "verified": True, "message_id": "321"}
             if payload["action"] == "readback":
-                return {"ok": True, "verified": True}
+                return {"ok": True, "verified": True, "inline_keyboard": []}
             self.fail("publish called for an already-delivered operation")
         owner = LocalTelegramOwner(self.key, transport=transport)
         result = Bridge({"telegram": owner}).dispatch(
