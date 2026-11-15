@@ -182,7 +182,7 @@ class AppServeTests(unittest.TestCase):
                 base=f"http://127.0.0.1:{server.port}"
                 keyboard=[[{"text":"応募","url":"https://example.org/entry"}]]
                 data={"selected_action":"telegram.publish_announcement",
-                      "selected_target":"100","message":"告知 対象: 100\\n本文: お知らせ",
+                      "selected_target":"100","message":"告知 対象: 100\n本文: お知らせ",
                       "existing_buttons":keyboard}
                 headers={"Content-Type":"application/json"}
                 status,raw,_=fetch(base+"/assistant",TOKEN,method="POST",
