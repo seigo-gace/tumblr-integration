@@ -31,7 +31,7 @@ class CMOwnerDeliveryTests(unittest.TestCase):
             if payload["action"] == "readback":
                 rows = next(v["cm_buttons"] for v in self.requests if v["action"] == "publish")
                 return {"verified": receipt_verified,
-                        "inline_keyboard": [[{"text": "既存", "callback_data": "go"}]] + rows if keyboard else []}
+                        "inline_keyboard": rows if keyboard else []}
             raise AssertionError(payload)
         owner = LocalTelegramOwner(self.token, transport=transport, cm_registry=self.cm)
         return Bridge({"telegram": owner}).dispatch(
