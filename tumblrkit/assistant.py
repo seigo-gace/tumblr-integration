@@ -472,8 +472,10 @@ class Assistant:
                 return self._pack("not_connected",
                     "Telegram投稿先との接続がありません。まだ送信していません。",
                     False,recovery=True,action=action,provider=provider)
+            # CMなし/CM非表示 are owner control lines, never published body.
+            body_source=re.sub(r"(?m)^\s*CM(?:なし|非表示)\s*$", "", cleaned or "")
             body=re.search(r"(?:^|\n)\s*本文\s*[:：]\s*(.+)\Z",
-                           cleaned or "",flags=re.DOTALL)
+                           body_source,flags=re.DOTALL)
             if not body or not body.group(1).strip():
                 return self._pack("unclear",
                     "告知する本文を入力してください。例：告知 対象: 投稿先\n本文: 告知内容",
