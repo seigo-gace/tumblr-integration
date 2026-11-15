@@ -126,8 +126,13 @@ class CMRegistry:
                           if item["enabled"] and
                           (item["destination"] is None or item["destination"] == destination)}
                 if items and isinstance(items[0], str):
+                    # Legacy snapshots must not silently lose a disabled ID.
+                    # Publishing a shortened footer would differ from the
+                    # originally approved preview.
+                    if any(item not in active for item in items):
+                        raise ValueError("cm_selection_stale")
                     items = [{"id": item, "label": active[item]["label"],
-                              "url": active[item]["url"]} for item in items if item in active]
+                              "url": active[item]["url"]} for item in items]
                 if any(item["id"] not in active or
                        active[item["id"]]["label"] != item["label"] or
                        active[item["id"]]["url"] != item["url"] for item in items):
