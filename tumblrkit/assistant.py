@@ -271,7 +271,8 @@ class Assistant:
         return providers_from_env(os.environ, self.transport)
 
     def turn(self, message="", confirm=False, request_id=None, draft=False, abort=False,
-             goals=None, selected_action=None, selected_target=None, catalog_action=None):
+             goals=None, selected_action=None, selected_target=None, catalog_action=None,
+             existing_buttons=None):
         if abort:
             self.pending.clear()
             return self._pack("aborted", "中断しました。実行していません。", False)
@@ -311,6 +312,9 @@ class Assistant:
             # Reuse exact selected action gate (same target constraints).
             return self.turn(message="",goals=goals,
                              selected_action=action,selected_target=target)
+        if existing_buttons is not None and selected_action!="telegram.publish_announcement":
+            return self._pack("invalid_tool",
+                "既存ボタンはTelegram告知の投稿確認だけに指定できます。",False,recovery=True)
         if selected_action is not None:
             saved_discovery=(selected_action=="tumblr.discover" and
                              isinstance(selected_target,str) and
@@ -324,7 +328,8 @@ class Assistant:
                 return self._pack("invalid_tool","未登録の操作または不正な対象を拒否しました。実行していません。",False,recovery=True)
             return self._propose(selected_action,selected_target,
                                  message if selected_action=="telegram.publish_announcement" else "",
-                                 "", "", "owner_selected",ai=False)
+                                 "", "", "owner_selected",ai=False,
+                                 existing_buttons=existing_buttons)
         text = (message or "").strip()
         if not text and not goals:
             return self._pack("unclear", "やりたいことを一文で書いてください。実行していません。", False, recovery=True)
@@ -437,7 +442,7 @@ class Assistant:
         target = TARGET.search(cleaned)
         return self._propose(local[0], target.group(1) if target else "", cleaned, omitted, question, "none", ai=False)
 
-    def _propose(self, action, target, cleaned, omitted, question, provider, ai):
+    def _propose(self, action, target, cleaned, omitted, question, provider, ai, existing_buttons=None):
         if not target:
             text = "対象が不足しています。対象: 名前 の形で教えてください。実行していません。"
             return self._pack("unclear", text + omitted, False, recovery=True, provider=provider, action=action)
@@ -478,12 +483,25 @@ class Assistant:
             label = "AIの提案" if ai else "既存ツール索引の候補であり、AIの判断ではありません"
             text = label + "。プレビュー: " + action + " を " + target + " に対して行う操作です。まだ実行していません。"
             expected_digest=None
+            preserved_buttons = []
+            if action=="telegram.publish_announcement" and existing_buttons is not None:
+                from tumblrkit.cm_links import validate_existing_url_buttons
+                try:
+                    preserved_buttons = validate_existing_url_buttons(existing_buttons)
+                except ValueError:
+                    return self._pack("invalid_tool",
+                        "既存ボタンのURLまたは配置が不正です。投稿していません。",
+                        False,recovery=True)
             cm_disabled = (action=="telegram.publish_announcement" and
                            re.search(r"(?m)^\s*CM(?:なし|非表示)\s*$", cleaned or "") is not None)
             if action=="telegram.publish_announcement":
                 expected_digest=body.group(1).strip()
                 text=("Telegram告知の投稿前確認。\n投稿先："+target+
                       "\n本文：\n"+expected_digest+"\n確認後、既存MPBで投稿します。")
+                if preserved_buttons:
+                    text += "\n既存のURLボタン（順序保持）：\n" + "\n".join(
+                        " / ".join(button["text"] for button in row)
+                        for row in preserved_buttons)
                 cm_preview = getattr(self.bridge.adapters.get("telegram"), "preview_cm", None)
                 if cm_disabled:
                     text += "\n掲載予定CM：なし（指定により非表示）"
@@ -537,7 +555,7 @@ class Assistant:
                           "\n投稿ID："+intent["post_id"]+
                           "\n現在の本文：\n"+intent["current_text"]+
                           "\n削除後は元へ戻せません。確認まで実行しません。")
-            self.pending[request_id] = (action, target, expected_digest, cm_disabled)
+            self.pending[request_id] = (action, target, expected_digest, cm_disabled, preserved_buttons)
             return self._pack("confirmation_required", text + omitted + question, False, request_id=request_id, action=action, provider=provider)
         result = self.bridge.dispatch(ActionRequest(uuid.uuid4().hex, action, target))
         return self._from_bridge(result, provider)
@@ -546,7 +564,7 @@ class Assistant:
         item = self.pending.get(request_id or "")
         if not item:
             return self._pack("failed", "確認できる提案がありません。実行していません。", False, recovery=True)
-        action, target, expected_digest, cm_disabled = item
+        action, target, expected_digest, cm_disabled, preserved_buttons = item
         if action=="tumblr.publish_draft":
             tumblr=self.bridge.adapters.get("tumblr")
             publisher=getattr(tumblr,"publisher",None)
@@ -565,6 +583,8 @@ class Assistant:
             "tumblr.publish_draft","tumblr.edit_post","tumblr.delete_post") else {}
         if action=="telegram.publish_announcement":
             payload={"text":expected_digest}
+            if preserved_buttons:
+                payload["buttons"] = preserved_buttons
             if cm_disabled:
                 payload["cm_disabled"] = True
         if action in ("tumblr.edit_post","tumblr.delete_post"):
