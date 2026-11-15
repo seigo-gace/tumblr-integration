@@ -1172,6 +1172,7 @@ class _Handler(BaseHTTPRequestHandler):
             selected_action=payload.get("selected_action"),
             selected_target=payload.get("selected_target"),
             catalog_action=payload.get("catalog_action"),
+            existing_buttons=payload.get("existing_buttons"),
         ))
 
 
