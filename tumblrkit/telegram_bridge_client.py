@@ -119,10 +119,11 @@ class LocalTelegramOwner:
             except (OSError, ValueError, TypeError, KeyError):
                 return {"verified": False, "status": "unverified", "reference": message}
             verified = isinstance(receipt, dict) and receipt.get("verified") is True
-            if verified and expected_rows:
+            if verified:
                 keyboard = receipt.get("inline_keyboard")
-                # Readback must prove both original rows and the CM suffix,
-                # in exactly the order approved for this operation.
+                # Empty means no buttons were approved. Verify their absence
+                # too: CMなし must not be reported as successful if the
+                # provider unexpectedly attached any keyboard.
                 verified = isinstance(keyboard, list) and keyboard == expected_rows
             if verified and cm_rows:
                 try:
