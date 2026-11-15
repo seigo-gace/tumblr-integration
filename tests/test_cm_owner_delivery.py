@@ -99,6 +99,17 @@ class CMOwnerDeliveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "cm_selection_stale"):
             self.cm.select_for_operation("100", "stale")
 
+    def test_stopped_legacy_id_does_not_disappear_from_approved_footer(self):
+        # Historical owner tables stored pinned IDs rather than snapshots.
+        self.db.execute(
+            "INSERT INTO cm_operation_choices(operation_key,destination,chosen_ids) "
+            "VALUES(?,?,?)",("legacy-operation","100",'["c0","c1"]'))
+        self.db.commit()
+        self.cm.set_enabled("c0",False)
+        with self.assertRaisesRegex(ValueError,"cm_selection_stale"):
+            self.cm.select_for_operation("100","legacy-operation")
+        self.assertFalse(self.cm.is_advanced("100","legacy-operation",["c0","c1"]))
+
     def test_explicit_cm_disabled_keeps_existing_text_only_delivery(self):
         calls = []
         def transport(payload):
