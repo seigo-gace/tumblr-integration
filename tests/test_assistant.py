@@ -161,6 +161,12 @@ class AssistantTests(unittest.TestCase):
         result = assistant.turn(confirm=True, request_id=preview["request_id"])
         self.assertEqual(result["state"], "completed")
         self.assertTrue(owner.calls[0][2]["cm_disabled"])
+        self.assertEqual(owner.calls[0][2]["text"],"テスト")
+        after_body=assistant.turn("告知 対象: 100\\n本文: 追加説明\\nCM非表示")
+        self.assertEqual(after_body["state"],"confirmation_required")
+        assistant.turn(confirm=True,request_id=after_body["request_id"])
+        self.assertEqual(owner.calls[1][2]["text"],"追加説明")
+        self.assertTrue(owner.calls[1][2]["cm_disabled"])
 
     def test_telegram_announcement_needs_body_and_existing_owner(self):
         class ExistingTelegram:
