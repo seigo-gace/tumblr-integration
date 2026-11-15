@@ -102,6 +102,57 @@ class CampaignRuntimeTests(unittest.TestCase):
             self.owner.dispatch_notification(notice["event_id"],uncertain)
         self.assertEqual(len(uncertain.calls),1)
 
+    def test_notice_reconcile_uses_saved_ref_and_never_sends_again(self):
+        self.owner.enter("launch","alice")
+        self.now=1100
+        self.owner.draw("launch")
+        notice=self.owner.pending_notifications("launch")[0]
+        class Provider:
+            def __init__(self):
+                self.sent=0
+                self.verified=False
+                self.readbacks=0
+            def publish(self,*args):
+                self.sent+=1
+                return {"message_ref":"provider-message-21"}
+            def readback(self,*args):
+                self.readbacks+=1
+                return self.verified
+        provider=Provider()
+        first=self.owner.dispatch_notification(notice["event_id"],provider)
+        self.assertEqual(first["state"],"needs_reconcile")
+        self.assertEqual(provider.sent,1)
+        self.assertEqual(self.owner.reconcile_notification(
+            notice["event_id"],provider)["state"],"needs_reconcile")
+        provider.verified=True
+        confirmed=self.owner.reconcile_notification(notice["event_id"],provider)
+        self.assertEqual(confirmed["state"],"verified")
+        self.assertEqual(provider.sent,1)
+        self.assertEqual(self.owner.notification_history("launch")[0]["state"],"verified")
+        self.assertEqual(self.owner.reconcile_notification(
+            notice["event_id"],provider)["state"],"verified")
+        self.assertEqual(provider.sent,1)
+
+    def test_notice_without_reference_does_not_try_to_publish(self):
+        self.owner.enter("launch","alice")
+        self.now=1100
+        self.owner.draw("launch")
+        notice=self.owner.pending_notifications("launch")[0]
+        class NoReceipt:
+            def __init__(self):self.sends=0
+            def publish(self,*args):
+                self.sends+=1
+                raise TimeoutError("provider may have accepted")
+            def readback(self,*args):raise AssertionError("no reference")
+        provider=NoReceipt()
+        first=self.owner.dispatch_notification(notice["event_id"],provider)
+        self.assertEqual(first["state"],"needs_reconcile")
+        self.assertIsNone(first["message_ref"])
+        recovery=self.owner.reconcile_notification(notice["event_id"],provider)
+        self.assertEqual(recovery["state"],"needs_reconcile")
+        self.assertIsNone(recovery["message_ref"])
+        self.assertEqual(provider.sends,1)
+
     def test_existing_notification_verified_only_after_owner_readback(self):
         self.owner.enter("launch","alice")
         self.now=1100
