@@ -119,7 +119,7 @@ class CMOwnerDeliveryTests(unittest.TestCase):
             if payload["action"] == "publish":
                 return {"verified": True, "message_id": "90"}
             if payload["action"] == "readback":
-                return {"verified": True}
+                return {"verified": True, "inline_keyboard": []}
             raise AssertionError(payload)
         owner = LocalTelegramOwner(self.token, transport=transport,
                                    cm_registry=self.cm)
@@ -184,6 +184,23 @@ class CMOwnerDeliveryTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "cm_url_invalid"):
                     self.cm.add("unsafe", "禁止", url)
         self.assertEqual(len(self.cm.list_links()), 4)
+
+    def test_cm_off_rejects_unexpected_provider_keyboard(self):
+        def transport(payload):
+            if payload["action"]=="lookup":
+                return {"verified":False}
+            if payload["action"]=="publish":
+                return {"verified":True,"message_id":"107"}
+            if payload["action"]=="readback":
+                return {"verified":True,"inline_keyboard":[[
+                    {"text":"PR / 想定外","url":"https://example.org/unexpected"}
+                ]]}
+            raise AssertionError(payload)
+        owner=LocalTelegramOwner(self.token,transport=transport,cm_registry=self.cm)
+        result=owner.perform("telegram.publish_announcement","100",{
+            "text":"本文","operation_key":"cm-off-unexpected","cm_disabled":True})
+        self.assertFalse(result["verified"])
+        self.assertEqual([r["id"] for r in self.cm.select("100")],["c0","c1","c2"])
 
     def test_missing_keyboard_does_not_claim_success_or_advance(self):
         result = self.deliver(keyboard=False)
