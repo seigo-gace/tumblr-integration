@@ -161,10 +161,10 @@ class AppServeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             key=Path(folder)/"cm-owner-key"
             key.write_text("x"*40)
-            db=sqlite3.connect(":memory:")
-            self.addCleanup(db.close)
-            cm=CMRegistry(db)
-            cm.add("sponsor","スポンサー","https://sponsor.example")
+            cm_path=Path(folder)/"owner-drafts.sqlite3"
+            with sqlite3.connect(cm_path) as db:
+                cm=CMRegistry(db)
+                cm.add("sponsor","スポンサー","https://sponsor.example")
             calls=[]
             def transport(data):
                 calls.append(data)
@@ -175,7 +175,7 @@ class AppServeTests(unittest.TestCase):
                     return {"verified":True,"inline_keyboard":
                             recorded.get("buttons",[])+recorded.get("cm_buttons",[])}
                 raise AssertionError(data)
-            owner=LocalTelegramOwner(key,transport=transport,cm_registry=cm)
+            owner=LocalTelegramOwner(key,transport=transport,cm_store_path=cm_path)
             assistant=Assistant(bridge=Bridge({"telegram":owner}),providers=[])
             release=build_release(APP,self.tmp,SHA_A)
             with AppServer(release,TOKEN,assistant=assistant) as server:
@@ -199,7 +199,8 @@ class AppServeTests(unittest.TestCase):
                 self.assertEqual(json.loads(raw)["state"],"completed")
                 posted=next(x for x in calls if x["action"]=="publish")
                 self.assertEqual(posted["buttons"],keyboard)
-                self.assertEqual(cm.select("100")[0]["id"],"sponsor")
+                with sqlite3.connect(cm_path) as db:
+                    self.assertEqual(CMRegistry(db).select("100")[0]["id"],"sponsor")
 
     def test_catalog_action_http_cannot_bypass_bridge_confirmation(self):
         class Existing:
