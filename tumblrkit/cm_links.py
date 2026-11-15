@@ -195,6 +195,30 @@ class CMRegistry:
             return bool(ids)
 
 
+def validate_existing_url_buttons(rows):
+    """Owner-submitted URL-only rows; freeze exact order before approval."""
+    if not isinstance(rows,list) or len(rows)>20:
+        raise ValueError("cm_keyboard_invalid")
+    result=[]
+    total=0
+    for row in rows:
+        if not isinstance(row,list) or not 1<=len(row)<=4:
+            raise ValueError("cm_keyboard_invalid")
+        validated=[]
+        for entry in row:
+            total+=1
+            if total>50 or not isinstance(entry,dict) or set(entry)!={"text","url"}:
+                raise ValueError("cm_keyboard_invalid")
+            label,url=entry["text"],entry["url"]
+            if not isinstance(label,str) or not 1<=len(label.strip())<=64:
+                raise ValueError("cm_keyboard_invalid")
+            # Same allowlist as CM; no userinfo/private-host escape.
+            CMRegistry._link(label[:40],url)
+            validated.append({"text":label,"url":url})
+        result.append(validated)
+    return result
+
+
 def append_cm_buttons(existing_rows, selected):
     """Preserve all existing MPB rows, then append at most three PR URL rows."""
     if not isinstance(existing_rows, list) or not isinstance(selected, list):
