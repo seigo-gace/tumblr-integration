@@ -5,6 +5,7 @@ advertising platform, click tracking, or Telegram delivery is created here.
 Only the existing MPB owner may establish a verified delivery.
 """
 import json
+import ipaddress
 from urllib.parse import urlsplit
 
 
@@ -48,10 +49,16 @@ class CMRegistry:
             port = parsed.port
         except ValueError:
             raise ValueError("cm_url_invalid") from None
-        # HTTPS links only. Actual redirect/advertiser policy remains the
-        # Telegram publisher owner's responsibility at publication time.
-        if (parsed.scheme != "https" or not host or parsed.username or
-                parsed.password or port not in (None, 443) or
+        # HTTPS links only. Reject local/IP endpoints before they reach MPB;
+        # redirect destinations and advertiser policies remain publisher-owned.
+        try:
+            ipaddress.ip_address(host or "")
+            literal_ip = True
+        except ValueError:
+            literal_ip = False
+        if (parsed.scheme != "https" or not host or literal_ip or
+                host == "localhost" or host.endswith((".localhost", ".local")) or
+                parsed.username or parsed.password or port not in (None, 443) or
                 any(char.isspace() for char in url)):
             raise ValueError("cm_url_invalid")
         return label.strip(), url
