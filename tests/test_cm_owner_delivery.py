@@ -121,6 +121,50 @@ class CMOwnerDeliveryTests(unittest.TestCase):
         self.assertEqual([x["id"] for x in self.cm.select("100")],
                          ["c0", "c1", "c2"])
 
+    def test_existing_rows_come_first_and_full_keyboard_is_verified(self):
+        original = [[{"text": "応募はこちら", "url": "https://example.org/apply"}],
+                    [{"text": "案内", "url": "https://example.org/info"}]]
+        calls = []
+        def transport(request):
+            calls.append(request)
+            if request["action"] == "lookup":
+                return {"verified": False}
+            if request["action"] == "publish":
+                return {"verified": True, "message_id": "88"}
+            if request["action"] == "readback":
+                published = next(x for x in calls if x["action"] == "publish")
+                return {"verified": True,
+                        "inline_keyboard": published["buttons"] + published["cm_buttons"]}
+            raise AssertionError(request)
+        owner = LocalTelegramOwner(self.token, transport=transport, cm_registry=self.cm)
+        receipt = owner.perform("telegram.publish_announcement", "100",
+                                {"text": "本文", "operation_key": "combined",
+                                 "buttons": original})
+        self.assertTrue(receipt["verified"])
+        posted = next(x for x in calls if x["action"] == "publish")
+        self.assertEqual(posted["buttons"], original)
+        self.assertEqual(len(posted["cm_buttons"]), 3)
+        self.assertEqual(self.cm.select("100")[0]["id"], "c1")
+
+    def test_missing_original_button_is_unverified_without_rotation(self):
+        original = [[{"text": "応募", "url": "https://example.org/apply"}]]
+        def transport(request):
+            if request["action"] == "lookup":
+                return {"verified": False}
+            if request["action"] == "publish":
+                return {"verified": True, "message_id": "99"}
+            if request["action"] == "readback":
+                return {"verified": True, "inline_keyboard": [
+                    [{"text": f"PR / 案内{i}", "url": f"https://example.org/{i}"}]
+                    for i in range(3)]}
+            raise AssertionError(request)
+        owner = LocalTelegramOwner(self.token, transport=transport, cm_registry=self.cm)
+        receipt = owner.perform("telegram.publish_announcement", "100",
+                                {"text": "本文", "operation_key": "lost-original",
+                                 "buttons": original})
+        self.assertFalse(receipt["verified"])
+        self.assertEqual(self.cm.select("100")[0]["id"], "c0")
+
     def test_missing_keyboard_does_not_claim_success_or_advance(self):
         result = self.deliver(keyboard=False)
         self.assertEqual(result.state, "unverified")
