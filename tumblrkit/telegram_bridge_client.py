@@ -77,9 +77,15 @@ class LocalTelegramOwner:
                 raise ValueError("announcement_text_required")
             if not isinstance(operation, str) or not operation:
                 raise ValueError("announcement_operation_key_required")
+            # Producer-owned URL rows are never replaced by the CM footer.
+            # Only MPB is permitted to render the combined keyboard.
+            original_rows = payload.get("buttons", [])
+            if not isinstance(original_rows, list):
+                raise ValueError("announcement_buttons_invalid")
             cm_selection = (registry.select_for_operation(target, operation)
                             if registry and payload.get("cm_disabled") is not True else [])
             cm_rows = append_cm_buttons([], cm_selection) if cm_selection else []
+            expected_rows = append_cm_buttons(original_rows, cm_selection)
             # Existing MPB operation ledger is the recovery source. Check it
             # first, so a retry after a lost response only reads the post.
             try:
@@ -97,6 +103,7 @@ class LocalTelegramOwner:
                                              "destination": target,
                                              "text": text,
                                              "operation_key": operation,
+                                             **({"buttons": original_rows} if original_rows else {}),
                                              **({"cm_buttons": cm_rows} if cm_rows else {})})
                 except (OSError, ValueError, TypeError, KeyError):
                     return {"verified": False, "status": "unverified", "reference": None}
@@ -112,19 +119,19 @@ class LocalTelegramOwner:
             except (OSError, ValueError, TypeError, KeyError):
                 return {"verified": False, "status": "unverified", "reference": message}
             verified = isinstance(receipt, dict) and receipt.get("verified") is True
-            if verified and cm_rows:
+            if verified and expected_rows:
                 keyboard = receipt.get("inline_keyboard")
-                verified = (isinstance(keyboard, list) and
-                            len(keyboard) >= len(cm_rows) and
-                            keyboard[-len(cm_rows):] == cm_rows)
-                if verified:
-                    try:
-                        ids = [item["id"] for item in cm_selection]
-                        if not registry.is_advanced(target, operation, ids):
-                            registry.advance_after_delivery(
-                                target, operation, ids, verified=True)
-                    except ValueError:
-                        verified = False
+                # Readback must prove both original rows and the CM suffix,
+                # in exactly the order approved for this operation.
+                verified = isinstance(keyboard, list) and keyboard == expected_rows
+            if verified and cm_rows:
+                try:
+                    ids = [item["id"] for item in cm_selection]
+                    if not registry.is_advanced(target, operation, ids):
+                        registry.advance_after_delivery(
+                            target, operation, ids, verified=True)
+                except ValueError:
+                    verified = False
             return {"verified": verified,
                     "status": "published" if verified else "unverified",
                     "reference": message}
