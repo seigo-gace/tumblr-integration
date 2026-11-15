@@ -457,6 +457,43 @@ class CampaignContest:
                 "state":"verified" if verified else "needs_reconcile",
                 "message_ref":reference}
 
+    def reconcile_notification(self,event_id,messenger):
+        """Read back the previously stored provider reference; never publish again."""
+        if not isinstance(event_id,str) or len(event_id)!=64 or any(
+                c not in "0123456789abcdef" for c in event_id):
+            raise ValueError("campaign_event_invalid")
+        if messenger is None:
+            raise ValueError("campaign_messenger_not_connected")
+        row=self.db.execute(
+            "SELECT state,message_ref FROM campaign_notifications WHERE event_id=?",
+            (event_id,)).fetchone()
+        if row is None:
+            raise ValueError("campaign_notification_missing")
+        state,reference=row
+        if state=="verified":
+            return {"event_id":event_id,"state":"verified","message_ref":reference}
+        if state not in ("sending","needs_reconcile"):
+            raise ValueError("campaign_notification_not_reconcilable")
+        if not isinstance(reference,str) or not reference:
+            return {"event_id":event_id,"state":"needs_reconcile",
+                    "message_ref":None}
+        try:
+            confirmed=messenger.readback(event_id,reference) is True
+        except Exception:
+            confirmed=False
+        if not confirmed:
+            return {"event_id":event_id,"state":"needs_reconcile",
+                    "message_ref":reference}
+        with self.db:
+            changed=self.db.execute(
+                "UPDATE campaign_notifications SET state='verified',updated_at=? "
+                "WHERE event_id=? AND state IN ('sending','needs_reconcile') "
+                "AND message_ref=?",
+                (int(self.clock()),event_id,reference)).rowcount
+        return {"event_id":event_id,
+                "state":"verified" if changed else "needs_reconcile",
+                "message_ref":reference}
+
     def list_campaigns(self):
         """Owner-only management data; never expose the private draw seed."""
         rows = self.db.execute(
