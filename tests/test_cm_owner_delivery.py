@@ -165,6 +165,15 @@ class CMOwnerDeliveryTests(unittest.TestCase):
         self.assertFalse(receipt["verified"])
         self.assertEqual(self.cm.select("100")[0]["id"], "c0")
 
+    def test_local_and_literal_ip_cm_links_never_enter_registry(self):
+        for url in ("https://localhost/admin", "https://sub.localhost/data",
+                    "https://10.0.0.1/private", "https://127.0.0.1/",
+                    "https://[::1]/", "https://printer.local/"):
+            with self.subTest(url=url):
+                with self.assertRaisesRegex(ValueError, "cm_url_invalid"):
+                    self.cm.add("unsafe", "禁止", url)
+        self.assertEqual(len(self.cm.list_links()), 4)
+
     def test_missing_keyboard_does_not_claim_success_or_advance(self):
         result = self.deliver(keyboard=False)
         self.assertEqual(result.state, "unverified")
