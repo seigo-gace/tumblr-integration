@@ -152,6 +152,55 @@ class AppServeTests(unittest.TestCase):
             self.assertTrue(json.loads(raw)["cancelled"])
             self.assertEqual(server.httpd.scheduler.list()[0]["state"],"cancelled")
 
+    def test_owner_http_keeps_original_buttons_through_confirmation(self):
+        from tumblrkit.assistant import Assistant
+        from tumblrkit.bridge import Bridge
+        from tumblrkit.cm_links import CMRegistry
+        from tumblrkit.telegram_bridge_client import LocalTelegramOwner
+        import sqlite3
+        with tempfile.TemporaryDirectory() as folder:
+            key=Path(folder)/"cm-owner-key"
+            key.write_text("x"*40)
+            db=sqlite3.connect(":memory:")
+            self.addCleanup(db.close)
+            cm=CMRegistry(db)
+            cm.add("sponsor","スポンサー","https://sponsor.example")
+            calls=[]
+            def transport(data):
+                calls.append(data)
+                if data["action"]=="lookup":return {"verified":False}
+                if data["action"]=="publish":return {"verified":True,"message_id":"25"}
+                if data["action"]=="readback":
+                    recorded=next(x for x in calls if x["action"]=="publish")
+                    return {"verified":True,"inline_keyboard":
+                            recorded.get("buttons",[])+recorded.get("cm_buttons",[])}
+                raise AssertionError(data)
+            owner=LocalTelegramOwner(key,transport=transport,cm_registry=cm)
+            assistant=Assistant(bridge=Bridge({"telegram":owner}),providers=[])
+            release=build_release(APP,self.tmp,SHA_A)
+            with AppServer(release,TOKEN,assistant=assistant) as server:
+                base=f"http://127.0.0.1:{server.port}"
+                keyboard=[[{"text":"応募","url":"https://example.org/entry"}]]
+                data={"selected_action":"telegram.publish_announcement",
+                      "selected_target":"100","message":"告知 対象: 100\\n本文: お知らせ",
+                      "existing_buttons":keyboard}
+                headers={"Content-Type":"application/json"}
+                status,raw,_=fetch(base+"/assistant",TOKEN,method="POST",
+                                   data=json.dumps(data).encode(),headers=headers)
+                self.assertEqual(status,200,raw)
+                preview=json.loads(raw)
+                self.assertEqual(preview["state"],"confirmation_required")
+                self.assertIn("応募",preview["text"])
+                self.assertEqual(calls,[])
+                status,raw,_=fetch(base+"/assistant",TOKEN,method="POST",
+                    data=json.dumps({"confirm":True,
+                                     "request_id":preview["request_id"]}).encode(),headers=headers)
+                self.assertEqual(status,200,raw)
+                self.assertEqual(json.loads(raw)["state"],"completed")
+                posted=next(x for x in calls if x["action"]=="publish")
+                self.assertEqual(posted["buttons"],keyboard)
+                self.assertEqual(cm.select("100")[0]["id"],"sponsor")
+
     def test_catalog_action_http_cannot_bypass_bridge_confirmation(self):
         class Existing:
             def __init__(self):self.calls=[]
