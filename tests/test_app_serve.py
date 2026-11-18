@@ -644,6 +644,18 @@ class AppServeTests(unittest.TestCase):
             self.assertTrue(result["verified"])
             self.assertEqual(result["current"]["new_candidates"],1)
             self.assertEqual(result["previous"]["new_candidates"],0)
+            status,_,_=fetch(base+"/analytics/post?candidate_id=alpha%3A123")
+            self.assertEqual(status,401)
+            status,body,_=fetch(base+"/analytics/post?candidate_id=alpha%3A123",TOKEN)
+            self.assertEqual(status,200)
+            post=json.loads(body)
+            self.assertTrue(post["verified"])
+            self.assertEqual(post["candidate_id"],"alpha:123")
+            self.assertEqual(post["confirmed_own_actions"],[])
+            for invalid in ("/analytics/post","/analytics/post?candidate_id=bad",
+                            "/analytics/post?candidate_id=alpha%3A123&candidate_id=alpha%3A124"):
+                status,_,_=fetch(base+invalid,TOKEN)
+                self.assertEqual(status,400)
             status,_,_=fetch(base+"/analytics/report?period=week")
             self.assertEqual(status,401)
             status,report,headers=fetch(base+"/analytics/report?period=week",TOKEN)
