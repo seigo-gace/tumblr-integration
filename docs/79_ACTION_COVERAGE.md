@@ -44,7 +44,7 @@ Generated from the **actual** `tumblrkit/action_catalog.py` on `feat/initial-mod
 | `publisher.03` | 過去文から作り直す | No owner route | Not connected |
 | `publisher.04` | 画像・動画を添付 | No owner route | Not connected |
 | `publisher.05` | タグを提案 | No owner route | Not connected |
-| `publisher.06` | プレビューする | No owner route | Not connected |
+| `publisher.06` | プレビューする | UI `drafts` | UI + owned operation (Source; Runtime unverified) |
 | `publisher.07` | 今すぐ投稿 | Bridge `tumblr.publish_draft` | Bridge adapter contract only |
 | `publisher.08` | 予約投稿 | UI `drafts` | Navigation only; individual action unverified |
 | `publisher.09` | 予約を変更 | UI `drafts` | Navigation only; individual action unverified |
@@ -86,7 +86,9 @@ Generated from the **actual** `tumblrkit/action_catalog.py` on `feat/initial-mod
 
 ## Counts and verification contract
 
-- Exactly 79 catalog IDs. 42 link to an owner UI, 13 link to a Bridge contract, 24 have no route. These counts **do not equal implemented actions**.
+- Exactly 79 catalog IDs. 43 link to an owner UI, 13 link to a Bridge contract, 23 have no route. These counts **do not equal implemented actions**.
 - Verified source deltas in this change unit: `library.07` searched via existing Discovery DB; `analytics.04` measured matched period comparison; `media.05` explicit failed-save retry via existing MediaSave; `media.06` candidate-ID scoped save history; `media.07` actual storage capacity readback; `referral.07` existing GATE tier-progress ledger report; `analytics.11` owner-only measured CSV export; `engagement.06` owner-private receipt history. Each still requires actual runtime/browser acceptance.
 - Existing `tests/test_action_catalog.py` protects 79 IDs and prohibits treating disconnected actions as executed. New tests independently cover implemented owned operations; no faked provider, GATE, or Telegram response is accepted as live.
 - Exact owners, stores, dependency mapping and deployment boundaries are in [NINE_MODULE_SOURCE_MAP.md](NINE_MODULE_SOURCE_MAP.md); authoritative UX examples remain the original supplied catalog. Never replace implementation with route documentation.
+
+- `publisher.06`: original draft cards now show read-only source-text preview with status and digest via existing private draft store and authenticated endpoint; separate confirmed publishing remains required. Media/tag-complete preview is still NOT IMPLEMENTED.
