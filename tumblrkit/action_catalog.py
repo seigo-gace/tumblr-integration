@@ -111,6 +111,7 @@ OWNER_UI_ROUTES = {
     "media.06": "media_history",
     "media.07": "media_history",
     "engagement.06": "engagement_history",
+    "publisher.06": "drafts",
     "publisher.08": "drafts",
     "publisher.09": "drafts",
     "campaign.01": "campaign",
