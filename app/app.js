@@ -93,9 +93,11 @@
     const result=await libraryRequest("/library/update",{candidate_ids:ids,field:field,value:value});
     if(result.verified!==true||result.updated!==ids.length)throw new Error("library_unverified");
   }
+  let mediaHistoryQuery="";
   async function mediaHistory(offset=0,oldPanel=null){
     try{
-      const data=await libraryRequest("/media/jobs?offset="+offset+"&limit=100");
+      const data=await libraryRequest("/media/jobs?offset="+offset+"&limit=100"+
+        (mediaHistoryQuery?"&candidate_id="+encodeURIComponent(mediaHistoryQuery):""));
       if(data.verified!==true||!Array.isArray(data.jobs)||
          !Number.isInteger(data.total)||data.offset!==offset||
          typeof data.has_next!=="boolean")throw new Error("history_unverified");
@@ -103,6 +105,24 @@
       section.className="library-panel result-view";
       const title=document.createElement("h3");title.textContent="メディア保存履歴";
       section.appendChild(title);
+      const searchControls=document.createElement("div");
+      searchControls.className="library-controls";
+      const candidateSearch=document.createElement("input");
+      candidateSearch.type="search";candidateSearch.maxLength=100;
+      candidateSearch.placeholder="候補IDで保存履歴を検索";
+      candidateSearch.value=mediaHistoryQuery;
+      candidateSearch.setAttribute("aria-label","保存済みメディアを候補IDで検索");
+      const searchButton=document.createElement("button");
+      searchButton.type="button";searchButton.textContent="探す";
+      const applyFilter=function(){
+        mediaHistoryQuery=candidateSearch.value.trim();mediaHistory(0,section);
+      };
+      searchButton.addEventListener("click",applyFilter);
+      candidateSearch.addEventListener("keydown",function(e){
+        if(e.key==="Enter"){e.preventDefault();applyFilter();}
+      });
+      searchControls.append(candidateSearch,searchButton);
+      section.appendChild(searchControls);
       const counter=document.createElement("span");
       counter.textContent=(data.jobs.length?offset+1:0)+"～"+(offset+data.jobs.length)+
         " / "+data.total+"件";
