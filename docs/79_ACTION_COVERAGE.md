@@ -37,7 +37,7 @@ Generated from the **actual** `tumblrkit/action_catalog.py` on `feat/initial-mod
 | `engagement.03` | リブログする | Bridge `engagement.reblog` | Bridge adapter contract only |
 | `engagement.04` | フォロー候補を見る | No owner route | Not connected |
 | `engagement.05` | フォローする | Bridge `engagement.follow` | Bridge adapter contract only |
-| `engagement.06` | 交流履歴を見る | No owner route | Not connected |
+| `engagement.06` | 交流履歴を見る | UI `engagement_history` | UI + owned operation (Source; CI pending/readback) |
 | `engagement.07` | 操作を取り消す | No owner route | Not connected |
 | `publisher.01` | 投稿文をゼロから作る | No owner route | Not connected |
 | `publisher.02` | 元文を手直しする | No owner route | Not connected |
@@ -86,7 +86,7 @@ Generated from the **actual** `tumblrkit/action_catalog.py` on `feat/initial-mod
 
 ## Counts and verification contract
 
-- Exactly 79 catalog IDs. 41 link to an owner UI, 13 link to a Bridge contract, 25 have no route. These counts **do not equal implemented actions**.
-- Verified source deltas in this change unit: `library.07` searched via existing Discovery DB; `analytics.04` measured matched period comparison; `media.05` explicit failed-save retry via existing MediaSave; `media.06` candidate-ID scoped save history; `media.07` actual storage capacity readback; `referral.07` existing GATE tier-progress ledger report; `analytics.11` owner-only measured CSV export. Each still requires actual runtime/browser acceptance.
+- Exactly 79 catalog IDs. 42 link to an owner UI, 13 link to a Bridge contract, 24 have no route. These counts **do not equal implemented actions**.
+- Verified source deltas in this change unit: `library.07` searched via existing Discovery DB; `analytics.04` measured matched period comparison; `media.05` explicit failed-save retry via existing MediaSave; `media.06` candidate-ID scoped save history; `media.07` actual storage capacity readback; `referral.07` existing GATE tier-progress ledger report; `analytics.11` owner-only measured CSV export; `engagement.06` owner-private receipt history. Each still requires actual runtime/browser acceptance.
 - Existing `tests/test_action_catalog.py` protects 79 IDs and prohibits treating disconnected actions as executed. New tests independently cover implemented owned operations; no faked provider, GATE, or Telegram response is accepted as live.
 - Exact owners, stores, dependency mapping and deployment boundaries are in [NINE_MODULE_SOURCE_MAP.md](NINE_MODULE_SOURCE_MAP.md); authoritative UX examples remain the original supplied catalog. Never replace implementation with route documentation.
