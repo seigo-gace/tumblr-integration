@@ -20,13 +20,13 @@ class ActionCoverageMapTests(unittest.TestCase):
         self.assertFalse(set(OWNER_UI_ROUTES)&set(BRIDGE_ROUTES))
         self.assertTrue(set(OWNER_UI_ROUTES)<=set(expected))
         self.assertTrue(set(BRIDGE_ROUTES)<=set(expected))
-        self.assertEqual(len(expected)-len(OWNER_UI_ROUTES)-len(BRIDGE_ROUTES),23)
+        self.assertEqual(len(expected)-len(OWNER_UI_ROUTES)-len(BRIDGE_ROUTES),22)
 
     def test_source_owner_routes_stay_distinct_from_external_acceptance(self):
         document=(Path(__file__).resolve().parents[1]/
                   "docs"/"79_ACTION_COVERAGE.md").read_text(encoding="utf-8")
         for action_id in ("library.07","analytics.04","media.05","media.06",
-                          "media.07","referral.07","analytics.11","engagement.06","publisher.06"):
+                          "media.07","referral.07","analytics.11","engagement.06","publisher.06","analytics.06"):
             self.assertIn(action_id,OWNER_UI_ROUTES)
             self.assertIn("Source",next(line for line in document.splitlines()
                                         if line.startswith("| `"+action_id+"` |")))
