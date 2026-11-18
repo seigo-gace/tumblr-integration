@@ -164,6 +164,14 @@ class AnalyticsRuntimeTests(unittest.TestCase):
         self.assertEqual(report["campaign_basis"],
                          "local_campaign_records_not_external_conversion")
         self.assertEqual([r["value"] for r in report["rows"]][-4:],[2,2,1,1])
+        import csv,io
+        csv_rows=list(csv.DictReader(io.StringIO(
+            AnalyticsAdapter(self.store,clock=lambda:self.now,campaign_db=db)
+            .report_csv("all").lstrip(chr(0xfeff)))))
+        campaign_rows=[r for r in csv_rows if r["metric"].startswith("アプリ記録済み")]
+        self.assertTrue(campaign_rows)
+        self.assertTrue(all(r["basis"]=="local_campaign_records_not_external_conversion"
+                            for r in campaign_rows))
         self.assertIn("Telegram参加転換率",report["not_measured"])
         absent=self.adapter.perform("analytics.get_summary","all",{})
         self.assertEqual(absent["campaign_basis"],"not_connected")
