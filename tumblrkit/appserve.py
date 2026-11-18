@@ -455,6 +455,20 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._json(200, {"campaigns":campaigns})
             return
+        if parts.path == "/media/capacity":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            if parts.query:
+                self._json(400,{"error":"media_query_invalid"})
+                return
+            try:
+                result=self.server.media_save.capacity()
+            except (MediaError,ValueError,OSError,sqlite3.Error):
+                self._json(503,{"error":"media_capacity_unavailable"})
+                return
+            self._json(200,result)
+            return
         if parts.path == "/media/jobs":
             if not _authorized(self):
                 self._unauthorized()
