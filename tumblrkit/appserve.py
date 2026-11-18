@@ -347,7 +347,7 @@ class _Handler(BaseHTTPRequestHandler):
         parts = urlsplit(self.path)
         # Browser entry URLs can include harmless query parameters.
         # They must never obscure the login page with a plain-text 400.
-        if parts.query and parts.path not in ("/", "/index.html", "/login", "/oauth/callback", "/library", "/media/jobs", "/drafts", "/analytics/compare", "/analytics/report"):
+        if parts.query and parts.path not in ("/", "/index.html", "/login", "/oauth/callback", "/library", "/media/jobs", "/drafts", "/analytics/compare", "/analytics/report", "/engagement/history"):
             self._send(400, "bad request\n", "text/plain; charset=utf-8")
             return
         if parts.path == "/oauth/callback":
@@ -364,6 +364,31 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(400, "Tumblr認可に失敗しました。再ログイン後に連携をやり直してください。", "text/plain; charset=utf-8")
                 return
             self._send(200, '<!doctype html><html lang="ja"><meta charset="utf-8"><title>Tumblr連携</title><p>Tumblrの本人確認が完了しました。</p><a href="/">操作画面に戻る</a></html>', "text/html; charset=utf-8")
+            return
+        if parts.path == "/engagement/history":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            from urllib.parse import parse_qs
+            params=parse_qs(parts.query,keep_blank_values=True)
+            if set(params)-{"offset","limit"} or any(len(v)!=1 for v in params.values()):
+                self._json(400,{"error":"engagement_history_query_invalid"})
+                return
+            try:
+                adapter=self.server.assistant.bridge.adapters.get("engagement")
+                if adapter is None:
+                    self._json(409,{"error":"engagement_not_connected"})
+                    return
+                result=adapter.history(
+                    int(params.get("offset",["0"])[0]),
+                    int(params.get("limit",["50"])[0]))
+            except (ValueError,TypeError,OverflowError):
+                self._json(400,{"error":"engagement_history_query_invalid"})
+                return
+            except (OSError,sqlite3.Error):
+                self._json(503,{"error":"engagement_history_unavailable"})
+                return
+            self._json(200,result)
             return
         if parts.path == "/analytics/report":
             if not _authorized(self):
