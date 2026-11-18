@@ -101,6 +101,7 @@ OWNER_UI_ROUTES = {
     "library.04": "library",
     "library.05": "library",
     "library.06": "library",
+    "library.07": "library",
     "library.08": "library",
     "media.01": "library",
     "media.02": "library",
