@@ -84,7 +84,7 @@ class AnalyticsAdapter:
         if summary.get("verified") is not True:
             raise ValueError("analytics_report_unverified")
         stream=io.StringIO(newline="")
-        writer=csv.writer(stream,lineterminator="\\r\\n")
+        writer=csv.writer(stream,lineterminator=chr(13)+chr(10))
         writer.writerow(("metric","value","period","basis"))
         for record in summary["rows"]:
             label=record["label"]
@@ -98,7 +98,7 @@ class AnalyticsAdapter:
             writer.writerow((label,count,record["period"],summary["basis"]))
         writer.writerow(("UNMEASURED","",summary["period"],
                          " / ".join(summary.get("not_measured",[]))))
-        return "\\ufeff"+stream.getvalue()
+        return chr(0xfeff)+stream.getvalue()
 
     def perform(self, action, target, payload):
         if action != "analytics.get_summary":
