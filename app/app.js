@@ -912,7 +912,54 @@
   // A visible choice and an explicit target are required before dispatch.
   // Reuse the six-goal chat surface for locally implemented owner modules.
   // These controls do not claim that external Tumblr/GATE/MPB is verified.
+  async function showEngagementHistory(offset=0,oldPanel=null){
+    try{
+      const response=await fetch("/engagement/history?offset="+offset+"&limit=50",{
+        credentials:"same-origin"});
+      if(!response.ok)throw new Error("engagement_history_unavailable");
+      const data=await response.json();
+      if(data.verified!==true||!Array.isArray(data.items))throw new Error("not_verified");
+      const panel=document.createElement("section");panel.className="result-view";
+      const title=document.createElement("h3");title.textContent="交流履歴（保存済みの操作記録）";
+      panel.appendChild(title);
+      const intro=document.createElement("p");
+      intro.textContent="確認済み・送信中・結果不明を区別。公開反応総数ではありません。"+
+        " 全"+data.total+"件";
+      panel.appendChild(intro);
+      data.items.forEach(function(entry){
+        const row=document.createElement("div");row.className="library-controls";
+        const label=document.createElement("span");
+        label.textContent=entry.action+" / "+entry.target+" / "+entry.state;
+        row.appendChild(label);
+        panel.appendChild(row);
+      });
+      const pager=document.createElement("div");pager.className="library-controls";
+      const previous=document.createElement("button");
+      previous.type="button";previous.textContent="前へ";previous.disabled=offset===0;
+      previous.addEventListener("click",function(){
+        showEngagementHistory(Math.max(0,offset-50),panel);
+      });
+      const next=document.createElement("button");
+      next.type="button";next.textContent="次へ";
+      next.disabled=offset+data.items.length>=data.total;
+      next.addEventListener("click",function(){showEngagementHistory(offset+50,panel);});
+      const close=document.createElement("button");
+      close.type="button";close.textContent="閉じる";
+      close.addEventListener("click",function(){panel.remove();});
+      pager.append(previous,next,close);panel.appendChild(pager);
+      if(oldPanel)oldPanel.replaceWith(panel);else messages.appendChild(panel);
+      messages.scrollTop=messages.scrollHeight;
+    }catch(error){
+      display("交流履歴を読み込めませんでした。外部操作は行っていません。","system");
+    }
+  }
   function ownerModulePanel(section,goals){
+    if(goals.includes("巡回")){
+      const control=document.createElement("button");
+      control.type="button";control.textContent="保存済み交流履歴を見る";
+      control.addEventListener("click",function(){showEngagementHistory(0);});
+      section.appendChild(control);
+    }
     if(goals.includes("集計")){
       const panel=document.createElement("details");
       panel.className="result-view";
@@ -1163,6 +1210,7 @@
         if(!(item.bridge_action&&item.adapter_bound)&&item.owner_ui){
           if(item.owner_ui==="library"){showLibrary();return;}
           if(item.owner_ui==="media_history"){mediaHistory(0);return;}
+          if(item.owner_ui==="engagement_history"){showEngagementHistory(0);return;}
           if(item.owner_ui==="drafts"){refreshDrafts();return;}
           if(item.owner_ui==="oauth_status"){showOAuthStatus();connect.focus();return;}
           if(item.owner_ui==="oauth_connect"){connect.focus();
