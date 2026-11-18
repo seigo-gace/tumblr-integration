@@ -347,7 +347,7 @@ class _Handler(BaseHTTPRequestHandler):
         parts = urlsplit(self.path)
         # Browser entry URLs can include harmless query parameters.
         # They must never obscure the login page with a plain-text 400.
-        if parts.query and parts.path not in ("/", "/index.html", "/login", "/oauth/callback", "/library", "/media/jobs", "/drafts", "/analytics/compare", "/analytics/report", "/engagement/history"):
+        if parts.query and parts.path not in ("/", "/index.html", "/login", "/oauth/callback", "/library", "/media/jobs", "/drafts", "/analytics/compare", "/analytics/report", "/engagement/history", "/analytics/post"):
             self._send(400, "bad request\n", "text/plain; charset=utf-8")
             return
         if parts.path == "/oauth/callback":
@@ -389,6 +389,32 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             except (OSError,sqlite3.Error):
                 self._json(503,{"error":"engagement_history_unavailable"})
+                return
+            self._json(200,result)
+            return
+        if parts.path == "/analytics/post":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            from urllib.parse import parse_qs
+            params=parse_qs(parts.query,keep_blank_values=True)
+            if set(params)!={"candidate_id"} or len(params["candidate_id"])!=1:
+                self._json(400,{"error":"analytics_post_query_invalid"})
+                return
+            try:
+                adapter=self.server.assistant.bridge.adapters.get("analytics")
+                if adapter is None:
+                    self._json(409,{"error":"analytics_not_connected"})
+                    return
+                result=adapter.post_reactions(params["candidate_id"][0])
+            except ValueError as exc:
+                code=str(exc)
+                self._json(404 if code=="analytics_candidate_unavailable" else 400,
+                           {"error":code if code.startswith("analytics_")
+                            else "analytics_post_invalid"})
+                return
+            except (OSError,sqlite3.Error):
+                self._json(503,{"error":"analytics_store_unavailable"})
                 return
             self._json(200,result)
             return
