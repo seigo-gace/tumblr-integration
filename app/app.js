@@ -154,6 +154,27 @@
           (job.error_code?" • "+job.error_code:"")+
           (job.state==="completed"?" • "+job.output_bytes+"バイト":"");
         line.appendChild(text);
+        if(job.state==="failed"&&typeof job.candidate_id==="string"&&
+           Number.isInteger(job.media_index)&&job.media_index>=0){
+          const retry=document.createElement("button");
+          retry.type="button";retry.textContent="保存失敗を再試行";
+          retry.addEventListener("click",async function(){
+            if(!window.confirm("このメディアの保存・再取得について権利者の許可と利用規約上の許可を現在も確認済みですか？ 元の保存処理を1件だけ再実行します。"))return;
+            retry.disabled=true;
+            try{
+              const result=await libraryRequest("/media/save",{
+                candidate_id:job.candidate_id,media_index:job.media_index,
+                rights_confirmed:true
+              });
+              if(result.verified!==true)throw new Error("media_retry_unverified");
+              display("メディア再保存の確認結果："+(result.state||result.job?.state||"確認済み"),"system");
+              mediaHistory(offset,section);
+            }catch(error){
+              display("再保存を確認できませんでした。再送せず、履歴で結果を確認してください。","system");
+            }finally{retry.disabled=false;}
+          });
+          line.appendChild(retry);
+        }
         if(job.state==="completed"&&/^[0-9a-f]{32}$/.test(job.id)){
           const link=document.createElement("a");
           link.href="/media/file/"+job.id;link.textContent=(job.output_name||"").endsWith(".mp4")?"MP4を保存":"画像を保存";
