@@ -129,6 +129,7 @@ OWNER_UI_ROUTES = {
     "analytics.05": "analytics",
     "analytics.07": "analytics",
     "analytics.08": "analytics",
+    "analytics.11": "analytics",
 }
 
 BRIDGE_ROUTES = {
