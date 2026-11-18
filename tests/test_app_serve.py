@@ -614,6 +614,16 @@ class AppServeTests(unittest.TestCase):
             self.assertTrue(result["verified"])
             self.assertEqual(result["current"]["new_candidates"],1)
             self.assertEqual(result["previous"]["new_candidates"],0)
+            status,_,_=fetch(base+"/analytics/report?period=week")
+            self.assertEqual(status,401)
+            status,report,headers=fetch(base+"/analytics/report?period=week",TOKEN)
+            self.assertEqual(status,200)
+            self.assertTrue(report.startswith(chr(0xfeff).encode("utf-8")))
+            self.assertIn(b"metric,value,period,basis",report)
+            for path in ("/analytics/report","/analytics/report?period=year",
+                         "/analytics/report?period=week&period=month"):
+                status,_,_=fetch(base+path,TOKEN)
+                self.assertEqual(status,400)
             for path in ("/analytics/compare","/analytics/compare?period=all",
                          "/analytics/compare?period=week&period=today"):
                 status,_,_=fetch(base+path,TOKEN)
