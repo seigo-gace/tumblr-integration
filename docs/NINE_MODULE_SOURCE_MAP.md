@@ -11,7 +11,7 @@ Authority: TGtumbler current Notion decisions and original 79-action catalog, th
 | engagement (7) | `engagement_runtime.py`; Bridge `engagement.*` | owner OAuth, rate budget, Discovery candidate | verified like/reblog/follow source | undo/history and actual provider user acceptance |
 | publisher (12) | `drafts.py`, `post_scheduler.py`, `publisher_runtime.py`, `post_lifecycle.py`; `/drafts`, `/schedules` | existing app drafts SQLite, official Tumblr writer | previews, direct publish, schedule, edit/delete/reconcile | media/tag authoring, provider operation E2E, browser acceptance |
 | campaign (12) | `campaign_runtime.py`; `POST /campaigns` | existing core SQLite, GateEligibility through existing Telegram owner Bridge | contest, draw, one-time claim tickets, outbox/reconcile | real entrant user flow, authenticated member binding and DM provider |
-| referral (9) | `referral_runtime.py`; `POST /referrals` | existing core SQLite and GateEligibility, no second GATE | codes, revoke, gate-confirmed report | real public GATE attribution URL and user-visible incentive workflow |
+| referral (9) | `referral_runtime.py`; `POST /referrals` | existing core SQLite and GateEligibility, no second GATE | codes, revoke, gate-confirmed report | referral.07 verified-tier progress now provided from existing grants (Source; Runtime unverified); real public GATE attribution URL and user-visible incentive workflow |
 | analytics (11) | `analytics_runtime.py`, `follower_analytics.py`; `/analytics/*` | Discovery follower history, existing campaign/referral records | recorded follower time series and measured summaries | analytics.04 now compares disjoint observed periods (Source; Runtime unverified); true source attribution, user report UX still missing |
 
 ## Routes and change boundaries
@@ -36,3 +36,5 @@ No past source commit or CI success counts as Host deployment. Cross-repo provid
 - `media.07`: `MediaSave.capacity()` reads current filesystem free bytes and completed-job ledger; `GET /media/capacity` reuses owner authentication.
 
 All these entries are Source modifications. Actual Host release, external Tumblr/Telegram results, rights and mobile browser acceptance still require separate evidence.
+
+- `referral.07`: existing Referral report now reads stored `tiers`, `memberships` and `grants` and returns each threshold's verified-member remainder and actual grant receipt; referrer codes and public GATE link attribution remain separate pending work.
