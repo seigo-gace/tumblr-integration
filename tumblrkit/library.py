@@ -69,13 +69,16 @@ class Library:
             raise ValueError("library_candidate_id_invalid")
         return candidate_id
 
-    def list(self,filter_name="all",offset=0,limit=50):
+    def list(self,filter_name="all",offset=0,limit=50,query=""):
         if filter_name not in ("all","unread","favorite","watch_later","seen","unavailable"):
             raise ValueError("library_filter_invalid")
         if type(offset) is not int or offset<0 or offset>9223372036854775807:
             raise ValueError("library_offset_invalid")
         if type(limit) is not int or not 1<=limit<=100:
             raise ValueError("library_limit_invalid")
+        if not isinstance(query,str) or len(query)>100 or "\x00" in query:
+            raise ValueError("library_query_invalid")
+        query=query.strip()
         clause={
             "all":"p.state='visible' AND COALESCE(b.blocked,0)=0",
             "unread":"p.state='visible' AND COALESCE(b.blocked,0)=0 AND COALESCE(s.seen,0)=0",
@@ -87,14 +90,22 @@ class Library:
         select="SELECT p.candidate_id,p.blog,p.post_id,p.title,p.url,p.post_type,p.posted_at,p.media_json,p.thumbnail_url,p.state,COALESCE(s.seen,0),COALESCE(s.favorite,0),COALESCE(s.watch_later,0),COALESCE(s.last_media_index,0)"
         join=" FROM discovery_posts p LEFT JOIN discovery_blogs b ON b.name=p.blog LEFT JOIN library_state s ON s.candidate_id=p.candidate_id"
         where=" WHERE "+clause
+        params=[]
+        if query:
+            # Plain substring matching: wildcard characters are literal,
+            # and queries never become SQL fragments or provider requests.
+            where += (" AND (instr(lower(COALESCE(p.title,'')),lower(?))>0"
+                      " OR instr(lower(p.blog),lower(?))>0"
+                      " OR instr(p.post_id,?)>0)")
+            params=[query,query,query]
         with closing(self._open()) as db:
-            count=db.execute("SELECT COUNT(*)"+join+where).fetchone()[0]
+            count=db.execute("SELECT COUNT(*)"+join+where,params).fetchone()[0]
             rows=db.execute(select+join+where+" ORDER BY p.last_seen DESC,p.candidate_id ASC LIMIT ? OFFSET ?",
-                            (limit,offset)).fetchall()
+                            (*params,limit,offset)).fetchall()
             session=db.execute("SELECT candidate_id,media_index FROM library_session WHERE key='last'").fetchone()
         records=self._decode_records(rows)
         return {"verified":True,"items":records,"total":count,"offset":offset,"limit":limit,
-                "filter":filter_name,"last_position":{"candidate_id":session[0],"media_index":session[1]} if session else None,
+                "filter":filter_name,"query":query,"last_position":{"candidate_id":session[0],"media_index":session[1]} if session else None,
                 "resume_item":self.resume_item() if session else None}
 
     @staticmethod
