@@ -61,6 +61,7 @@
   // Library/Viewer is local-only. It never invokes a Tumblr endpoint.
   const libraryButton=document.getElementById("show-library");
   let libraryFilter="all";
+  let libraryQuery="";
   let libraryOffset=0;
   const librarySelection=new Set();
   function libraryLink(url){
@@ -218,7 +219,7 @@
   async function showLibrary(){
     let data;
     try{
-      data=await libraryRequest("/library?filter="+encodeURIComponent(libraryFilter)+"&offset="+libraryOffset+"&limit=50");
+      data=await libraryRequest("/library?filter="+encodeURIComponent(libraryFilter)+"&query="+encodeURIComponent(libraryQuery)+"&offset="+libraryOffset+"&limit=50");
       if(data.verified!==true||!Array.isArray(data.items))throw new Error("not_verified");
     }catch(error){display("ライブラリを読み込めませんでした。保存状態を変更していません。","system");return;}
     const section=document.createElement("section");section.className="library-panel result-view";
@@ -230,6 +231,20 @@
     }
     filter.value=libraryFilter;
     filter.addEventListener("change",function(){libraryFilter=filter.value;libraryOffset=0;librarySelection.clear();showLibrary();});
+    const search=document.createElement("input");
+    search.type="search";search.maxLength=100;search.value=libraryQuery;
+    search.placeholder="タイトル・ブログ・投稿IDで検索";
+    search.setAttribute("aria-label","ライブラリを検索");
+    const searchButton=document.createElement("button");
+    searchButton.type="button";searchButton.textContent="検索";
+    const applySearch=function(){
+      libraryQuery=search.value.trim();libraryOffset=0;showLibrary();
+    };
+    searchButton.addEventListener("click",applySearch);
+    search.addEventListener("keydown",function(event){
+      if(event.key==="Enter"){event.preventDefault();applySearch();}
+    });
+    controls.appendChild(search);controls.appendChild(searchButton);
     const total=document.createElement("span");total.textContent=String(data.total)+"件";
     const selectedCount=document.createElement("span");
     const updateSelectionCount=function(){
