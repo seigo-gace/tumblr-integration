@@ -90,6 +90,26 @@ class EngagementAdapter:
         self.budget=budget
         self.writer=writer or EngagementTransport()
 
+    def history(self, offset=0, limit=50):
+        """Owner-private persisted receipts, not speculative provider activity."""
+        if type(offset) is not int or not 0<=offset<=9223372036854775807:
+            raise ValueError("engagement_history_offset_invalid")
+        if type(limit) is not int or not 1<=limit<=100:
+            raise ValueError("engagement_history_limit_invalid")
+        with closing(self.store._open()) as db:
+            db.executescript(RECEIPTS)
+            total=db.execute("SELECT COUNT(*) FROM engagement_receipts").fetchone()[0]
+            rows=db.execute(
+                "SELECT action,target,state,provider_post_id,updated_at "
+                "FROM engagement_receipts ORDER BY updated_at DESC,action,target "
+                "LIMIT ? OFFSET ?",(limit,offset)).fetchall()
+        return {"verified":True,"source":"owner_private_engagement_receipts",
+                "total":total,"offset":offset,"limit":limit,
+                "items":[{"action":a,"target":target,"state":state,
+                          "provider_post_id":post_id if state=="verified" else "",
+                          "updated_at":updated}
+                         for a,target,state,post_id,updated in rows]}
+
     def _lookup(self, db, action, target):
         if action not in ACTIONS or not isinstance(target,str):
             raise ValueError("engagement_target_invalid")
