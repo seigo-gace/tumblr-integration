@@ -638,6 +638,26 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, item["data"], item["media_type"],
                        extra=[("Content-Disposition", disposition)])
             return
+        if parts.path.startswith("/drafts/") and parts.path.endswith("/preview"):
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            if parts.query:
+                self._json(400,{"error":"draft_preview_invalid"})
+                return
+            identifier=parts.path[len("/drafts/"):-len("/preview")]
+            if identifier.endswith("/"):
+                identifier=identifier[:-1]
+            try:
+                result=self.server.draft_store.preview(identifier)
+            except ValueError:
+                self._json(404,{"error":"draft_preview_unavailable"})
+                return
+            except (OSError,sqlite3.Error):
+                self._json(503,{"error":"draft_store_unavailable"})
+                return
+            self._json(200,result)
+            return
         if parts.path == "/drafts":
             if not _authorized(self):
                 self._unauthorized()
