@@ -489,14 +489,15 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             from urllib.parse import parse_qs
             params=parse_qs(parts.query,keep_blank_values=True)
-            if set(params)-{"filter","offset","limit"} or any(len(v)!=1 for v in params.values()):
+            if set(params)-{"filter","offset","limit","query"} or any(len(v)!=1 for v in params.values()):
                 self._json(400, {"error":"library_query_invalid"})
                 return
             try:
                 result=self.server.library.list(
                     params.get("filter",["all"])[0],
                     int(params.get("offset",["0"])[0]),
-                    int(params.get("limit",["50"])[0]))
+                    int(params.get("limit",["50"])[0]),
+                    params.get("query",[""])[0])
             except (ValueError,TypeError):
                 self._json(400, {"error":"library_query_invalid"})
                 return
