@@ -981,7 +981,14 @@
           display("期間比較を取得できません。記録済みデータを変更していません。","system");
         }finally{compareButton.disabled=false;}
       });
-      controls.append(history,snapshot,comparePeriod,compareButton);
+      const report=document.createElement("a");
+      report.href="/analytics/report?period="+encodeURIComponent(comparePeriod.value);
+      report.download="tumblr-analytics.csv";
+      report.textContent="実測CSVレポートを保存";
+      comparePeriod.addEventListener("change",function(){
+        report.href="/analytics/report?period="+encodeURIComponent(comparePeriod.value);
+      });
+      controls.append(history,snapshot,comparePeriod,compareButton,report);
       panel.appendChild(controls);
       section.appendChild(panel);
     }
