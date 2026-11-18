@@ -89,6 +89,32 @@ class AnalyticsRuntimeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,"analytics_period_invalid"):
                 self.adapter.report_csv(bad)
 
+    def test_post_reactions_separates_observed_notes_from_own_verified_actions(self):
+        from tumblrkit.engagement_runtime import RECEIPTS
+        import sqlite3
+        with sqlite3.connect(self.store.path) as db:
+            db.execute("UPDATE discovery_posts SET note_count=7 WHERE candidate_id='newer:2'")
+            db.executescript(RECEIPTS)
+            db.executemany(
+                "INSERT INTO engagement_receipts(action,target,state,updated_at) "
+                "VALUES(?,?,?,?)",[
+                    ("engagement.like","newer:2","verified",self.now),
+                    ("engagement.reblog","newer:2","sent",self.now),
+                ])
+        result=self.adapter.post_reactions("newer:2")
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["observed_notes"],7)
+        self.assertEqual(result["observed_at"],self.now)
+        self.assertEqual([a["action"] for a in result["confirmed_own_actions"]],
+                         ["engagement.like"])
+        self.assertIn("スキのみの総数",result["not_measured"])
+        self.store.mark_unavailable("newer:2")
+        with self.assertRaisesRegex(ValueError,"analytics_candidate_unavailable"):
+            self.adapter.post_reactions("newer:2")
+        for candidate in (None,"bad",{},1):
+            with self.assertRaisesRegex(ValueError,"analytics_candidate_invalid"):
+                self.adapter.post_reactions(candidate)
+
     def test_week_metrics_are_derived_from_current_real_state(self):
         result=self.adapter.perform("analytics.get_summary","week",{})
         self.assertTrue(result["verified"])
