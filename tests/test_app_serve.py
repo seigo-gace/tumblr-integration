@@ -584,6 +584,36 @@ class AppServeTests(unittest.TestCase):
             self.assertEqual(len(stub.calls),2)
             self.assertEqual(store.read_candidates(),[])
 
+    def test_engagement_history_http_owner_only_bounded(self):
+        from tumblrkit.assistant import Assistant
+        from tumblrkit.bridge import Bridge
+        class ExistingReceipts:
+            def __init__(self):
+                self.calls=[]
+            def history(self,offset,limit):
+                self.calls.append((offset,limit))
+                return {"verified":True,"total":1,"offset":offset,"limit":limit,
+                        "items":[{"action":"engagement.like","target":"alpha:1",
+                                  "state":"verified","provider_post_id":"1",
+                                  "updated_at":100}]}
+        owner=ExistingReceipts()
+        assistant=Assistant(bridge=Bridge({"engagement":owner}),providers=[])
+        release=build_release(APP,self.tmp,SHA_A)
+        with AppServer(release,TOKEN,assistant=assistant) as server:
+            base=f"http://127.0.0.1:{server.port}"
+            status,_,_=fetch(base+"/engagement/history")
+            self.assertEqual(status,401)
+            status,body,_=fetch(base+"/engagement/history?offset=0&limit=1",TOKEN)
+            self.assertEqual(status,200)
+            self.assertEqual(json.loads(body)["items"][0]["state"],"verified")
+            self.assertEqual(owner.calls,[(0,1)])
+            for path in ("/engagement/history?limit=0",
+                         "/engagement/history?limit=101",
+                         "/engagement/history?unknown=1",
+                         "/engagement/history?offset=0&offset=2"):
+                status,_,_=fetch(base+path,TOKEN)
+                self.assertEqual(status,400)
+
     def test_analytics_period_comparison_requires_owner_and_valid_period(self):
         from tumblrkit.analytics_runtime import AnalyticsAdapter
         from tumblrkit.discovery_store import DiscoveryStore
