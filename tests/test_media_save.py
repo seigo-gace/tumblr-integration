@@ -76,6 +76,34 @@ class MediaSaveTests(unittest.TestCase):
         self.assertIn(b"ftyp",dest.read_bytes()[:32])
         self.assertEqual(Transcoder()._probe(dest)["video"],"h264")
 
+    def test_capacity_reports_real_disk_and_completed_ledger_only(self):
+        empty=self.worker.capacity()
+        self.assertTrue(empty["verified"])
+        self.assertEqual(empty["retained_bytes"],0)
+        self.assertEqual(empty["retained_limit_bytes"],MAX_TOTAL_SAVED_BYTES)
+        self.assertGreater(empty["disk_free_bytes"],0)
+        self.assertGreaterEqual(empty["retained_remaining_bytes"],0)
+        from contextlib import closing
+        with closing(self.worker._open()) as db:
+            db.execute("INSERT INTO media_save_jobs "
+                       "(id,candidate_id,source_url,source_post_id,media_index,"
+                       "state,output_bytes,created_at,updated_at) "
+                       "VALUES(?,?,?,?,?,'completed',?,?,?)",
+                       ("1"*32,"source:123","https://64.media.tumblr.com/image.jpg",
+                        "123",0,4096,1,1))
+            db.execute("INSERT INTO media_save_jobs "
+                       "(id,candidate_id,source_url,source_post_id,media_index,"
+                       "state,output_bytes,created_at,updated_at) "
+                       "VALUES(?,?,?,?,?,'failed',?,?,?)",
+                       ("2"*32,"source:123","https://64.media.tumblr.com/failed.jpg",
+                        "123",1,999999,1,1))
+        measured=self.worker.capacity()
+        self.assertEqual(measured["completed_jobs"],1)
+        self.assertEqual(measured["retained_bytes"],4096)
+        self.assertEqual(measured["retained_remaining_bytes"],
+                         MAX_TOTAL_SAVED_BYTES-4096)
+        self.assertGreaterEqual(measured["disk_free_bytes"],0)
+
     def test_all_135_saved_job_receipts_are_reachable_by_history_pages(self):
         from contextlib import closing
         with closing(self.worker._open()) as db:
