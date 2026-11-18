@@ -32,6 +32,49 @@ class AnalyticsAdapter:
         self.campaign_db = campaign_db
         self.campaign_db_path = Path(campaign_db_path) if campaign_db_path is not None else None
 
+    def compare(self, period="week"):
+        """Compare two disjoint, equal UTC-second windows of observed local events.
+
+        This is not Tumblr's total impressions or external conversion.
+        Current Library flags are intentionally excluded: their current state
+        cannot be reconstructed at historical cutoff times.
+        """
+        if period not in ("today","week","month"):
+            raise ValueError("analytics_comparison_period_invalid")
+        seconds,label=self.PERIODS[period]
+        end=int(self.clock())
+        middle=end-seconds
+        start=middle-seconds
+        with closing(self.store._open()) as db:
+            entries=db.execute(
+                "SELECT "
+                "COALESCE(SUM(CASE WHEN first_seen>=? AND first_seen<? THEN 1 ELSE 0 END),0), "
+                "COALESCE(SUM(CASE WHEN first_seen>=? AND first_seen<? THEN 1 ELSE 0 END),0) "
+                "FROM discovery_posts p LEFT JOIN discovery_blogs b ON b.name=p.blog "
+                "WHERE p.state='visible' AND COALESCE(b.blocked,0)=0",
+                (middle,end,start,middle)).fetchone()
+            table=db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='engagement_receipts'").fetchone()
+            if table:
+                reactions=db.execute(
+                    "SELECT "
+                    "COALESCE(SUM(CASE WHEN updated_at>=? AND updated_at<? THEN 1 ELSE 0 END),0), "
+                    "COALESCE(SUM(CASE WHEN updated_at>=? AND updated_at<? THEN 1 ELSE 0 END),0) "
+                    "FROM engagement_receipts WHERE state='verified'",
+                    (middle,end,start,middle)).fetchone()
+            else:
+                reactions=(0,0)
+        return {"verified":True,"period":period,"period_label":label,
+                "basis":"observed_local_discovery_and_verified_engagement",
+                "current":{"from":middle,"to":end,
+                           "new_candidates":int(entries[0]),
+                           "verified_engagements":int(reactions[0])},
+                "previous":{"from":start,"to":middle,
+                            "new_candidates":int(entries[1]),
+                            "verified_engagements":int(reactions[1])},
+                "not_measured":["Tumblr表示回数","Telegram転換","過去時点のお気に入り状態"]}
+
     def perform(self, action, target, payload):
         if action != "analytics.get_summary":
             raise ValueError("analytics_action_unlisted")
