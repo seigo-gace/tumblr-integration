@@ -42,7 +42,8 @@ class AnalyticsAdapter:
         if period not in ("today","week","month"):
             raise ValueError("analytics_comparison_period_invalid")
         seconds,label=self.PERIODS[period]
-        end=int(self.clock())
+        # Half-open windows include events observed in the current second.
+        end=int(self.clock())+1
         middle=end-seconds
         start=middle-seconds
         with closing(self.store._open()) as db:
