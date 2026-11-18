@@ -1035,7 +1035,32 @@
       comparePeriod.addEventListener("change",function(){
         report.href="/analytics/report?period="+encodeURIComponent(comparePeriod.value);
       });
-      controls.append(history,snapshot,comparePeriod,compareButton,report);
+      const candidateInput=document.createElement("input");
+      candidateInput.type="text";candidateInput.maxLength=100;
+      candidateInput.placeholder="投稿候補ID（例: blog:123）";
+      candidateInput.setAttribute("aria-label","投稿別反応の候補ID");
+      const postNotes=document.createElement("button");
+      postNotes.type="button";postNotes.textContent="投稿別反応";
+      postNotes.addEventListener("click",async function(){
+        const candidate=candidateInput.value.trim();
+        if(!candidate){display("確認する投稿候補IDを指定してください。","system");return;}
+        postNotes.disabled=true;
+        try{
+          const response=await fetch("/analytics/post?candidate_id="+
+            encodeURIComponent(candidate),{credentials:"same-origin"});
+          if(!response.ok)throw new Error("post_reactions_unavailable");
+          const result=await response.json();
+          if(result.verified!==true)throw new Error("post_reactions_unverified");
+          display("投稿："+result.title+"\\nTumblr最終観測のノート数："+result.observed_notes+
+            "（観測時刻："+new Date(result.observed_at*1000).toLocaleString("ja-JP")+"）"+
+            "。本アプリの確認済み交流操作："+result.confirmed_own_actions.length+
+            "件。スキだけの総数や表示回数は未計測です。","system");
+        }catch(error){
+          display("投稿別の観測情報を確認できませんでした。実データ以外は表示しません。","system");
+        }finally{postNotes.disabled=false;}
+      });
+      controls.append(history,snapshot,comparePeriod,compareButton,report,
+                      candidateInput,postNotes);
       panel.appendChild(controls);
       section.appendChild(panel);
     }
