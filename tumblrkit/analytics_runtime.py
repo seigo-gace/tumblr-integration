@@ -95,7 +95,16 @@ class AnalyticsAdapter:
             # server-owned fixed strings, but still fail closed if changed.
             if label.startswith(("=","+","-","@")):
                 raise ValueError("analytics_report_invalid")
-            writer.writerow((label,count,record["period"],summary["basis"]))
+            if label.startswith(("アプリ記録済み","MPB結果照合済み",
+                                 "キャンペーン","抽選・繰上り")):
+                basis=summary["campaign_basis"]
+            elif label.startswith("Tumblr認証済み"):
+                basis="official_oauth_follower_snapshot"
+            elif label.startswith("本アプリから確認済み"):
+                basis=summary["engagement_basis"]
+            else:
+                basis=summary["basis"]
+            writer.writerow((label,count,record["period"],basis))
         writer.writerow(("UNMEASURED","",summary["period"],
                          " / ".join(summary.get("not_measured",[]))))
         return chr(0xfeff)+stream.getvalue()
