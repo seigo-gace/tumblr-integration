@@ -376,6 +376,25 @@ class MediaSave:
                 "total":total,"offset":offset,"limit":limit,
                 "has_next":offset+len(rows)<total}
 
+    def capacity(self):
+        """Read current filesystem headroom and retained output ledger.
+
+        Does not fetch media or trust metadata for available disk space.
+        """
+        free=shutil.disk_usage(self._directory()).free
+        with closing(self._open()) as db:
+            used,jobs=db.execute(
+                "SELECT COALESCE(SUM(output_bytes),0),COUNT(*) "
+                "FROM media_save_jobs WHERE state='completed'").fetchone()
+        if type(used) is not int or used<0:
+            raise MediaError("MEDIA_CAPACITY_INVALID")
+        return {"verified":True,"retained_bytes":used,"completed_jobs":jobs,
+                "retained_limit_bytes":MAX_TOTAL_SAVED_BYTES,
+                "retained_remaining_bytes":max(0,MAX_TOTAL_SAVED_BYTES-used),
+                "disk_free_bytes":free,
+                "minimum_free_bytes":MIN_DISK_FREE_BYTES,
+                "safe_to_begin":free>=MIN_DISK_FREE_BYTES and used<MAX_TOTAL_SAVED_BYTES}
+
     def file(self,job_id):
         if not isinstance(job_id,str) or not KEY.fullmatch(job_id):
             raise MediaError("MEDIA_JOB_INVALID")
