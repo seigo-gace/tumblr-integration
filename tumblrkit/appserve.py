@@ -379,9 +379,11 @@ class _Handler(BaseHTTPRequestHandler):
                 if adapter is None:
                     self._json(409,{"error":"engagement_not_connected"})
                     return
-                result=adapter.history(
-                    int(params.get("offset",["0"])[0]),
-                    int(params.get("limit",["50"])[0]))
+                offset=int(params.get("offset",["0"])[0])
+                limit=int(params.get("limit",["50"])[0])
+                if offset<0 or offset>9223372036854775807 or not 1<=limit<=100:
+                    raise ValueError("engagement_history_query_invalid")
+                result=adapter.history(offset,limit)
             except (ValueError,TypeError,OverflowError):
                 self._json(400,{"error":"engagement_history_query_invalid"})
                 return
