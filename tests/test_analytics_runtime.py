@@ -74,6 +74,21 @@ class AnalyticsRuntimeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,"analytics_comparison_period_invalid"):
                 self.adapter.compare(invalid)
 
+    def test_csv_report_contains_only_verified_local_summary_and_unmeasured_note(self):
+        import csv
+        import io
+        content=self.adapter.report_csv("week")
+        self.assertTrue(content.startswith(chr(0xfeff)))
+        self.assertIn("\\r\\n",repr(content))
+        rows=list(csv.DictReader(io.StringIO(content.lstrip(chr(0xfeff)))))
+        self.assertEqual(rows[0]["metric"],"確認済み候補数")
+        self.assertEqual(rows[0]["value"],"2")
+        self.assertEqual(rows[-1]["metric"],"UNMEASURED")
+        self.assertIn("Telegram参加転換率",rows[-1]["basis"])
+        for bad in ("yesterday","",None,7):
+            with self.assertRaisesRegex(ValueError,"analytics_period_invalid"):
+                self.adapter.report_csv(bad)
+
     def test_week_metrics_are_derived_from_current_real_state(self):
         result=self.adapter.perform("analytics.get_summary","week",{})
         self.assertTrue(result["verified"])
