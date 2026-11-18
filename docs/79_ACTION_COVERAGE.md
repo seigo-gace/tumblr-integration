@@ -82,11 +82,11 @@ Generated from the **actual** `tumblrkit/action_catalog.py` on `feat/initial-mod
 | `analytics.08` | 紹介成果 | UI `analytics` | Navigation only; individual action unverified |
 | `analytics.09` | Telegram流入経路 | No owner route | Not connected |
 | `analytics.10` | 未分類流入を見る | No owner route | Not connected |
-| `analytics.11` | レポートを出す | No owner route | Not connected |
+| `analytics.11` | レポートを出す | UI `analytics` | UI + owned operation (Source; CI pending/readback) |
 
 ## Counts and verification contract
 
-- Exactly 79 catalog IDs. 40 link to an owner UI, 13 link to a Bridge contract, 26 have no route. These counts **do not equal implemented actions**.
-- Verified source deltas in this change unit: `library.07` searched via existing Discovery DB; `analytics.04` measured matched period comparison; `media.05` explicit failed-save retry via existing MediaSave; `media.06` candidate-ID scoped save history; `media.07` actual storage capacity readback; `referral.07` existing GATE tier-progress ledger report. Each still requires actual runtime/browser acceptance.
+- Exactly 79 catalog IDs. 41 link to an owner UI, 13 link to a Bridge contract, 25 have no route. These counts **do not equal implemented actions**.
+- Verified source deltas in this change unit: `library.07` searched via existing Discovery DB; `analytics.04` measured matched period comparison; `media.05` explicit failed-save retry via existing MediaSave; `media.06` candidate-ID scoped save history; `media.07` actual storage capacity readback; `referral.07` existing GATE tier-progress ledger report; `analytics.11` owner-only measured CSV export. Each still requires actual runtime/browser acceptance.
 - Existing `tests/test_action_catalog.py` protects 79 IDs and prohibits treating disconnected actions as executed. New tests independently cover implemented owned operations; no faked provider, GATE, or Telegram response is accepted as live.
 - Exact owners, stores, dependency mapping and deployment boundaries are in [NINE_MODULE_SOURCE_MAP.md](NINE_MODULE_SOURCE_MAP.md); authoritative UX examples remain the original supplied catalog. Never replace implementation with route documentation.
