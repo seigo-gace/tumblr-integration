@@ -47,6 +47,30 @@ class DraftEndpointTests(unittest.TestCase):
         status,body=req(self.service.port,"GET","/drafts",headers=self.auth)
         self.assertEqual(json.loads(body)["drafts"],[])
 
+    def test_preview_is_owner_only_exact_and_never_publishes(self):
+        import hashlib
+        status,body=req(self.service.port,"POST","/drafts",
+                        json.dumps({"text":"投稿前の全文確認"}).encode(),self.auth)
+        self.assertEqual(status,201)
+        ident=json.loads(body)["id"]
+        status,_=req(self.service.port,"GET","/drafts/"+ident+"/preview")
+        self.assertEqual(status,401)
+        status,body=req(self.service.port,"GET","/drafts/"+ident+"/preview",headers=self.auth)
+        self.assertEqual(status,200)
+        preview=json.loads(body)
+        self.assertTrue(preview["verified"])
+        self.assertEqual(preview["text"],"投稿前の全文確認")
+        self.assertEqual(preview["text_digest"],
+                         hashlib.sha256(preview["text"].encode("utf-8")).hexdigest())
+        self.assertFalse(preview["external_publication"])
+        self.assertFalse(preview["locked"])
+        self.assertEqual(preview["publish_state"],"local")
+        status,_=req(self.service.port,"GET","/drafts/"+ident+"/preview?unexpected=1",headers=self.auth)
+        self.assertEqual(status,400)
+        status,_=req(self.service.port,"GET","/drafts/invalid/preview",headers=self.auth)
+        self.assertEqual(status,404)
+        self.assertEqual(self.service.assistant.providers,[])
+
     def test_restart_preserves_drafts_and_no_external_provider(self):
         status,body=req(self.service.port,"POST","/drafts",'{"text":"再起動しても保存"}'.encode("utf-8"),self.auth)
         self.assertEqual(status,201)
