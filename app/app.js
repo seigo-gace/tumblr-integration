@@ -107,6 +107,26 @@
       counter.textContent=(data.jobs.length?offset+1:0)+"～"+(offset+data.jobs.length)+
         " / "+data.total+"件";
       section.appendChild(counter);
+      const capacityButton=document.createElement("button");
+      capacityButton.type="button";capacityButton.textContent="保存容量を確認";
+      capacityButton.addEventListener("click",async function(){
+        capacityButton.disabled=true;
+        try{
+          const response=await fetch("/media/capacity",{credentials:"same-origin"});
+          if(!response.ok)throw new Error("media_capacity_unavailable");
+          const cap=await response.json();
+          if(cap.verified!==true)throw new Error("media_capacity_unverified");
+          const mib=function(bytes){return (bytes/1048576).toFixed(1)+"MiB";};
+          display("メディア保存済み："+mib(cap.retained_bytes)+
+            " / 上限 "+mib(cap.retained_limit_bytes)+
+            "、保存先ディスク空き："+mib(cap.disk_free_bytes)+
+            "、確保すべき空き："+mib(cap.minimum_free_bytes)+
+            "。この表示だけでは次の保存成功を保証しません。","system");
+        }catch(error){
+          display("保存容量を確認できませんでした。保存操作は行っていません。","system");
+        }finally{capacityButton.disabled=false;}
+      });
+      section.appendChild(capacityButton);
       for(const job of data.jobs){
         const line=document.createElement("div");line.className="library-controls";
         const text=document.createElement("span");
