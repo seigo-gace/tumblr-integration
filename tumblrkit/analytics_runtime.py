@@ -76,6 +76,30 @@ class AnalyticsAdapter:
                             "verified_engagements":int(reactions[1])},
                 "not_measured":["Tumblr表示回数","Telegram転換","過去時点のお気に入り状態"]}
 
+    def report_csv(self, period="month"):
+        """Download measured owner-only summary rows, never estimated metrics."""
+        import csv
+        import io
+        summary=self.perform("analytics.get_summary",period,{})
+        if summary.get("verified") is not True:
+            raise ValueError("analytics_report_unverified")
+        stream=io.StringIO(newline="")
+        writer=csv.writer(stream,lineterminator="\\r\\n")
+        writer.writerow(("metric","value","period","basis"))
+        for record in summary["rows"]:
+            label=record["label"]
+            count=record["value"]
+            if not isinstance(label,str) or type(count) is not int or count<0:
+                raise ValueError("analytics_report_invalid")
+            # Excel interprets leading =,+,-,@ as formulas; labels are
+            # server-owned fixed strings, but still fail closed if changed.
+            if label.startswith(("=","+","-","@")):
+                raise ValueError("analytics_report_invalid")
+            writer.writerow((label,count,record["period"],summary["basis"]))
+        writer.writerow(("UNMEASURED","",summary["period"],
+                         " / ".join(summary.get("not_measured",[]))))
+        return "\\ufeff"+stream.getvalue()
+
     def perform(self, action, target, payload):
         if action != "analytics.get_summary":
             raise ValueError("analytics_action_unlisted")
