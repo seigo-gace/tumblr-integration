@@ -102,6 +102,32 @@ class EngagementTests(unittest.TestCase):
     def bot(self):
         return Assistant(bridge=Bridge({"engagement":self.adapter}),providers=[])
 
+    def test_owner_receipt_history_is_read_only_bounded_and_status_aware(self):
+        self.assertEqual(self.adapter.history()["items"],[])
+        with sqlite3.connect(self.store.path) as db:
+            from tumblrkit.engagement_runtime import RECEIPTS
+            db.executescript(RECEIPTS)
+            db.executemany(
+                "INSERT INTO engagement_receipts(action,target,state,provider_post_id,updated_at)"
+                " VALUES(?,?,?,?,?)",[
+                    ("engagement.like","source:123","verified","123",100),
+                    ("engagement.follow","source","sent","secret",200),
+                    ("engagement.reblog","source:123","reserved","",300),
+                ])
+        history=self.adapter.history(offset=0,limit=2)
+        self.assertTrue(history["verified"])
+        self.assertEqual(history["total"],3)
+        self.assertEqual([x["state"] for x in history["items"]],["reserved","sent"])
+        self.assertEqual(history["items"][1]["provider_post_id"],"")
+        last=self.adapter.history(offset=2,limit=2)
+        self.assertEqual(last["items"][0]["state"],"verified")
+        self.assertEqual(last["items"][0]["provider_post_id"],"123")
+        for offset,limit in ((-1,50),(0,101),(0,0),(True,50)):
+            with self.assertRaises(ValueError):
+                self.adapter.history(offset,limit)
+        self.assertEqual(self.writer.calls,[])
+        self.assertEqual(self.reader.calls,[])
+
     def test_like_requires_confirmation_real_candidate_and_readback(self):
         chat=self.bot()
         preview=chat.turn(selected_action="engagement.like",
