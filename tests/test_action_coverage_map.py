@@ -13,7 +13,7 @@ class ActionCoverageMapTests(unittest.TestCase):
     def test_every_original_action_has_exactly_one_status_in_source_map(self):
         document=(Path(__file__).resolve().parents[1]/
                   "docs"/"79_ACTION_COVERAGE.md").read_text(encoding="utf-8")
-        found=re.findall(r"^\\| \\x60([a-z]+\\.\\d{2})\\x60 \\|",document,re.MULTILINE)
+        found=[line.split("`")[1] for line in document.splitlines() if line.startswith("| `")]
         expected=[action.action_id for action in CATALOG]
         self.assertEqual(found,expected)
         self.assertEqual(len(set(found)),79)
@@ -29,7 +29,7 @@ class ActionCoverageMapTests(unittest.TestCase):
                           "media.07","referral.07","analytics.11","engagement.06"):
             self.assertIn(action_id,OWNER_UI_ROUTES)
             self.assertIn("Source",next(line for line in document.splitlines()
-                                        if line.startswith("| \`"+action_id+"\` |")))
+                                        if line.startswith("| `"+action_id+"` |")))
         self.assertIn("Runtime and user acceptance remain",document)
 
 
