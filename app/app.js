@@ -1608,7 +1608,23 @@
           post({selected_action:"tumblr.publish_draft",
                 selected_target:draft.id}).finally(function(){publish.disabled=false;});
         });
-        controls.append(load,publish,remove);
+        const preview=document.createElement("button");
+        preview.type="button";preview.textContent="プレビュー";
+        preview.addEventListener("click",async function(){
+          preview.disabled=true;
+          try{
+            const data=await draftRequest("/drafts/"+encodeURIComponent(draft.id)+
+              "/preview","GET");
+            if(data.verified!==true||data.draft_id!==draft.id||
+               typeof data.text!=="string")throw new Error("draft_preview_unverified");
+            display("保存済み下書きのプレビュー（Tumblr未送信）\\n"+
+              data.text+"\\n公開処理状態："+data.publish_state+
+              "。公開する場合は別途「Tumblrへ投稿」で確認してください。","system");
+          }catch(error){
+            display("下書きプレビューを取得できませんでした。投稿はしていません。","system");
+          }finally{preview.disabled=false;}
+        });
+        controls.append(load,preview,publish,remove);
         if(draft.publish_state==="local" && draft.locked!==true &&
            /^[0-9a-f]{64}$/.test(draft.text_digest||"")){
           const schedule=document.createElement("button");
