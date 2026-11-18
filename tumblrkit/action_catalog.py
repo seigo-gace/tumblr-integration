@@ -129,6 +129,7 @@ OWNER_UI_ROUTES = {
     "referral.09": "referral",
     "analytics.04": "analytics",
     "analytics.05": "analytics",
+    "analytics.06": "analytics",
     "analytics.07": "analytics",
     "analytics.08": "analytics",
     "analytics.11": "analytics",
