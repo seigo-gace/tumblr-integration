@@ -584,6 +584,41 @@ class AppServeTests(unittest.TestCase):
             self.assertEqual(len(stub.calls),2)
             self.assertEqual(store.read_candidates(),[])
 
+    def test_analytics_period_comparison_requires_owner_and_valid_period(self):
+        from tumblrkit.analytics_runtime import AnalyticsAdapter
+        from tumblrkit.discovery_store import DiscoveryStore
+        from tumblrkit.assistant import Assistant
+        from tumblrkit.bridge import Bridge
+        import os
+        private=self.tmp/"analytics-private"
+        private.mkdir(mode=0o700)
+        os.chmod(private,0o700)
+        store=DiscoveryStore(private/"discovery.sqlite3")
+        store.save_page("tag:analytics",[
+            {"name":"alpha","url":"https://alpha.tumblr.com"}],[{
+                "candidate_id":"alpha:123","blog":"alpha","post_id":"123",
+                "url":"https://alpha.tumblr.com/post/123","title":"observed",
+                "type":"image","date":"","thumbnail_url":"","text_excerpt":"",
+                "tags":[],"note_count":0,"media_refs":[],
+            }],1,complete=True)
+        adapter=AnalyticsAdapter(store)
+        assistant=Assistant(bridge=Bridge({"analytics":adapter}),providers=[])
+        release=build_release(APP,self.tmp,SHA_A)
+        with AppServer(release,TOKEN,assistant=assistant) as server:
+            base=f"http://127.0.0.1:{server.port}"
+            status,_,_=fetch(base+"/analytics/compare?period=week")
+            self.assertEqual(status,401)
+            status,body,_=fetch(base+"/analytics/compare?period=week",TOKEN)
+            self.assertEqual(status,200)
+            result=json.loads(body)
+            self.assertTrue(result["verified"])
+            self.assertEqual(result["current"]["new_candidates"],1)
+            self.assertEqual(result["previous"]["new_candidates"],0)
+            for path in ("/analytics/compare","/analytics/compare?period=all",
+                         "/analytics/compare?period=week&period=today"):
+                status,_,_=fetch(base+path,TOKEN)
+                self.assertEqual(status,400)
+
     def test_library_http_owner_only_bulk_update_and_resume(self):
         import os
         from tumblrkit.discovery_store import DiscoveryStore
