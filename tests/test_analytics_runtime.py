@@ -42,6 +42,38 @@ class AnalyticsRuntimeTests(unittest.TestCase):
              "media_refs":[]}
         ],number,complete=True)
 
+    def test_period_comparison_uses_disjoint_windows_and_measured_receipts(self):
+        result=self.adapter.compare("week")
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["current"]["new_candidates"],2)
+        self.assertEqual(result["previous"]["new_candidates"],1)
+        self.assertEqual(result["current"]["verified_engagements"],0)
+        self.assertEqual(result["previous"]["verified_engagements"],0)
+        self.assertEqual(result["current"]["from"],result["previous"]["to"])
+        self.assertEqual(result["current"]["to"]-result["current"]["from"],
+                         result["previous"]["to"]-result["previous"]["from"])
+        from tumblrkit.engagement_runtime import RECEIPTS
+        import sqlite3
+        with sqlite3.connect(self.store.path) as db:
+            db.executescript(RECEIPTS)
+            db.executemany(
+                "INSERT INTO engagement_receipts(action,target,state,updated_at) "
+                "VALUES(?,?,?,?)",[
+                    ("engagement.like","newer:2","verified",self.now-1),
+                    ("engagement.reblog","older:1","verified",self.now-8*86400),
+                    ("engagement.follow","newer","reserved",self.now),
+                ])
+        comparison=self.adapter.compare("week")
+        self.assertEqual(comparison["current"]["verified_engagements"],1)
+        self.assertEqual(comparison["previous"]["verified_engagements"],1)
+        self.store.exclude_blog("newer")
+        hidden=self.adapter.compare("week")
+        self.assertEqual(hidden["current"]["new_candidates"],0)
+        self.assertEqual(hidden["current"]["verified_engagements"],1)
+        for invalid in ("all","year","",None,3):
+            with self.assertRaisesRegex(ValueError,"analytics_comparison_period_invalid"):
+                self.adapter.compare(invalid)
+
     def test_week_metrics_are_derived_from_current_real_state(self):
         result=self.adapter.perform("analytics.get_summary","week",{})
         self.assertTrue(result["verified"])
