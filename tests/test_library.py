@@ -216,6 +216,26 @@ class LibraryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.library.list()
 
+    def test_search_matches_existing_title_blog_and_post_id_with_filters(self):
+        self.assertEqual(self.library.list(query="post 100")["items"][0]["candidate_id"],"alpha:100")
+        self.assertEqual(self.library.list(query="BETA")["items"][0]["candidate_id"],"beta:101")
+        self.assertEqual(self.library.list(query="102")["items"][0]["candidate_id"],"alpha:102")
+        self.assertEqual(self.library.list(query="post")["total"],3)
+        self.assertEqual(self.library.list(query="post",offset=1,limit=1)["total"],3)
+        self.assertEqual(len(self.library.list(query="post",offset=1,limit=1)["items"]),1)
+        self.assertEqual(self.library.list(query="%")["total"],0)
+        self.assertEqual(self.library.list(query="_")["total"],0)
+        self.library.update(["alpha:100"],"favorite",True)
+        self.assertEqual(self.library.list("favorite",query="alpha")["total"],1)
+        self.assertEqual(self.library.list("unread",query="beta")["total"],1)
+        self.store.mark_unavailable("alpha:100")
+        self.assertEqual(self.library.list("all",query="100")["total"],0)
+        self.assertEqual(self.library.list("unavailable",query="100")["total"],1)
+        for bad in (None,101*"x","ok\\x00fail",1):
+            with self.subTest(query=bad):
+                with self.assertRaisesRegex(ValueError,"library_query_invalid"):
+                    self.library.list(query=bad)
+
     def test_pagination_and_filter_validation(self):
         self.assertEqual(self.library.list(offset=1,limit=1)["total"],3)
         self.assertEqual(len(self.library.list(offset=1,limit=1)["items"]),1)
