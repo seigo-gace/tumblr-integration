@@ -76,6 +76,40 @@ class AnalyticsAdapter:
                             "verified_engagements":int(reactions[1])},
                 "not_measured":["Tumblr表示回数","Telegram転換","過去時点のお気に入り状態"]}
 
+    def post_reactions(self,candidate_id):
+        """Recorded Tumblr notes and this app's own verified interactions.
+
+        Notes are an observed mixed Tumblr count, not like-only impressions.
+        """
+        from tumblrkit.library import IDENT
+        if not isinstance(candidate_id,str) or not IDENT.fullmatch(candidate_id):
+            raise ValueError("analytics_candidate_invalid")
+        with closing(self.store._open()) as db:
+            row=db.execute(
+                "SELECT p.title,p.blog,p.post_id,p.note_count,p.last_seen,p.state,"
+                "COALESCE(b.blocked,0) FROM discovery_posts p "
+                "LEFT JOIN discovery_blogs b ON b.name=p.blog "
+                "WHERE p.candidate_id=?",(candidate_id,)).fetchone()
+            if row is None or row[5]!="visible" or row[6]:
+                raise ValueError("analytics_candidate_unavailable")
+            title,blog,post_id,notes,last_seen,_,_=row
+            actions=[]
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                          "AND name='engagement_receipts'").fetchone():
+                actions=[{"action":a,"observed_at":at}
+                         for a,at in db.execute(
+                             "SELECT action,updated_at FROM engagement_receipts "
+                             "WHERE target=? AND state='verified' "
+                             "ORDER BY updated_at DESC,action",
+                             (candidate_id,)).fetchall()]
+        if type(notes) is not int or notes<0:
+            raise ValueError("analytics_notes_unavailable")
+        return {"verified":True,"basis":"last_saved_tumblr_discovery_snapshot",
+                "candidate_id":candidate_id,"blog":blog,"post_id":post_id,
+                "title":title,"observed_notes":notes,"observed_at":last_seen,
+                "confirmed_own_actions":actions,
+                "not_measured":["Tumblr投稿表示回数","スキのみの総数","返信のみの総数"]}
+
     def report_csv(self, period="month"):
         """Download measured owner-only summary rows, never estimated metrics."""
         import csv
