@@ -122,6 +122,7 @@ OWNER_UI_ROUTES = {
     "campaign.12": "campaign",
     "referral.01": "referral",
     "referral.05": "referral",
+    "referral.07": "referral",
     "referral.08": "referral",
     "referral.09": "referral",
     "analytics.04": "analytics",
