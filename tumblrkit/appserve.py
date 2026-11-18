@@ -347,7 +347,7 @@ class _Handler(BaseHTTPRequestHandler):
         parts = urlsplit(self.path)
         # Browser entry URLs can include harmless query parameters.
         # They must never obscure the login page with a plain-text 400.
-        if parts.query and parts.path not in ("/", "/index.html", "/login", "/oauth/callback", "/library", "/media/jobs", "/drafts", "/analytics/compare"):
+        if parts.query and parts.path not in ("/", "/index.html", "/login", "/oauth/callback", "/library", "/media/jobs", "/drafts", "/analytics/compare", "/analytics/report"):
             self._send(400, "bad request\n", "text/plain; charset=utf-8")
             return
         if parts.path == "/oauth/callback":
@@ -364,6 +364,31 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(400, "Tumblr認可に失敗しました。再ログイン後に連携をやり直してください。", "text/plain; charset=utf-8")
                 return
             self._send(200, '<!doctype html><html lang="ja"><meta charset="utf-8"><title>Tumblr連携</title><p>Tumblrの本人確認が完了しました。</p><a href="/">操作画面に戻る</a></html>', "text/html; charset=utf-8")
+            return
+        if parts.path == "/analytics/report":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            from urllib.parse import parse_qs
+            params=parse_qs(parts.query,keep_blank_values=True)
+            if set(params)!={"period"} or len(params["period"])!=1:
+                self._json(400,{"error":"analytics_report_query_invalid"})
+                return
+            try:
+                adapter=self.server.assistant.bridge.adapters.get("analytics")
+                if adapter is None:
+                    raise ValueError("analytics_adapter_unavailable")
+                csv_content=adapter.report_csv(params["period"][0])
+            except ValueError as exc:
+                self._json(400,{"error":str(exc) if str(exc).startswith("analytics_")
+                                else "analytics_report_invalid"})
+                return
+            except (OSError,sqlite3.Error):
+                self._json(503,{"error":"analytics_store_unavailable"})
+                return
+            self._send(200,csv_content,"text/csv; charset=utf-8",
+                       extra=[("Content-Disposition",
+                               'attachment; filename="tumblr-analytics-'+params["period"][0]+'.csv"')])
             return
         if parts.path == "/analytics/compare":
             if not _authorized(self):
