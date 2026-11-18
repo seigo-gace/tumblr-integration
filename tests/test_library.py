@@ -231,7 +231,7 @@ class LibraryTests(unittest.TestCase):
         self.store.mark_unavailable("alpha:100")
         self.assertEqual(self.library.list("all",query="100")["total"],0)
         self.assertEqual(self.library.list("unavailable",query="100")["total"],1)
-        for bad in (None,101*"x","ok\\x00fail",1):
+        for bad in (None,101*"x","ok"+chr(0)+"fail",1):
             with self.subTest(query=bad):
                 with self.assertRaisesRegex(ValueError,"library_query_invalid"):
                     self.library.list(query=bad)
