@@ -105,9 +105,24 @@ class ReferralManager:
             "FROM referrals r LEFT JOIN referral_revocations v "
             "ON v.campaign_id=r.campaign_id AND v.referrer_id=r.referrer_id "
             "WHERE r.campaign_id=? ORDER BY r.referrer_id",(campaign_id,)).fetchall()
+        tiers=self.db.execute(
+            "SELECT threshold,reward FROM tiers WHERE campaign_id=? ORDER BY threshold",
+            (campaign_id,)).fetchall()
+        granted=self.db.execute(
+            "SELECT referrer_id,threshold,awarded_at FROM grants WHERE campaign_id=?",
+            (campaign_id,)).fetchall()
+        granted_at={(person,threshold):at for person,threshold,at in granted}
         return {"campaign_id":campaign_id,"referrers":[
             {"referrer_id":r[0],"referral_code":r[1],
              "status":"revoked" if r[2] else "active",
-             "verified_members":r[3],"awarded_tiers":r[4]} for r in rows],
+             "verified_members":r[3],"awarded_tiers":r[4],
+             "tier_progress":[
+                 {"threshold":threshold,"reward":reward,
+                  "verified_members":r[3],
+                  "remaining":max(0,threshold-r[3]),
+                  "awarded":(r[0],threshold) in granted_at,
+                  "awarded_at":granted_at.get((r[0],threshold))}
+                 for threshold,reward in tiers]
+            } for r in rows],
             "basis":"owner_private_gate_verified_ledger",
             "clicks_are_not_memberships":True}
