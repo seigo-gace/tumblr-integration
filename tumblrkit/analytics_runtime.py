@@ -48,8 +48,8 @@ class AnalyticsAdapter:
         with closing(self.store._open()) as db:
             entries=db.execute(
                 "SELECT "
-                "COALESCE(SUM(CASE WHEN first_seen>=? AND first_seen<? THEN 1 ELSE 0 END),0), "
-                "COALESCE(SUM(CASE WHEN first_seen>=? AND first_seen<? THEN 1 ELSE 0 END),0) "
+                "COALESCE(SUM(CASE WHEN p.first_seen>=? AND p.first_seen<? THEN 1 ELSE 0 END),0), "
+                "COALESCE(SUM(CASE WHEN p.first_seen>=? AND p.first_seen<? THEN 1 ELSE 0 END),0) "
                 "FROM discovery_posts p LEFT JOIN discovery_blogs b ON b.name=p.blog "
                 "WHERE p.state='visible' AND COALESCE(b.blocked,0)=0",
                 (middle,end,start,middle)).fetchone()
