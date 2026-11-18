@@ -893,7 +893,34 @@
           display("公式Tumblrから確認できませんでした。推測値は記録していません。","system");
         }finally{snapshot.disabled=false;}
       });
-      controls.append(history,snapshot);
+      const comparePeriod=document.createElement("select");
+      comparePeriod.setAttribute("aria-label","集計の比較期間");
+      [["today","24時間"],["week","7日"],["month","30日"]].forEach(function(entry){
+        const option=document.createElement("option");
+        option.value=entry[0];option.textContent=entry[1];
+        comparePeriod.appendChild(option);
+      });
+      comparePeriod.value="week";
+      const compareButton=document.createElement("button");
+      compareButton.type="button";compareButton.textContent="前期間と比較";
+      compareButton.addEventListener("click",async function(){
+        compareButton.disabled=true;
+        try{
+          const response=await fetch("/analytics/compare?period="+
+            encodeURIComponent(comparePeriod.value),{credentials:"same-origin"});
+          if(!response.ok)throw new Error("analytics_comparison_unavailable");
+          const result=await response.json();
+          if(result.verified!==true)throw new Error("analytics_comparison_unverified");
+          display("保存済み実測値の期間比較（現在／直前の同じ長さ）\\n"+
+            "新規候補："+result.current.new_candidates+"／"+result.previous.new_candidates+
+            "、実行確認済み交流："+result.current.verified_engagements+
+            "／"+result.previous.verified_engagements+
+            "。外部表示回数・参加転換は未計測です。","system");
+        }catch(error){
+          display("期間比較を取得できません。記録済みデータを変更していません。","system");
+        }finally{compareButton.disabled=false;}
+      });
+      controls.append(history,snapshot,comparePeriod,compareButton);
       panel.appendChild(controls);
       section.appendChild(panel);
     }
