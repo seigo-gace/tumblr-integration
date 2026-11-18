@@ -608,6 +608,16 @@ class AppServeTests(unittest.TestCase):
             self.assertEqual(status,200)
             self.assertEqual(json.loads(body)["total"],1)
             self.assertEqual(len(json.loads(body)["items"][0]["media"]),1)
+            status,body,_=fetch(base+"/library?query=alpha",TOKEN)
+            self.assertEqual(status,200)
+            self.assertEqual(json.loads(body)["total"],1)
+            status,body,_=fetch(base+"/library?query=missing",TOKEN)
+            self.assertEqual(status,200)
+            self.assertEqual(json.loads(body)["total"],0)
+            status,_,_=fetch(base+"/library?query=alpha&query=beta",TOKEN)
+            self.assertEqual(status,400)
+            status,_,_=fetch(base+"/library?query="+("a"*101),TOKEN)
+            self.assertEqual(status,400)
             selected=json.dumps({"candidate_ids":["alpha:123"]}).encode()
             headers={"Content-Type":"application/json","Origin":base}
             status,_,_=fetch(base+"/library/selected",method="POST",
