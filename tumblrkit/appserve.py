@@ -475,13 +475,14 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             from urllib.parse import parse_qs
             params=parse_qs(parts.query,keep_blank_values=True)
-            if set(params)-{"offset","limit"} or any(len(v)!=1 for v in params.values()):
+            if set(params)-{"offset","limit","candidate_id"} or any(len(v)!=1 for v in params.values()):
                 self._json(400,{"error":"media_query_invalid"})
                 return
             try:
                 offset=int(params.get("offset",["0"])[0])
                 limit=int(params.get("limit",["100"])[0])
-                result=self.server.media_save.list(offset=offset,limit=limit)
+                result=self.server.media_save.list(candidate_id=params.get("candidate_id",[None])[0],
+                                                   offset=offset,limit=limit)
             except (MediaError,ValueError,OverflowError):
                 self._json(400,{"error":"media_query_invalid"})
                 return
