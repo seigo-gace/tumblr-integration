@@ -77,6 +77,27 @@ class DraftStore:
             raise ValueError("DRAFT_NOT_FOUND")
         return {"id":row[0],"text":row[1],"updated":row[2]}
 
+    def preview(self, ident):
+        """Exact stored text and digest for a single owner approval preview.
+
+        Never mutates or publishes; caller must separately confirm the
+        corresponding original Bridge publishing action.
+        """
+        self.get(ident)  # Canonical ID validation and absence handling.
+        with self._connect() as db:
+            row=db.execute("SELECT text,updated FROM operation_drafts WHERE id=?",
+                           (ident,)).fetchone()
+            if row is None:
+                raise ValueError("DRAFT_NOT_FOUND")
+            text,updated=row
+            state,post_id,current=self._published_info(db,ident,text)
+            return {"verified":True,"draft_id":ident,"text":text,
+                    "text_digest":hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                    "updated":updated,"publish_state":state,
+                    "locked":self._has_publish_receipt(db,ident),
+                    "provider_post_id":post_id,
+                    "external_publication":False}
+
     @staticmethod
     def _has_publish_receipt(db, ident):
         table=db.execute(
