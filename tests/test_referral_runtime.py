@@ -28,7 +28,26 @@ class ReferralRuntimeTests(unittest.TestCase):
         report=ReferralManager(self.db).report("launch")
         self.assertEqual(report["referrers"][0]["verified_members"],2)
         self.assertEqual(report["referrers"][0]["awarded_tiers"],1)
+        self.assertEqual(report["referrers"][0]["tier_progress"][0]["threshold"],2)
+        self.assertEqual(report["referrers"][0]["tier_progress"][0]["remaining"],0)
+        self.assertTrue(report["referrers"][0]["tier_progress"][0]["awarded"])
+        self.assertIsNotNone(report["referrers"][0]["tier_progress"][0]["awarded_at"])
         self.assertTrue(report["clicks_are_not_memberships"])
+
+    def test_referral_report_shows_remaining_verified_members_not_clicks(self):
+        code=self.owner.issue("launch","alice")["referral_code"]
+        before=self.owner.report("launch")["referrers"][0]["tier_progress"][0]
+        self.assertEqual(before["remaining"],2)
+        self.assertFalse(before["awarded"])
+        self.owner.confirm("launch","bob",code)
+        current=self.owner.report("launch")["referrers"][0]["tier_progress"][0]
+        self.assertEqual(current["verified_members"],1)
+        self.assertEqual(current["remaining"],1)
+        self.assertFalse(current["awarded"])
+        self.owner.confirm("launch","charlie",code)
+        earned=self.owner.report("launch")["referrers"][0]["tier_progress"][0]
+        self.assertEqual(earned["remaining"],0)
+        self.assertTrue(earned["awarded"])
 
     def test_missing_gate_blocks_without_touching_membership(self):
         code=self.owner.issue("launch","alice")["referral_code"]
