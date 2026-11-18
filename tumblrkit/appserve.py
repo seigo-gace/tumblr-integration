@@ -365,6 +365,29 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, '<!doctype html><html lang="ja"><meta charset="utf-8"><title>Tumblr連携</title><p>Tumblrの本人確認が完了しました。</p><a href="/">操作画面に戻る</a></html>', "text/html; charset=utf-8")
             return
+        if parts.path == "/analytics/compare":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            from urllib.parse import parse_qs
+            params=parse_qs(parts.query,keep_blank_values=True)
+            if set(params)!={"period"} or len(params["period"])!=1:
+                self._json(400,{"error":"analytics_comparison_query_invalid"})
+                return
+            try:
+                adapter=self.server.assistant.bridge.adapters.get("analytics")
+                if adapter is None:
+                    raise ValueError("analytics_adapter_unavailable")
+                result=adapter.compare(params["period"][0])
+            except ValueError as exc:
+                self._json(400,{"error":str(exc) if str(exc).startswith("analytics_")
+                                else "analytics_comparison_invalid"})
+                return
+            except (OSError,sqlite3.Error):
+                self._json(503,{"error":"analytics_store_unavailable"})
+                return
+            self._json(200,result)
+            return
         if parts.path == "/analytics/followers":
             if not _authorized(self):
                 self._unauthorized()
