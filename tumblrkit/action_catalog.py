@@ -145,6 +145,7 @@ OWNER_UI_ROUTES = {
 BRIDGE_ROUTES = {
     "discovery.02": ("tumblr.discover", "followers"),
     "discovery.03": ("tumblr.discover", "following"),
+    "discovery.04": ("tumblr.discover", None),
     "discovery.05": ("tumblr.discover", None),
     "publisher.07": ("tumblr.publish_draft", None),
     "publisher.10": ("tumblr.edit_post", None),
@@ -171,4 +172,6 @@ def resolve_bridge_action(action_id, target=""):
         raise ValueError("catalog_target_required")
     if action_id=="discovery.05":
         return action,"tag:"+target.strip()
+    if action_id=="discovery.04":
+        return action,"related:"+target.strip()
     return action,target.strip()
