@@ -62,6 +62,24 @@
       display("Tumblr設定を読み出せません。保存済み情報は変更していません。","system");
     }
   }
+  async function disconnectTumblr(){
+    if(!window.confirm("このアプリに保存されたTumblr認可情報を解除しますか？予約投稿や取得操作が使えなくなります。Tumblr側の認可取り消しは別途必要です。"))return;
+    try{
+      const response=await fetch("/oauth/disconnect",{
+        method:"POST",credentials:"same-origin",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({confirmation:"disconnect_local_tumblr"})
+      });
+      if(!response.ok)throw new Error("oauth_disconnect_failed");
+      const result=await response.json();
+      if(result.connected!==false||result.local_credentials_removed!==true)
+        throw new Error("oauth_disconnect_unverified");
+      await showOAuthStatus();
+      display("このアプリ内のTumblr連携情報を解除しました。Tumblr側の認可取消しは実行していません。","system");
+    }catch(error){
+      display("連携解除を確認できません。再送前に接続状態を確認してください。","system");
+    }
+  }
   showOAuthStatus();
   connect.addEventListener("click",async function(){
     connect.disabled=true;
@@ -1317,6 +1335,7 @@
           if(item.owner_ui==="drafts"){refreshDrafts();return;}
           if(item.owner_ui==="oauth_status"){showOAuthStatus();connect.focus();return;}
           if(item.owner_ui==="oauth_settings"){showOAuthSettings();return;}
+          if(item.owner_ui==="oauth_disconnect"){disconnectTumblr();return;}
           if(item.owner_ui==="discovery_targets"){showExcludedBlogs();return;}
           if(item.owner_ui==="oauth_connect"){connect.focus();
             display("画面上部のTumblr連携を押してください。認可は自動開始しません。","system");
