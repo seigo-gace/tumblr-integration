@@ -868,6 +868,11 @@ class _Handler(BaseHTTPRequestHandler):
                         response={"campaign_id":result.campaign_id,"commitment":result.commitment,
                                   "winners":list(result.winners),"participants":result.participants,
                                   "winner_count":result.winner_count}
+                    elif action=="configure" and set(data)=={"action","campaign_id","deadline","winners","claim_seconds","gate_topic_id"}:
+                        response=owner.configure_entry_terms(
+                            data["campaign_id"],deadline=data["deadline"],
+                            winners=data["winners"],claim_seconds=data["claim_seconds"],
+                            gate_topic_id=data["gate_topic_id"])
                     elif action=="reschedule" and set(data)=={"action","campaign_id","deadline"}:
                         response=owner.change_deadline(data["campaign_id"],data["deadline"])
                     elif action=="entries" and set(data)=={"action","campaign_id"}:
