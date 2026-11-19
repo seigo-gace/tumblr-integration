@@ -8,7 +8,7 @@ Generated from the **actual** `tumblrkit/action_catalog.py` on `feat/initial-mod
 | `account.02` | 接続を開始 | UI `oauth_connect` | Navigation only; individual action unverified |
 | `account.03` | 再認証する | UI `oauth_connect` | Navigation only; individual action unverified |
 | `account.04` | 操作権限を見る | UI `oauth_status` | Navigation only; individual action unverified |
-| `account.05` | 設定を確認する | No owner route | Not connected |
+| `account.05` | 設定を確認する | UI `oauth_settings`, read-only existing `/oauth/status` | Source only; runtime verification pending |
 | `account.06` | 接続を解除する | No owner route | Not connected |
 | `discovery.01` | 新着を巡回 | UI `discovery` | Navigation only; individual action unverified |
 | `discovery.02` | フォロワーを確認 | Bridge `tumblr.discover` | Bridge adapter contract only |
