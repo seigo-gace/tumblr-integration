@@ -53,7 +53,7 @@ Generated from the **actual** `tumblrkit/action_catalog.py` on `feat/initial-mod
 | `publisher.12` | 投稿結果を見る | Bridge `tumblr.reconcile_post` | Bridge adapter contract only |
 | `campaign.01` | 新規企画を作る | UI `campaign` | Navigation only; individual action unverified |
 | `campaign.02` | 企画文を作る | No owner route | Not connected |
-| `campaign.03` | 応募条件を設定 | No owner route | Not connected |
+| `campaign.03` | 応募条件を設定 | UI `campaign`, `POST /campaigns` configure (pre-entry only) | Source only; runtime verification pending |
 | `campaign.04` | 応募状況を見る | UI `campaign` | Navigation only; individual action unverified |
 | `campaign.05` | 重複・無効候補を見る | UI `campaign`, `POST /campaigns` audit (bounded GATE recheck) | Source only; runtime verification pending |
 | `campaign.06` | 応募締切を変更 | UI `campaign` | Navigation only; individual action unverified |
