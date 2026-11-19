@@ -25,6 +25,7 @@ class ActionCatalogTests(unittest.TestCase):
         self.assertEqual(resolve_bridge_action("analytics.03"),("analytics.get_summary","month"))
         self.assertEqual(resolve_bridge_action("discovery.02"),("tumblr.discover","followers"))
         self.assertEqual(resolve_bridge_action("discovery.05","映像"),("tumblr.discover","tag:映像"))
+        self.assertEqual(resolve_bridge_action("discovery.04","映像"),("tumblr.discover","related:映像"))
         self.assertEqual(resolve_bridge_action("publisher.07","a"*32),
                          ("tumblr.publish_draft","a"*32))
         for action in ("campaign.07","referral.05","publisher.08","analytics.11"):
