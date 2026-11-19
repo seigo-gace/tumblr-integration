@@ -1110,6 +1110,34 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._json(200, {"excluded": True})
             return
+        if parts.path == "/oauth/disconnect":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            bearer_ok=self.headers.get("Authorization","").startswith("Bearer ") and _authorized(self)
+            if ((self.headers.get("Origin") and not _same_origin(self)) or
+                    (not self.headers.get("Origin") and not bearer_ok)):
+                self._send(403,"origin rejected\n","text/plain; charset=utf-8")
+                return
+            if self.server.owner_oauth is None:
+                self._json(503,{"error":"oauth_not_configured"})
+                return
+            try:
+                if self.headers.get("Content-Type","").split(";",1)[0].strip().lower()!="application/json":
+                    raise ValueError("oauth_disconnect_confirmation_required")
+                data=json.loads(self._read_body(256).decode("utf-8"))
+                if not isinstance(data,dict) or set(data)!={"confirmation"}:
+                    raise ValueError("oauth_disconnect_confirmation_required")
+                result=self.server.owner_oauth.disconnect(data["confirmation"])
+            except (ValueError,TypeError,UnicodeError,json.JSONDecodeError) as exc:
+                self._json(400,{"error":str(exc) if str(exc).startswith("oauth_")
+                                else "oauth_disconnect_invalid"})
+                return
+            except OSError:
+                self._json(503,{"error":"oauth_disconnect_unavailable"})
+                return
+            self._json(200,result)
+            return
         if parts.path == "/oauth/start":
             if not _authorized(self):
                 self._unauthorized()
