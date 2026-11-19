@@ -381,6 +381,32 @@ class CampaignContest:
         return {"status":"claimed","campaign_id":campaign_id,
                 "applicant_id":applicant_id,"at":now}
 
+    def expiry_preview(self,campaign_id):
+        """Read-only expiry/waitlist view; no promotion or prize mutation."""
+        self._ident(campaign_id)
+        contest=self.db.execute(
+            "SELECT state,claim_seconds FROM campaign_contests WHERE campaign_id=?",
+            (campaign_id,)).fetchone()
+        if contest is None:
+            raise ValueError("campaign_missing")
+        now=int(self.clock())
+        rows=self.db.execute(
+            "SELECT applicant_id,status,claim_deadline,rank "
+            "FROM campaign_entries WHERE campaign_id=? "
+            "AND status IN ('winner','waitlisted','expired') ORDER BY rank",
+            (campaign_id,)).fetchall()
+        due=[{"applicant_id":r[0],"claim_deadline":r[2],"rank":r[3]}
+             for r in rows if r[1]=="winner"
+             and r[2] is not None and now>=r[2]]
+        waiting=[{"applicant_id":r[0],"rank":r[3]} for r in rows
+                 if r[1]=="waitlisted"]
+        expired=[{"applicant_id":r[0],"rank":r[3]} for r in rows
+                 if r[1]=="expired"]
+        return {"campaign_id":campaign_id,"state":contest[0],
+                "due_unclaimed":due,"waitlisted":waiting,
+                "already_expired":expired,"now":now,
+                "promotion_executed":False}
+
     def promote_expired(self,campaign_id):
         """Expire unclaimed winners and promote the next ranked entry once."""
         self._ident(campaign_id)
