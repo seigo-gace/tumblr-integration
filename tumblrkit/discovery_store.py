@@ -177,11 +177,31 @@ class DiscoveryStore:
                 db.execute("INSERT INTO discovery_blogs(name,url,source,blocked,first_seen,last_seen)"
                            " VALUES(?,?,?,1,?,?) ON CONFLICT(name) DO UPDATE SET blocked=1",
                            (blog,"https://"+blog+".tumblr.com","excluded",now,now))
-                db.execute("UPDATE discovery_posts SET state='excluded' WHERE blog=?",(blog,))
+                # Preserve provider-verified unavailable state. Exclusion
+                # hides visible candidates without rewriting provider evidence.
+                db.execute("UPDATE discovery_posts SET state='excluded' "
+                           "WHERE blog=? AND state='visible'",(blog,))
                 db.execute("COMMIT")
             except Exception:
                 db.execute("ROLLBACK")
                 raise
+
+    def include_blog(self,name):
+        """Re-enable the selected blog without reviving stale excluded posts.
+
+        Excluded posts become visible only after a new official observation,
+        rather than pretending an old/deleted item is still public.
+        """
+        from tumblrkit.tumblr_read import normalize_blog
+        blog=normalize_blog(name)
+        with closing(self._open()) as db:
+            with db:
+                changed=db.execute(
+                    "UPDATE discovery_blogs SET blocked=0 WHERE name=? AND blocked=1",
+                    (blog,)).rowcount
+        if changed!=1:
+            raise ValueError("discovery_blog_not_excluded")
+        return {"blog":blog,"included":True,"refresh_required":True}
 
     def read_candidates(self,source=None,limit=100,offset=0):
         if not 1<=limit<=100 or type(offset) is not int or offset<0:
