@@ -298,6 +298,58 @@
     messages.appendChild(section);messages.scrollTop=messages.scrollHeight;
     await render();
   }
+  async function showExcludedBlogs(){
+    try{
+      const response=await fetch("/discovery/excluded",{credentials:"same-origin"});
+      if(!response.ok)throw new Error("discovery_list_unavailable");
+      const result=await response.json();
+      if(!Array.isArray(result.blogs))throw new Error("discovery_list_invalid");
+      const panel=document.createElement("section");
+      panel.className="library-panel result-view";
+      const heading=document.createElement("h3");
+      heading.textContent="発見候補から除外したブログ";
+      panel.appendChild(heading);
+      if(!result.blogs.length){
+        const empty=document.createElement("p");
+        empty.textContent="除外中のブログはありません。";
+        panel.appendChild(empty);
+      }
+      result.blogs.forEach(function(blog){
+        const row=document.createElement("div");
+        row.className="library-controls";
+        const label=document.createElement("span");
+        label.textContent=blog;
+        const restore=document.createElement("button");
+        restore.type="button";restore.textContent="候補へ戻す";
+        restore.addEventListener("click",async function(){
+          if(!window.confirm(blog+"を発見候補へ戻しますか？保存済みの古い投稿は自動復活しません。"))return;
+          restore.disabled=true;
+          try{
+            const response=await fetch("/discovery/include",{
+              method:"POST",credentials:"same-origin",
+              headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({blog:blog})
+            });
+            if(!response.ok)throw new Error("discovery_include_failed");
+            const receipt=await response.json();
+            if(receipt.included!==true||receipt.refresh_required!==true)
+              throw new Error("discovery_include_unverified");
+            row.remove();
+            display(blog+"を候補対象へ戻しました。投稿は公式APIで改めて取得・確認してください。","system");
+          }catch(error){
+            restore.disabled=false;
+            display(blog+"の再登録を確認できません。操作状況を照合してください。","system");
+          }
+        });
+        row.append(label,restore);
+        panel.appendChild(row);
+      });
+      messages.appendChild(panel);
+      messages.scrollTop=messages.scrollHeight;
+    }catch(error){
+      display("除外ブログ一覧を取得できません。保存済み設定は変更していません。","system");
+    }
+  }
   async function showLibrary(){
     let data;
     try{
@@ -1265,6 +1317,7 @@
           if(item.owner_ui==="drafts"){refreshDrafts();return;}
           if(item.owner_ui==="oauth_status"){showOAuthStatus();connect.focus();return;}
           if(item.owner_ui==="oauth_settings"){showOAuthSettings();return;}
+          if(item.owner_ui==="discovery_targets"){showExcludedBlogs();return;}
           if(item.owner_ui==="oauth_connect"){connect.focus();
             display("画面上部のTumblr連携を押してください。認可は自動開始しません。","system");
             return;}
