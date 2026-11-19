@@ -155,6 +155,40 @@ class CampaignContest:
         return {"campaign_id":campaign_id,"seed_commitment":commitment,
                 "deadline":deadline,"winners":winners}
 
+    def configure_entry_terms(self,campaign_id,*,deadline,winners,claim_seconds,gate_topic_id):
+        """Edit only the original adopted terms, before the first entry.
+
+        Preserve the draw seed and commitment. After an entrant appears the
+        contest terms are frozen; never silently change eligibility/rank.
+        """
+        self._ident(campaign_id)
+        now=int(self.clock())
+        if (type(deadline) is not int or deadline<=now or
+            type(winners) is not int or not 1<=winners<=10000 or
+            type(claim_seconds) is not int or not 60<=claim_seconds<=2592000):
+            raise ValueError("campaign_terms_invalid")
+        if (not isinstance(gate_topic_id,str) or not gate_topic_id.isascii()
+            or not gate_topic_id.isdecimal() or not 1<=len(gate_topic_id)<=13
+            or gate_topic_id[0]=="0"):
+            raise ValueError("campaign_gate_topic_invalid")
+        with self.db:
+            changed=self.db.execute(
+                "UPDATE campaign_contests SET deadline=?,winner_count=?,claim_seconds=? "
+                "WHERE campaign_id=? AND state='open' AND deadline>? "
+                "AND NOT EXISTS (SELECT 1 FROM campaign_entries e "
+                "WHERE e.campaign_id=campaign_contests.campaign_id)",
+                (deadline,winners,claim_seconds,campaign_id,now)).rowcount
+            if changed!=1:
+                raise ValueError("campaign_terms_locked")
+            self.db.execute(
+                "INSERT INTO campaign_gate_topics(campaign_id,posting_topic_id) "
+                "VALUES(?,?) ON CONFLICT(campaign_id) DO UPDATE SET "
+                "posting_topic_id=excluded.posting_topic_id",
+                (campaign_id,gate_topic_id))
+        return {"campaign_id":campaign_id,"deadline":deadline,
+                "winners":winners,"claim_seconds":claim_seconds,
+                "gate_topic_id":gate_topic_id,"state":"open"}
+
     def change_deadline(self, campaign_id, deadline):
         """Owner can amend an open campaign, not rewrite a completed draw."""
         self._ident(campaign_id)
