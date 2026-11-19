@@ -69,6 +69,21 @@ class OwnerAccountTests(unittest.TestCase):
             oauth.callback("state=" + state + "&code=valid-code")
         self.assertFalse(oauth.store.access.exists())
 
+    def test_disconnect_invalidates_in_flight_callback_before_token_write(self):
+        account_holder={}
+        class DisconnectDuringIdentity(FakeTransport):
+            def get_json(self,url,token):
+                account_holder["owner"].disconnect("disconnect_local_tumblr")
+                return super().get_json(url,token)
+        owner=OwnerOAuth(self.root,"recruitment",DisconnectDuringIdentity())
+        account_holder["owner"]=owner
+        state=parse_qs(urlsplit(owner.start()).query)["state"][0]
+        with self.assertRaisesRegex(ValueError,"oauth_authorization_invalidated"):
+            owner.callback("state="+state+"&code=valid-code")
+        self.assertFalse(owner.store.tokens.exists())
+        self.assertFalse(owner.store.access.exists())
+        self.assertFalse(owner.status()["connected"])
+
     def test_local_disconnect_requires_explicit_confirmation_and_invalidates_pending_states(self):
         params=parse_qs(urlsplit(self.oauth.start()).query)
         self.oauth.callback("state="+params["state"][0]+"&code=valid-code")
