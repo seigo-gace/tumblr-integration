@@ -153,6 +153,7 @@ class OwnerOAuth:
         self.oauth = None
         self.redirect_uri = redirect_uri
         self._pending = {}
+        self._generation = 0
         self._lock = threading.Lock()
 
     def _client(self):
@@ -181,6 +182,7 @@ class OwnerOAuth:
         state = params["state"][0]
         with self._lock:
             expires = self._pending.pop(state, 0)
+            generation = self._generation
         if expires <= self.clock():
             raise ValueError("oauth_state_expired_or_reused")
         client = self._client()
@@ -205,8 +207,11 @@ class OwnerOAuth:
             if len(primary) != 1:
                 raise ValueError("oauth_primary_blog_not_unique")
             selected = normalize_blog(primary[0]["name"])
-        self.store.write(tokens, selected)
-        self.blog = selected
+        with self._lock:
+            if self._generation != generation:
+                raise ValueError("oauth_authorization_invalidated")
+            self.store.write(tokens, selected)
+            self.blog = selected
         return {"connected": True, "blog": selected}
 
     def disconnect(self,confirmation):
@@ -214,6 +219,7 @@ class OwnerOAuth:
             raise ValueError("oauth_disconnect_confirmation_required")
         with self._lock:
             removed=self.store.clear_local()
+            self._generation+=1
             self._pending.clear()
         return {"connected":False,"local_credentials_removed":True,
                 "previous_credentials_present":removed,
