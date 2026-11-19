@@ -622,6 +622,20 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._json(200,result)
             return
+        if parts.path == "/discovery/excluded":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            if parts.query:
+                self._json(400,{"error":"discovery_query_invalid"})
+                return
+            try:
+                names=sorted(self.server.discovery_store.excluded_blogs())
+            except (OSError,sqlite3.Error):
+                self._json(503,{"error":"discovery_store_unavailable"})
+                return
+            self._json(200,{"blogs":names,"source":"owner_private_discovery"})
+            return
         if parts.path == "/discovery/candidates":
             if not _authorized(self):
                 self._unauthorized()
@@ -1048,6 +1062,30 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json(503, {"error": "discovery_recheck_unavailable"})
                 return
             self._json(200, result)
+            return
+        if parts.path == "/discovery/include":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            bearer_ok=self.headers.get("Authorization","").startswith("Bearer ") and _authorized(self)
+            if (self.headers.get("Origin") and not _same_origin(self)) or
+                    (not self.headers.get("Origin") and not bearer_ok):
+                self._send(403,"origin rejected\\n","text/plain; charset=utf-8")
+                return
+            try:
+                if self.headers.get("Content-Type","").split(";",1)[0].strip().lower()!="application/json":
+                    raise ValueError("invalid_content_type")
+                data=json.loads(self._read_body(512).decode("utf-8"))
+                if not isinstance(data,dict) or set(data)!={"blog"}:
+                    raise ValueError("invalid_discovery_payload")
+                result=self.server.discovery_store.include_blog(data["blog"])
+            except (ValueError,UnicodeError,TypeError,json.JSONDecodeError):
+                self._json(400,{"error":"invalid_discovery_inclusion"})
+                return
+            except (OSError,sqlite3.Error):
+                self._json(503,{"error":"discovery_store_unavailable"})
+                return
+            self._json(200,result)
             return
         if parts.path == "/discovery/exclude":
             if not _authorized(self):
