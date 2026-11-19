@@ -69,6 +69,28 @@ class OwnerAccountTests(unittest.TestCase):
             oauth.callback("state=" + state + "&code=valid-code")
         self.assertFalse(oauth.store.access.exists())
 
+    def test_local_disconnect_requires_explicit_confirmation_and_invalidates_pending_states(self):
+        params=parse_qs(urlsplit(self.oauth.start()).query)
+        self.oauth.callback("state="+params["state"][0]+"&code=valid-code")
+        pending=parse_qs(urlsplit(self.oauth.start()).query)["state"][0]
+        with self.assertRaisesRegex(ValueError,"oauth_disconnect_confirmation_required"):
+            self.oauth.disconnect("not-confirmed")
+        self.assertTrue(self.oauth.store.tokens.is_file())
+        self.assertTrue(self.oauth.store.access.is_file())
+        result=self.oauth.disconnect("disconnect_local_tumblr")
+        self.assertFalse(result["connected"])
+        self.assertTrue(result["local_credentials_removed"])
+        self.assertEqual(result["tumblr_remote_revocation"],"not_performed")
+        self.assertFalse(self.oauth.store.tokens.exists())
+        self.assertFalse(self.oauth.store.access.exists())
+        self.assertFalse(self.oauth.status()["connected"])
+        with self.assertRaisesRegex(ValueError,"oauth_not_connected"):
+            self.oauth.refresh_if_needed()
+        with self.assertRaisesRegex(ValueError,"oauth_state_expired_or_reused"):
+            self.oauth.callback("state="+pending+"&code=valid-code")
+        again=self.oauth.disconnect("disconnect_local_tumblr")
+        self.assertFalse(again["previous_credentials_present"])
+
     def test_authorization_owner_and_refresh_lifecycle(self):
         url = self.oauth.start()
         params = parse_qs(urlsplit(url).query)
