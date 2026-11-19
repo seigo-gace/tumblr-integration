@@ -27,6 +27,14 @@ Authority: TGtumbler current Notion decisions and original 79-action catalog, th
 - The separate existing `promote` action remains a mutation and still requires its normal owner interface; no automatic promotion or DM delivery occurs from preview.
 - `campaign.05` and `campaign.09` are source/test integrated; provider GATE/Telegram runtime and actual browser acceptance remain NOT_VERIFIED.
 
+## 2026-11-19 continued source mapping
+
+- `campaign.03`: `CampaignContest.configure_entry_terms` edits only existing deadline/winner count/claim seconds/GATE topic in the existing owner DB, only while contest is open and before the first applicant; preserves committed random seed. Owner API `POST /campaigns configure`; current campaign action screen; separate tests for immutable terms after first entry.
+- `referral.06`: `ReferralManager.set_tier` uses existing `tiers` table, validates member threshold and reward, locks the terms after the first referral code, verified member, or grant; owner API `POST /referrals set_tier` and existing Referral panel. No new GATE or reward dispatcher.
+- `account.05`: existing private `/oauth/status` displays sanitized saved settings only. No actual provider refresh or OAuth claims.
+- `discovery.06`: existing `DiscoveryStore.exclude_blog` now preserves state `unavailable`. New `include_blog` reverses blog block but does not set old excluded posts to visible; a fresh official scan must do so. Existing authorized API + chat catalog provide blocked-list and explicit re-inclusion; no unsolicited Tumblr call.
+- All listed changes require CI confirmation and separate Host and user acceptance. UI routing is not proof of outside-provider completion.
+
 ## Routes and change boundaries
 
 - `tumblrkit/action_catalog.py`: original 79 IDs and stable Japanese names. `BRIDGE_ROUTES` dispatch only actual action adapters; `OWNER_UI_ROUTES` **opens an existing UI**, not proof that the named operation is completed.
