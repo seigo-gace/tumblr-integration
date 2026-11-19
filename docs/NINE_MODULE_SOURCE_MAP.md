@@ -35,6 +35,12 @@ Authority: TGtumbler current Notion decisions and original 79-action catalog, th
 - `discovery.06`: existing `DiscoveryStore.exclude_blog` now preserves state `unavailable`. New `include_blog` reverses blog block but does not set old excluded posts to visible; a fresh official scan must do so. Existing authorized API + chat catalog provide blocked-list and explicit re-inclusion; no unsolicited Tumblr call.
 - All listed changes require CI confirmation and separate Host and user acceptance. UI routing is not proof of outside-provider completion.
 
+## Account.06 explicit local disconnect
+
+- `OwnerOAuth.disconnect("disconnect_local_tumblr")` requires exact owner confirmation, unlinks only app-owned private `account-tokens.json` and `access-token`, clears pending OAuth states and increments an in-memory generation. A callback that was already exchanging credentials must check that generation before any token persistence and is rejected if disconnect happened meanwhile.
+- `POST /oauth/disconnect` reuses the current owner session/Bearer and same-origin guard; six-goal screen and original account catalog surface a confirmation prompt. A password reset, Tumblr remote token revoke, new OAuth app, and independent provider restart are **not** performed.
+- Owner source/test verification is not proof that a real Tumblr authorization was revoked at the provider or that any live browser was exercised.
+
 ## Routes and change boundaries
 
 - `tumblrkit/action_catalog.py`: original 79 IDs and stable Japanese names. `BRIDGE_ROUTES` dispatch only actual action adapters; `OWNER_UI_ROUTES` **opens an existing UI**, not proof that the named operation is completed.
