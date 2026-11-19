@@ -21,6 +21,12 @@ Authority: TGtumbler current Notion decisions and original 79-action catalog, th
 - A current GATE recheck returns `verified`, `not_verified` or `check_unavailable`; a failed check is not automatically a new exclusion and previous entry acceptance remains historical. All external rechecks require the same already-authorized existing Telegram owner bridge. Unit and authenticated HTTP contract tests are offline; no live GATE verification is claimed.
 - This fills the original `campaign.05` UI lookup and audit action, **not** `campaign.08` real DM delivery or a public entrant/claim flow.
 
+## Campaign.09 read-only expiry verification
+
+- Original `campaign.09 — 期限切れを確認` now uses `CampaignContest.expiry_preview` from the existing contest/entry tables, served through owner-only `POST /campaigns` action `expiries`. It returns due unclaimed winners, waiting entries and previously expired entries, without changing records or granting a prize.
+- The separate existing `promote` action remains a mutation and still requires its normal owner interface; no automatic promotion or DM delivery occurs from preview.
+- `campaign.05` and `campaign.09` are source/test integrated; provider GATE/Telegram runtime and actual browser acceptance remain NOT_VERIFIED.
+
 ## Routes and change boundaries
 
 - `tumblrkit/action_catalog.py`: original 79 IDs and stable Japanese names. `BRIDGE_ROUTES` dispatch only actual action adapters; `OWNER_UI_ROUTES` **opens an existing UI**, not proof that the named operation is completed.
