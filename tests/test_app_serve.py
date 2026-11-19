@@ -538,6 +538,29 @@ class AppServeTests(unittest.TestCase):
                              secret_dir / "discovery.sqlite3")
             status, _, _ = fetch(base + "/oauth/callback?state=" + state + "&code=valid")
             self.assertEqual(status, 400)
+            disconnect=json.dumps({"confirmation":"disconnect_local_tumblr"}).encode()
+            status,_,_=fetch(base+"/oauth/disconnect",method="POST",
+                             data=disconnect,headers={"Content-Type":"application/json",
+                                                      "Origin":base})
+            self.assertEqual(status,401)
+            status,_,_=fetch(base+"/oauth/disconnect",TOKEN,method="POST",
+                             data=disconnect,headers={"Content-Type":"application/json",
+                                                      "Origin":"https://attacker.invalid"})
+            self.assertEqual(status,403)
+            status,_,_=fetch(base+"/oauth/disconnect",TOKEN,method="POST",
+                             data=json.dumps({"confirmation":"skip"}).encode(),
+                             headers={"Content-Type":"application/json","Origin":base})
+            self.assertEqual(status,400)
+            status,body,_=fetch(base+"/oauth/disconnect",TOKEN,method="POST",
+                             data=disconnect,headers={"Content-Type":"application/json",
+                                                      "Origin":base})
+            self.assertEqual(status,200,body)
+            self.assertEqual(json.loads(body)["tumblr_remote_revocation"],"not_performed")
+            self.assertFalse(account.store.tokens.exists())
+            self.assertFalse(account.store.access.exists())
+            status,body,_=fetch(base+"/oauth/status",TOKEN)
+            self.assertEqual(status,200)
+            self.assertFalse(json.loads(body)["connected"])
 
     def test_discovery_cache_and_exclusions_are_owner_only_and_offline(self):
         import os
