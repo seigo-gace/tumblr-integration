@@ -816,6 +816,9 @@ class _Handler(BaseHTTPRequestHandler):
                         response=owner.issue(data["campaign_id"],data["referrer_id"])
                     elif data.get("action")=="revoke" and set(data)=={"action","campaign_id","referrer_id"}:
                         response={"state":owner.revoke(data["campaign_id"],data["referrer_id"])}
+                    elif data.get("action")=="set_tier" and set(data)=={"action","campaign_id","threshold","reward"}:
+                        response=owner.set_tier(
+                            data["campaign_id"],data["threshold"],data["reward"])
                     elif data.get("action")=="report" and set(data)=={"action","campaign_id"}:
                         response=owner.report(data["campaign_id"])
                     elif data.get("action")=="confirm" and set(data)=={"action","campaign_id","member_id","referral_code"}:
