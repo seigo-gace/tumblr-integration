@@ -35,6 +35,37 @@ class ReferralManager:
             raise ValueError("referral_identifier_invalid")
         return value
 
+    def set_tier(self,campaign_id,threshold,reward):
+        """Configure the existing reward-tier table before referrals begin.
+
+        Terms are frozen after the first referral code or verified member.
+        This is a ledger mutation only; it never sends or grants a prize.
+        """
+        self._ident(campaign_id)
+        if (type(threshold) is not int or not 1<=threshold<=10000 or
+                not isinstance(reward,str) or not 1<=len(reward.strip())<=150):
+            raise ValueError("referral_tier_invalid")
+        with self.db:
+            campaign=self.db.execute(
+                "SELECT active FROM campaigns WHERE id=?",
+                (campaign_id,)).fetchone()
+            if not campaign or campaign[0]!=1:
+                raise ValueError("referral_campaign_missing")
+            touched=self.db.execute(
+                "SELECT (SELECT COUNT(*) FROM referrals WHERE campaign_id=?) + "
+                "(SELECT COUNT(*) FROM memberships WHERE campaign_id=?) + "
+                "(SELECT COUNT(*) FROM grants WHERE campaign_id=?)",
+                (campaign_id,campaign_id,campaign_id)).fetchone()[0]
+            if touched:
+                raise ValueError("referral_tiers_locked")
+            self.db.execute(
+                "INSERT INTO tiers(campaign_id,threshold,reward) VALUES(?,?,?) "
+                "ON CONFLICT(campaign_id,threshold) DO UPDATE SET reward=excluded.reward",
+                (campaign_id,threshold,reward.strip()))
+        return {"campaign_id":campaign_id,"threshold":threshold,
+                "reward":reward.strip(),"state":"configured",
+                "grants_issued":False}
+
     def issue(self,campaign_id,referrer_id):
         self._ident(campaign_id)
         self._ident(referrer_id)
