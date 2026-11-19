@@ -401,6 +401,12 @@ class AppServeTests(unittest.TestCase):
             status,invalid_audit=submit("/campaigns",{
                 "action":"audit","campaign_id":"gate-campaign","limit":21})
             self.assertEqual(status,400,invalid_audit)
+            status,expiry=submit("/campaigns",{
+                "action":"expiries","campaign_id":"gate-campaign"})
+            self.assertEqual(status,200,expiry)
+            self.assertEqual(expiry["due_unclaimed"],[])
+            self.assertEqual(expiry["state"],"open")
+            self.assertFalse(expiry["promotion_executed"])
             status,referral=submit("/referrals",{
                 "action":"issue","campaign_id":"gate-campaign","referrer_id":"10"})
             self.assertEqual(status,200,referral)
