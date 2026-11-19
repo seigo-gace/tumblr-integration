@@ -100,6 +100,19 @@ class PrivateTokenStore:
         payload["scopes"]=granted
         return payload
 
+    def clear_local(self):
+        """Remove only app-owned OAuth credentials; no remote revoke claim."""
+        self._private_dir()
+        token_exists=self._safe_file(self.tokens)
+        access_exists=self._safe_file(self.access)
+        # Access file is consumed by read-only adapters. Remove it first;
+        # failure must leave the operation visibly incomplete.
+        if access_exists:
+            self.access.unlink()
+        if token_exists:
+            self.tokens.unlink()
+        return token_exists or access_exists
+
     def write(self, tokens, blog):
         self._private_dir()
         self._safe_file(self.tokens)
@@ -195,6 +208,16 @@ class OwnerOAuth:
         self.store.write(tokens, selected)
         self.blog = selected
         return {"connected": True, "blog": selected}
+
+    def disconnect(self,confirmation):
+        if confirmation!="disconnect_local_tumblr":
+            raise ValueError("oauth_disconnect_confirmation_required")
+        with self._lock:
+            removed=self.store.clear_local()
+            self._pending.clear()
+        return {"connected":False,"local_credentials_removed":True,
+                "previous_credentials_present":removed,
+                "tumblr_remote_revocation":"not_performed"}
 
     def status(self):
         record = self.store.read()
