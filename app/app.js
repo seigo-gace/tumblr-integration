@@ -316,6 +316,41 @@
     messages.appendChild(section);messages.scrollTop=messages.scrollHeight;
     await render();
   }
+  async function showFollowCandidates(){
+    try{
+      const response=await fetch("/discovery/candidates",{credentials:"same-origin"});
+      if(!response.ok)throw new Error("discovery_unavailable");
+      const saved=await response.json();
+      if(!Array.isArray(saved.blogs))throw new Error("discovery_unverified");
+      const panel=document.createElement("section");
+      panel.className="library-panel result-view";
+      const title=document.createElement("h3");
+      title.textContent="保存済みのブログ候補（フォロー未実施）";
+      panel.appendChild(title);
+      if(!saved.blogs.length){
+        const line=document.createElement("p");
+        line.textContent="保存済みのブログ候補がありません。まず巡回で探してください。";
+        panel.appendChild(line);
+      }
+      saved.blogs.forEach(function(blog){
+        if(!blog||typeof blog.name!=="string")return;
+        const row=document.createElement("div");row.className="library-controls";
+        const label=document.createElement("span");label.textContent=blog.name;
+        const propose=document.createElement("button");
+        propose.type="button";propose.textContent="フォロー前確認";
+        propose.addEventListener("click",function(){
+          propose.disabled=true;
+          post({catalog_action:"engagement.05",selected_target:blog.name})
+            .finally(function(){propose.disabled=false;});
+        });
+        row.append(label,propose);panel.appendChild(row);
+      });
+      messages.appendChild(panel);
+      messages.scrollTop=messages.scrollHeight;
+    }catch(error){
+      display("フォロー候補を読み込めませんでした。フォロー操作は実行していません。","system");
+    }
+  }
   async function showExcludedBlogs(){
     try{
       const response=await fetch("/discovery/excluded",{credentials:"same-origin"});
@@ -1332,6 +1367,7 @@
           if(item.owner_ui==="library"){showLibrary();return;}
           if(item.owner_ui==="media_history"){mediaHistory(0);return;}
           if(item.owner_ui==="engagement_history"){showEngagementHistory(0);return;}
+          if(item.owner_ui==="follow_candidates"){showFollowCandidates();return;}
           if(item.owner_ui==="drafts"){refreshDrafts();return;}
           if(item.owner_ui==="oauth_status"){showOAuthStatus();connect.focus();return;}
           if(item.owner_ui==="oauth_settings"){showOAuthSettings();return;}
