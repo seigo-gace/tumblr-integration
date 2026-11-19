@@ -1068,8 +1068,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._unauthorized()
                 return
             bearer_ok=self.headers.get("Authorization","").startswith("Bearer ") and _authorized(self)
-            if (self.headers.get("Origin") and not _same_origin(self)) or
-                    (not self.headers.get("Origin") and not bearer_ok):
+            if ((self.headers.get("Origin") and not _same_origin(self)) or
+                    (not self.headers.get("Origin") and not bearer_ok)):
                 self._send(403,"origin rejected\\n","text/plain; charset=utf-8")
                 return
             try:
