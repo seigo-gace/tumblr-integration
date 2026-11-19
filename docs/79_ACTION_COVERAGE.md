@@ -13,7 +13,7 @@ Generated from the **actual** `tumblrkit/action_catalog.py` on `feat/initial-mod
 | `discovery.01` | 新着を巡回 | UI `discovery` | Navigation only; individual action unverified |
 | `discovery.02` | フォロワーを確認 | Bridge `tumblr.discover` | Bridge adapter contract only |
 | `discovery.03` | フォロー先を巡回 | Bridge `tumblr.discover` | Bridge adapter contract only |
-| `discovery.04` | 新しいブログを探す | No owner route | Not connected |
+| `discovery.04` | 新しいブログを探す | Bridge `tumblr.discover` explicit `related:tag` via existing official tagged-post reader | Source only; provider acceptance pending |
 | `discovery.05` | タグから探す | Bridge `tumblr.discover` | Bridge adapter contract only |
 | `discovery.06` | 対象を登録・解除 | UI `discovery_targets`, `GET /discovery/excluded`, `POST /discovery/include`, existing exclude | Source only; runtime verification pending |
 | `discovery.07` | 差分を見る | UI `discovery` | Navigation only; individual action unverified |
