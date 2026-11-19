@@ -385,6 +385,39 @@ class DiscoveryEngineTests(unittest.TestCase):
         self.assertEqual(len(stub.calls),1)
         self.assertTrue(cached["from_cache"])
 
+    def test_exclude_and_restore_preserve_unavailable_state_and_require_fresh_observation(self):
+        store=DiscoveryStore(self.root/"discovery.sqlite3")
+        posts=[]
+        for number in (1,2):
+            posts.append({
+                "candidate_id":"first:"+str(number),"blog":"first",
+                "post_id":str(number),"url":"https://first.tumblr.com/post/"+str(number),
+                "title":"item","type":"image","date":"",
+                "thumbnail_url":"","text_excerpt":"","tags":[],
+                "note_count":0,"media_refs":[]})
+        blogs=[{"name":"first","url":"https://first.tumblr.com"}]
+        store.save_page("tag:example",blogs,posts,2,complete=True)
+        store.mark_unavailable("first:2")
+        store.exclude_blog("first")
+        with store._open() as db:
+            states=dict(db.execute(
+                "SELECT candidate_id,state FROM discovery_posts WHERE blog='first'").fetchall())
+        self.assertEqual(states,{"first:1":"excluded","first:2":"unavailable"})
+        self.assertEqual(store.excluded_blogs(),{"first"})
+        receipt=store.include_blog("first")
+        self.assertTrue(receipt["refresh_required"])
+        self.assertEqual(store.excluded_blogs(),set())
+        self.assertEqual(store.count_candidates(),0)
+        with self.assertRaisesRegex(ValueError,"discovery_blog_not_excluded"):
+            store.include_blog("first")
+        # Only a fresh observed row is allowed to become visible.
+        store.save_page("tag:refresh",blogs,[posts[0]],1,complete=True)
+        self.assertEqual(store.count_candidates(),1)
+        with store._open() as db:
+            self.assertEqual(db.execute(
+                "SELECT state FROM discovery_posts WHERE candidate_id='first:2'"
+            ).fetchone()[0],"unavailable")
+
     def test_tags_resume_timestamp_and_exclude_blog(self):
         posts=[{"blog_name":"other","id_string":str(i),
                 "post_url":"https://other.tumblr.com/post/"+str(i),
