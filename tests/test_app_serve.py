@@ -391,6 +391,16 @@ class AppServeTests(unittest.TestCase):
                 "action":"enter","campaign_id":"gate-campaign","applicant_id":"42"})
             self.assertEqual(status,200,accepted)
             self.assertEqual(accepted["state"],"entered")
+            status,inspection=submit("/campaigns",{
+                "action":"audit","campaign_id":"gate-campaign","limit":20})
+            self.assertEqual(status,200,inspection)
+            self.assertEqual(inspection["total_entries"],1)
+            self.assertEqual(inspection["entries"],[
+                {"applicant_id":"42","gate_state":"verified"}])
+            self.assertFalse(inspection["mutated"])
+            status,invalid_audit=submit("/campaigns",{
+                "action":"audit","campaign_id":"gate-campaign","limit":21})
+            self.assertEqual(status,400,invalid_audit)
             status,referral=submit("/referrals",{
                 "action":"issue","campaign_id":"gate-campaign","referrer_id":"10"})
             self.assertEqual(status,200,referral)
