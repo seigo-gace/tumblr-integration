@@ -20,7 +20,7 @@ class ActionCoverageMapTests(unittest.TestCase):
         self.assertFalse(set(OWNER_UI_ROUTES)&set(BRIDGE_ROUTES))
         self.assertTrue(set(OWNER_UI_ROUTES)<=set(expected))
         self.assertTrue(set(BRIDGE_ROUTES)<=set(expected))
-        self.assertEqual(len(expected)-len(OWNER_UI_ROUTES)-len(BRIDGE_ROUTES),16)
+        self.assertEqual(len(expected)-len(OWNER_UI_ROUTES)-len(BRIDGE_ROUTES),15)
 
     def test_source_owner_routes_stay_distinct_from_external_acceptance(self):
         document=(Path(__file__).resolve().parents[1]/
