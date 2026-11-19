@@ -94,6 +94,7 @@ OWNER_UI_ROUTES = {
     "account.03": "oauth_connect",
     "account.04": "oauth_status",
     "account.05": "oauth_settings",
+    "account.06": "oauth_disconnect",
     "discovery.01": "discovery",
     "discovery.06": "discovery_targets",
     "discovery.07": "discovery",
