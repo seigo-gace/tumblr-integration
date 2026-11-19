@@ -68,7 +68,7 @@ Generated from the **actual** `tumblrkit/action_catalog.py` on `feat/initial-mod
 | `referral.03` | リンクを共有 | No owner route | Not connected |
 | `referral.04` | 紹介キャンペーンを設定 | No owner route | Not connected |
 | `referral.05` | 紹介成立を確認 | UI `referral` | Navigation only; individual action unverified |
-| `referral.06` | 段階特典を設定 | No owner route | Not connected |
+| `referral.06` | 段階特典を設定 | UI `referral`, `POST /referrals` set_tier (before first code) | Source only; runtime verification pending |
 | `referral.07` | 特典達成を確認 | UI `referral` | UI + owned operation (Source; CI pending/readback) |
 | `referral.08` | 付与履歴を見る | UI `referral` | Navigation only; individual action unverified |
 | `referral.09` | 紹介リンクを停止 | UI `referral` | Navigation only; individual action unverified |
