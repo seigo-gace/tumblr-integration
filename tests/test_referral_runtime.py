@@ -19,6 +19,27 @@ class ReferralRuntimeTests(unittest.TestCase):
             return member in ("bob","charlie")
         self.owner=ReferralManager(self.db,gate=trusted,clock=lambda:1000)
 
+    def test_tier_setup_before_first_referral_preserves_existing_table(self):
+        configured=self.owner.set_tier("launch",3,"tier3")
+        self.assertEqual(configured["threshold"],3)
+        self.assertFalse(configured["grants_issued"])
+        updated=self.owner.set_tier("launch",2,"new-tier2")
+        self.assertEqual(updated["reward"],"new-tier2")
+        tiers=self.db.execute(
+            "SELECT threshold,reward FROM tiers WHERE campaign_id='launch' ORDER BY threshold"
+        ).fetchall()
+        self.assertEqual(tiers,[(2,"new-tier2"),(3,"tier3")])
+        for threshold,reward in ((0,"bad"),(10001,"bad"),(True,"bad"),
+                                  (3,""),(3,"x"*151)):
+            with self.assertRaisesRegex(ValueError,"referral_tier_invalid"):
+                self.owner.set_tier("launch",threshold,reward)
+        self.owner.issue("launch","alice")
+        with self.assertRaisesRegex(ValueError,"referral_tiers_locked"):
+            self.owner.set_tier("launch",4,"late-tier")
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM tiers WHERE campaign_id='launch'"
+        ).fetchone()[0],2)
+
     def test_real_gate_confirmation_reward_once_and_restart(self):
         code=self.owner.issue("launch","alice")["referral_code"]
         self.assertEqual(code,self.owner.issue("launch","alice")["referral_code"])
