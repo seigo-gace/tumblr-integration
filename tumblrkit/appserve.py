@@ -874,6 +874,8 @@ class _Handler(BaseHTTPRequestHandler):
                         response={"entries":owner.entries(data["campaign_id"])}
                     elif action=="outcomes" and set(data)=={"action","campaign_id"}:
                         response={"outcomes":owner.outcomes(data["campaign_id"])}
+                    elif action=="audit" and set(data)=={"action","campaign_id","limit"}:
+                        response=owner.audit_entries(data["campaign_id"],data["limit"])
                     elif action=="notices" and set(data)=={"action","campaign_id"}:
                         response={"notices":owner.notification_history(data["campaign_id"])}
                     elif action=="issue_claim" and set(data)=={"action","campaign_id","applicant_id"}:
