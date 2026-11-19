@@ -57,6 +57,28 @@ class CampaignRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"campaign_closed"):
             second.draw("launch")
 
+    def test_applicant_audit_reuses_gate_without_mutating_draw_or_entries(self):
+        self.owner.enter("launch","alice")
+        self.owner.enter("launch","bob")
+        self.owner.enter("launch","alice")
+        before=self.owner.entries("launch")
+        self.allow.remove("bob")
+        inspected=self.owner.audit_entries("launch")
+        self.assertEqual(inspected["total_entries"],2)
+        self.assertEqual(inspected["duplicate_current_rows"],0)
+        self.assertEqual(inspected["duplicate_attempts"],"not_recorded")
+        self.assertEqual(inspected["entries"],[
+            {"applicant_id":"alice","gate_state":"verified"},
+            {"applicant_id":"bob","gate_state":"not_verified"}])
+        self.assertFalse(inspected["mutated"])
+        self.assertEqual(self.owner.entries("launch"),before)
+        self.assertEqual(self.owner.audit_entries("launch",limit=1)["remaining"],1)
+        for bad in (0,21,"1",True):
+            with self.assertRaisesRegex(ValueError,"campaign_audit_limit_invalid"):
+                self.owner.audit_entries("launch",limit=bad)
+        with self.assertRaisesRegex(PermissionError,"campaign_eligibility_not_connected"):
+            CampaignContest(self.db,clock=lambda:self.now).audit_entries("launch")
+
     def test_missing_adapter_or_unverified_eligibility_never_enrolls(self):
         with self.assertRaisesRegex(PermissionError,"campaign_eligibility_not_verified"):
             self.owner.enter("launch","other")
