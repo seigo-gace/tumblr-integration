@@ -384,6 +384,12 @@ class AppServeTests(unittest.TestCase):
                 "prize":"賞品","deadline":int(time.time())+3600,
                 "winners":1,"claim_seconds":3600,"gate_topic_id":"123"})
             self.assertEqual(status,200,created)
+            status,configured=submit("/campaigns",{
+                "action":"configure","campaign_id":"gate-campaign",
+                "deadline":int(time.time())+7200,"winners":2,
+                "claim_seconds":600,"gate_topic_id":"123"})
+            self.assertEqual(status,200,configured)
+            self.assertEqual(configured["winners"],2)
             status,denied=submit("/campaigns",{
                 "action":"enter","campaign_id":"gate-campaign","applicant_id":"77"})
             self.assertEqual(status,409)
@@ -391,6 +397,12 @@ class AppServeTests(unittest.TestCase):
                 "action":"enter","campaign_id":"gate-campaign","applicant_id":"42"})
             self.assertEqual(status,200,accepted)
             self.assertEqual(accepted["state"],"entered")
+            status,locked=submit("/campaigns",{
+                "action":"configure","campaign_id":"gate-campaign",
+                "deadline":int(time.time())+9300,"winners":1,
+                "claim_seconds":600,"gate_topic_id":"456"})
+            self.assertEqual(status,400,locked)
+            self.assertEqual(locked["error"],"campaign_terms_locked")
             status,inspection=submit("/campaigns",{
                 "action":"audit","campaign_id":"gate-campaign","limit":20})
             self.assertEqual(status,200,inspection)
