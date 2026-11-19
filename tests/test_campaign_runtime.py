@@ -57,6 +57,33 @@ class CampaignRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"campaign_closed"):
             second.draw("launch")
 
+    def test_entry_terms_can_change_before_entry_but_never_after_entry(self):
+        initial=self.result["seed_commitment"]
+        changed=self.owner.configure_entry_terms(
+            "launch",deadline=1200,winners=3,claim_seconds=300,gate_topic_id="123")
+        self.assertEqual(changed["winners"],3)
+        self.assertEqual(changed["gate_topic_id"],"123")
+        self.assertEqual(self.db.execute(
+            "SELECT seed_commitment FROM campaign_contests WHERE campaign_id='launch'"
+        ).fetchone()[0],initial)
+        self.assertEqual(self.db.execute(
+            "SELECT posting_topic_id FROM campaign_gate_topics WHERE campaign_id='launch'"
+        ).fetchone()[0],"123")
+        for invalid in ("-1","0","x"):
+            with self.assertRaisesRegex(ValueError,"campaign_gate_topic_invalid"):
+                self.owner.configure_entry_terms(
+                    "launch",deadline=1250,winners=1,claim_seconds=300,
+                    gate_topic_id=invalid)
+        self.owner.enter("launch","alice")
+        with self.assertRaisesRegex(ValueError,"campaign_terms_locked"):
+            self.owner.configure_entry_terms(
+                "launch",deadline=1300,winners=1,claim_seconds=60,
+                gate_topic_id="456")
+        self.assertEqual(self.db.execute(
+            "SELECT posting_topic_id FROM campaign_gate_topics WHERE campaign_id='launch'"
+        ).fetchone()[0],"123")
+        self.assertEqual(self.owner.entries("launch")[0]["status"],"entered")
+
     def test_applicant_audit_reuses_gate_without_mutating_draw_or_entries(self):
         self.owner.enter("launch","alice")
         self.owner.enter("launch","bob")
