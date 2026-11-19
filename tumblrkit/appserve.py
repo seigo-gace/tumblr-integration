@@ -883,6 +883,8 @@ class _Handler(BaseHTTPRequestHandler):
                     elif action=="redeem_claim" and set(data)=={"action","campaign_id","applicant_id","claim_ticket"}:
                         response=owner.redeem_claim_ticket(
                             data["campaign_id"],data["applicant_id"],data["claim_ticket"])
+                    elif action=="expiries" and set(data)=={"action","campaign_id"}:
+                        response=owner.expiry_preview(data["campaign_id"])
                     elif action=="promote" and set(data)=={"action","campaign_id"}:
                         response={"promoted":owner.promote_expired(data["campaign_id"])}
                     elif action=="close" and set(data)=={"action","campaign_id"}:
