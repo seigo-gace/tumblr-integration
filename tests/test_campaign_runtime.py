@@ -88,6 +88,29 @@ class CampaignRuntimeTests(unittest.TestCase):
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM campaign_entries")
                          .fetchone()[0],0)
 
+    def test_expiry_preview_never_changes_winners_or_waitlist(self):
+        for person in ("alice","bob","charlie","dan"):
+            self.owner.enter("launch",person)
+        self.now=1100
+        result=self.owner.draw("launch")
+        before=self.owner.entries("launch")
+        self.now=1160
+        inspection=self.owner.expiry_preview("launch")
+        self.assertEqual(inspection["state"],"drawn")
+        self.assertEqual(len(inspection["due_unclaimed"]),2)
+        self.assertEqual(len(inspection["waitlisted"]),2)
+        self.assertFalse(inspection["promotion_executed"])
+        self.assertEqual(self.owner.entries("launch"),before)
+        self.assertEqual(self.owner.draw("launch"),result)
+        promoted=self.owner.promote_expired("launch")
+        self.assertEqual(len(promoted),2)
+        after=self.owner.expiry_preview("launch")
+        self.assertEqual(len(after["due_unclaimed"]),0)
+        self.assertEqual(len(after["already_expired"]),2)
+        self.assertEqual(len(after["waitlisted"]),0)
+        with self.assertRaisesRegex(ValueError,"campaign_missing"):
+            self.owner.expiry_preview("missing")
+
     def test_claim_after_deadline_fails_and_cannot_reopen_draw(self):
         self.owner.enter("launch","alice")
         self.now=1100
