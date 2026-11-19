@@ -55,11 +55,11 @@ Generated from the **actual** `tumblrkit/action_catalog.py` on `feat/initial-mod
 | `campaign.02` | 企画文を作る | No owner route | Not connected |
 | `campaign.03` | 応募条件を設定 | No owner route | Not connected |
 | `campaign.04` | 応募状況を見る | UI `campaign` | Navigation only; individual action unverified |
-| `campaign.05` | 重複・無効候補を見る | No owner route | Not connected |
+| `campaign.05` | 重複・無効候補を見る | UI `campaign`, `POST /campaigns` audit (bounded GATE recheck) | Source only; runtime verification pending |
 | `campaign.06` | 応募締切を変更 | UI `campaign` | Navigation only; individual action unverified |
 | `campaign.07` | 抽選を実行 | UI `campaign` | Navigation only; individual action unverified |
 | `campaign.08` | 当選者へ通知 | No owner route | Not connected |
-| `campaign.09` | 期限切れを確認 | UI `campaign` | Navigation only; individual action unverified |
+| `campaign.09` | 期限切れを確認 | UI `campaign`, `POST /campaigns` expiries (read-only preview) | Source only; runtime verification pending |
 | `campaign.10` | 繰り上げを行う | UI `campaign` | Navigation only; individual action unverified |
 | `campaign.11` | 企画を終了 | UI `campaign` | Navigation only; individual action unverified |
 | `campaign.12` | 企画結果を見る | UI `campaign` | Navigation only; individual action unverified |
