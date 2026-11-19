@@ -116,6 +116,7 @@ OWNER_UI_ROUTES = {
     "publisher.09": "drafts",
     "campaign.01": "campaign",
     "campaign.04": "campaign",
+    "campaign.05": "campaign",
     "campaign.06": "campaign",
     "campaign.07": "campaign",
     "campaign.09": "campaign",
