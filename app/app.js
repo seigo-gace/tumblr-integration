@@ -1068,7 +1068,7 @@
       {goal:"キャンペーン",heading:"キャンペーン管理",endpoint:"/campaigns",
        actions:["list","create","configure","enter","entries","audit","outcomes","notices","expiries","issue_claim","redeem_claim","reschedule","draw","promote","close"]},
       {goal:"紹介",heading:"紹介管理",endpoint:"/referrals",
-       actions:["issue","confirm","report","revoke"]},
+       actions:["issue","confirm","set_tier","report","revoke"]},
     ];
     items.filter(item=>goals.includes(item.goal)).forEach(function(item){
       const details=document.createElement("details");
@@ -1086,7 +1086,7 @@
           list:"一覧",create:"新規作成",configure:"応募前の条件設定",enter:"GATE確認済み応募を登録",entries:"応募者を見る",
           outcomes:"抽選結果を見る",audit:"重複・GATE無効候補の確認（先頭20件）",notices:"通知台帳を確認",issue_claim:"当選者の受取コードを発行",redeem_claim:"受取コードで受取確定",reschedule:"締切を変更",
           draw:"抽選を実行",expiries:"期限切れ候補を確認（変更なし）",promote:"期限切れ・繰上りを実行",close:"企画を終了",
-          issue:"紹介コードを発行",confirm:"GATE確認済み紹介を記録",report:"紹介実績を見る",revoke:"紹介を停止"
+          issue:"紹介コードを発行",confirm:"GATE確認済み紹介を記録",set_tier:"段階特典を設定（紹介開始前）",report:"紹介実績を見る",revoke:"紹介を停止"
         })[action]||action;selector.appendChild(opt);
       });
       form.appendChild(selector);
@@ -1097,7 +1097,8 @@
            ["gate_topic_id","GATE確認先Topic ID（応募時に必要）"],
            ["applicant_id","応募ユーザーID"],["claim_ticket","受取コード"]]
         : [["campaign_id","キャンペーンID"],["referrer_id","紹介者ID"],
-           ["member_id","参加ユーザーID"],["referral_code","紹介コード"]];
+           ["member_id","参加ユーザーID"],["referral_code","紹介コード"],
+           ["threshold","紹介成立人数（しきい値）"],["reward","特典内容"]];
       const fields={};
       fieldDefs.forEach(function(def){
         const wrapper=document.createElement("label");
@@ -1105,7 +1106,7 @@
         const input=document.createElement("input");
         input.setAttribute("aria-label",def[1]);
         input.type=def[0]==="deadline"?"datetime-local":
-          ["winners","claim_seconds"].includes(def[0])?"number":"text";
+          ["winners","claim_seconds","threshold"].includes(def[0])?"number":"text";
         if(input.type==="number")input.min="1";
         wrapper.appendChild(input);form.appendChild(wrapper);
         fields[def[0]]=input;
@@ -1121,6 +1122,7 @@
           : action==="enter"||action==="issue_claim"?["campaign_id","applicant_id"]
           : action==="redeem_claim"?["campaign_id","applicant_id","claim_ticket"]
           : action==="confirm"?["campaign_id","member_id","referral_code"]
+          : action==="set_tier"?["campaign_id","threshold","reward"]
           : item.goal==="紹介"&&action!=="report"
             ? ["campaign_id","referrer_id"]:["campaign_id"]);
         for(const [name,input] of Object.entries(fields)){
@@ -1153,7 +1155,7 @@
               if(name==="deadline"){
                 value=Math.floor(new Date(value).getTime()/1000);
                 if(!Number.isSafeInteger(value))throw new Error("field_invalid");
-              }else if(name==="winners"||name==="claim_seconds"){
+              }else if(name==="winners"||name==="claim_seconds"||name==="threshold"){
                 value=Number(value);
                 if(!Number.isSafeInteger(value))throw new Error("field_invalid");
               }
