@@ -419,9 +419,19 @@ class AppServeTests(unittest.TestCase):
             self.assertEqual(expiry["due_unclaimed"],[])
             self.assertEqual(expiry["state"],"open")
             self.assertFalse(expiry["promotion_executed"])
+            status,tier=submit("/referrals",{
+                "action":"set_tier","campaign_id":"gate-campaign",
+                "threshold":2,"reward":"紹介特典"})
+            self.assertEqual(status,200,tier)
+            self.assertEqual(tier["threshold"],2)
             status,referral=submit("/referrals",{
                 "action":"issue","campaign_id":"gate-campaign","referrer_id":"10"})
             self.assertEqual(status,200,referral)
+            status,locked_tier=submit("/referrals",{
+                "action":"set_tier","campaign_id":"gate-campaign",
+                "threshold":3,"reward":"変更不可"})
+            self.assertEqual(status,400,locked_tier)
+            self.assertEqual(locked_tier["error"],"referral_tiers_locked")
             status,verified=submit("/referrals",{
                 "action":"confirm","campaign_id":"gate-campaign",
                 "member_id":"42","referral_code":referral["referral_code"]})
