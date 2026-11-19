@@ -180,6 +180,45 @@ class CampaignContest:
                     "FROM campaign_entries WHERE campaign_id=? "
                     "ORDER BY entered_at,applicant_id",(campaign_id,))]
 
+    def audit_entries(self, campaign_id, limit=20):
+        """Recheck a bounded set of entries against the existing trusted GATE.
+
+        Duplicate entries are prevented by the (campaign_id, applicant_id)
+        primary key; no historic rejected attempts were persisted, so their
+        counts must never be invented. This audit only reports and never
+        deletes entrants or changes draw eligibility automatically.
+        """
+        self._ident(campaign_id)
+        if type(limit) is not int or not 1<=limit<=20:
+            raise ValueError("campaign_audit_limit_invalid")
+        if self.eligibility is None:
+            raise PermissionError("campaign_eligibility_not_connected")
+        exists=self.db.execute(
+            "SELECT 1 FROM campaign_contests WHERE campaign_id=?",
+            (campaign_id,)).fetchone()
+        if not exists:
+            raise ValueError("campaign_missing")
+        total=self.db.execute(
+            "SELECT COUNT(*) FROM campaign_entries WHERE campaign_id=?",
+            (campaign_id,)).fetchone()[0]
+        rows=self.db.execute(
+            "SELECT applicant_id FROM campaign_entries WHERE campaign_id=? "
+            "ORDER BY entered_at,applicant_id LIMIT ?",
+            (campaign_id,limit)).fetchall()
+        results=[]
+        for (applicant,) in rows:
+            try:
+                verified=self.eligibility(campaign_id,applicant) is True
+                state="verified" if verified else "not_verified"
+            except Exception:
+                state="check_unavailable"
+            results.append({"applicant_id":applicant,"gate_state":state})
+        return {"campaign_id":campaign_id,"total_entries":total,
+                "checked":len(results),"remaining":max(0,total-len(results)),
+                "duplicate_current_rows":0,
+                "duplicate_attempts":"not_recorded",
+                "mutated":False,"entries":results}
+
     def enter(self, campaign_id, applicant_id):
         """Only trusted eligibility adapters may accept entries."""
         self._ident(campaign_id)
