@@ -35,7 +35,7 @@ Generated from the **actual** `tumblrkit/action_catalog.py` on `feat/initial-mod
 | `engagement.01` | スキを付ける | Bridge `engagement.like` | Bridge adapter contract only |
 | `engagement.02` | リブログ下書きを作る | No owner route | Not connected |
 | `engagement.03` | リブログする | Bridge `engagement.reblog` | Bridge adapter contract only |
-| `engagement.04` | フォロー候補を見る | No owner route | Not connected |
+| `engagement.04` | フォロー候補を見る | UI `follow_candidates`, existing saved `/discovery/candidates`; follow requires separate existing Bridge confirmation | Source only; provider result unverified |
 | `engagement.05` | フォローする | Bridge `engagement.follow` | Bridge adapter contract only |
 | `engagement.06` | 交流履歴を見る | UI `engagement_history` | UI + owned operation (Source; CI pending/readback) |
 | `engagement.07` | 操作を取り消す | No owner route | Not connected |
