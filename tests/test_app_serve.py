@@ -566,6 +566,23 @@ class AppServeTests(unittest.TestCase):
             self.assertEqual(status,200)
             self.assertTrue(json.loads(body)["excluded"])
             self.assertEqual(server.httpd.discovery_store.excluded_blogs(),{"example"})
+            status,_,_=fetch(base+"/discovery/excluded")
+            self.assertEqual(status,401)
+            status,body,_=fetch(base+"/discovery/excluded",TOKEN)
+            self.assertEqual(status,200)
+            self.assertEqual(json.loads(body)["blogs"],["example"])
+            status,_,_=fetch(base+"/discovery/include",TOKEN,method="POST",
+                data=exclusion,headers={"Content-Type":"application/json",
+                                        "Origin":"https://evil.invalid"})
+            self.assertEqual(status,403)
+            status,body,_=fetch(base+"/discovery/include",TOKEN,method="POST",
+                data=exclusion,headers={"Content-Type":"application/json","Origin":base})
+            self.assertEqual(status,200,body)
+            self.assertTrue(json.loads(body)["refresh_required"])
+            self.assertEqual(server.httpd.discovery_store.excluded_blogs(),set())
+            status,_,_=fetch(base+"/discovery/include",TOKEN,method="POST",
+                data=exclusion,headers={"Content-Type":"application/json","Origin":base})
+            self.assertEqual(status,400)
 
     def test_discovery_one_post_recheck_is_owner_only_and_offline(self):
         import os
