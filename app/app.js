@@ -41,6 +41,27 @@
       oauthStatus.textContent="Tumblr：連携状態を確認できません";
     }
   }
+  async function showOAuthSettings(){
+    try{
+      const response=await fetch("/oauth/status",{credentials:"same-origin"});
+      if(!response.ok)throw new Error("status_unavailable");
+      const result=await response.json();
+      if(result.connected!==true){
+        display("Tumblrの設定：アカウントは未連携です。保存済み認可は利用できません。","system");
+        return;
+      }
+      const expiry=Number(result.expires_at);
+      const expiryText=Number.isFinite(expiry)&&expiry>0
+        ?new Date(expiry*1000).toLocaleString("ja-JP"):"期限情報なし";
+      display("Tumblr設定（保存済み認可情報のみ）\\n"+
+        "対象ブログ："+String(result.blog||"未確認")+"\\n"+
+        "投稿権限："+(result.can_publish===true?"保存済み":"未確認／未承諾")+"\\n"+
+        "保存済み期限："+expiryText+"\\n"+
+        "公式APIの現在の権限確認や認証更新は実行していません。","system");
+    }catch(error){
+      display("Tumblr設定を読み出せません。保存済み情報は変更していません。","system");
+    }
+  }
   showOAuthStatus();
   connect.addEventListener("click",async function(){
     connect.disabled=true;
@@ -1243,6 +1264,7 @@
           if(item.owner_ui==="engagement_history"){showEngagementHistory(0);return;}
           if(item.owner_ui==="drafts"){refreshDrafts();return;}
           if(item.owner_ui==="oauth_status"){showOAuthStatus();connect.focus();return;}
+          if(item.owner_ui==="oauth_settings"){showOAuthSettings();return;}
           if(item.owner_ui==="oauth_connect"){connect.focus();
             display("画面上部のTumblr連携を押してください。認可は自動開始しません。","system");
             return;}
