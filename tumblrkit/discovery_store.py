@@ -305,6 +305,39 @@ class DiscoveryStore:
                 counts.update(distinct)
         return counts
 
+    def suggest_tags(self, text, limit=8):
+        """Rank tags already stored on visible posts. Never invents a tag."""
+        if not isinstance(text,str) or not text.strip() or len(text)>2000:
+            raise ValueError("tag_text_invalid")
+        if type(limit) is not int or not 1<=limit<=20:
+            raise ValueError("tag_limit_invalid")
+        from collections import Counter
+        counts=Counter()
+        with closing(self._open()) as db:
+            rows=db.execute(
+                "SELECT p.tags_json FROM discovery_posts p "
+                "LEFT JOIN discovery_blogs b ON b.name=p.blog "
+                "WHERE p.state='visible' AND COALESCE(b.blocked,0)=0")
+            for (raw,) in rows:
+                try:
+                    found=json.loads(raw)
+                except (TypeError,ValueError):
+                    continue
+                if not isinstance(found,list):
+                    continue
+                distinct={tag.strip() for tag in found
+                          if isinstance(tag,str) and tag.strip() and len(tag.strip())<=64}
+                counts.update(distinct)
+        folded=text.casefold()
+        matched,rest=[],[]
+        for tag,count in counts.items():
+            (matched if tag.casefold() in folded else rest).append((-count,tag))
+        matched.sort()
+        rest.sort()
+        ordered=[tag for _,tag in matched]
+        ordered.extend(tag for _,tag in rest if tag not in ordered)
+        return ordered[:limit]
+
     def is_selected_blog(self,name):
         """Check all durable following/follower links, not only UI page 1."""
         from tumblrkit.tumblr_read import normalize_blog

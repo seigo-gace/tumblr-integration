@@ -21,7 +21,7 @@ class DevelopmentResumeTests(unittest.TestCase):
         result = inspect()
         self.assertEqual((result["total_actions"], result["ui_route_count"],
                           result["bridge_route_count"], result["no_catalog_route_count"]),
-                         (79, 51, 14, 14))
+                         (79, 65, 14, 0))
         self.assertEqual(len(result["modules"]), 9)
         self.assertEqual(sum(row["action_count"] for row in result["modules"]), 79)
         self.assertTrue(result["routing_is_not_acceptance"])
@@ -34,8 +34,8 @@ class DevelopmentResumeTests(unittest.TestCase):
         result = inspect(module="engagement")
         self.assertEqual(len(result["modules"]), 1)
         row = result["modules"][0]
-        self.assertEqual(row["no_catalog_route_ids"], ["engagement.02", "engagement.07"])
-        self.assertIn("engagement.02", row["next_work"])
+        self.assertEqual(row["no_catalog_route_ids"], [])
+        self.assertIn("Runtime acceptance remains open", row["next_work"])
         self.assertIn("tests/test_engagement_runtime.py", row["test_files"])
         with self.assertRaisesRegex(ValueError, "MODULE_UNKNOWN"):
             inspect(module="unknown")
@@ -43,7 +43,7 @@ class DevelopmentResumeTests(unittest.TestCase):
     def test_old_summary_cannot_silently_reappear(self):
         target = self.copy_records()
         path = target / "docs/79_ACTION_COVERAGE.md"
-        path.write_text(path.read_text().replace("51 link to an owner UI, 14 link to a Bridge contract, 14 have no route",
+        path.write_text(path.read_text().replace("65 link to an owner UI, 14 link to a Bridge contract, 0 have no route",
                                                 "44 link to an owner UI, 13 link to a Bridge contract, 22 have no route"))
         with self.assertRaisesRegex(ValueError, "COVERAGE_TOTALS_STALE"):
             inspect(target)
@@ -73,7 +73,7 @@ class DevelopmentResumeTests(unittest.TestCase):
             inspect(target)
         target = self.copy_records()
         path = target / "docs/NINE_MODULE_SOURCE_MAP.md"
-        path.write_text(path.read_text().replace("`engagement.02`; `engagement.07`", "`engagement.07`"))
+        path.write_text(path.read_text().replace("| engagement | — |", "| engagement | `engagement.02` |", 1))
         with self.assertRaisesRegex(ValueError, "MODULE_RECORD_ACTIONS_STALE"):
             inspect(target)
 

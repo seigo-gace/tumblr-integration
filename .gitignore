@@ -8,3 +8,4 @@ __pycache__/
 media/
 dist/
 dist-staging/
+.worktrees/

@@ -864,6 +864,33 @@
                   });
                   td.appendChild(button);
                 });
+                if(typeof record.candidate_id==="string"&&
+                   /^[a-z0-9][a-z0-9-]{0,62}:[0-9]{1,25}$/.test(record.candidate_id)){
+                  const reblogDraft=document.createElement("button");
+                  reblogDraft.type="button";
+                  reblogDraft.className="discovery-exclude";
+                  reblogDraft.textContent="リブログ下書き";
+                  reblogDraft.addEventListener("click",async function(){
+                    const comment=window.prompt("リブログに添える本文。Tumblrへは送信しません。");
+                    if(!comment||!comment.trim())return;
+                    reblogDraft.disabled=true;
+                    try{
+                      const response=await fetch("/catalog-operations",{
+                        method:"POST",credentials:"same-origin",
+                        headers:{"Content-Type":"application/json"},
+                        body:JSON.stringify({action:"engagement.02",
+                          candidate_id:record.candidate_id,comment:comment.trim()})});
+                      if(!response.ok)throw new Error("reblog_draft_failed");
+                      const saved=await response.json();
+                      if(saved.published!==false||saved.external_publication!==false)
+                        throw new Error("reblog_draft_unverified");
+                      display("リブログ下書きを保存しました。公開はしていません。","system");
+                    }catch(error){
+                      display("リブログ下書きを保存できませんでした。Tumblrへは送信していません。","system");
+                    }finally{reblogDraft.disabled=false;}
+                  });
+                  td.appendChild(reblogDraft);
+                }
               }
             }catch(error){td.textContent="リンク無効";}
           }else{td.textContent=value||"—";}
@@ -1055,8 +1082,33 @@
       data.items.forEach(function(entry){
         const row=document.createElement("div");row.className="library-controls";
         const label=document.createElement("span");
-        label.textContent=entry.action+" / "+entry.target+" / "+entry.state;
+        label.textContent=entry.action+" / "+entry.target+" / "+entry.state+
+          (entry.undone===true?" / 取り消し済み":"");
         row.appendChild(label);
+        if(entry.state==="verified"&&entry.undone!==true){
+          const undo=document.createElement("button");
+          undo.type="button";undo.textContent="操作を取り消す";
+          undo.addEventListener("click",async function(){
+            if(!window.confirm("確認済みのこの操作を公式APIで1件取り消しますか？"))return;
+            undo.disabled=true;
+            try{
+              const response=await fetch("/catalog-operations",{
+                method:"POST",credentials:"same-origin",
+                headers:{"Content-Type":"application/json"},
+                body:JSON.stringify({action:"engagement.07",
+                  engagement_action:entry.action,target:entry.target})});
+              if(!response.ok)throw new Error("undo_failed");
+              const result=await response.json();
+              if(result.verified!==true||result.state!=="undone")throw new Error("undo_unverified");
+              display("操作の取り消しを確認しました。","system");
+              showEngagementHistory(offset,panel);
+            }catch(error){
+              display("取り消しを確認できませんでした。成功したことにはしません。","system");
+              undo.disabled=false;
+            }
+          });
+          row.appendChild(undo);
+        }
         panel.appendChild(row);
       });
       const pager=document.createElement("div");pager.className="library-controls";
@@ -1185,16 +1237,39 @@
           display("投稿別の観測情報を確認できませんでした。実データ以外は表示しません。","system");
         }finally{postNotes.disabled=false;}
       });
+      async function showInflow(kind,button){
+        button.disabled=true;
+        try{
+          const response=await fetch("/catalog-operations",{
+            method:"POST",credentials:"same-origin",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({action:kind==="telegram"?"analytics.09":"analytics.10"})});
+          if(!response.ok)throw new Error("inflow_unavailable");
+          const result=await response.json();
+          if(result.verified!==true||!Array.isArray(result.items))throw new Error("inflow_unverified");
+          const title=kind==="telegram"?"Telegram流入経路":"未分類流入";
+          display(title+"（台帳件数 "+result.total+"。転換率は未計測）\n"+
+                  JSON.stringify(result.items,null,2),"system");
+        }catch(error){
+          display("流入台帳を確認できませんでした。件数は作っていません。","system");
+        }finally{button.disabled=false;}
+      }
+      const telegramInflow=document.createElement("button");
+      telegramInflow.type="button";telegramInflow.textContent="Telegram流入経路";
+      telegramInflow.addEventListener("click",function(){showInflow("telegram",telegramInflow);});
+      const unknownInflow=document.createElement("button");
+      unknownInflow.type="button";unknownInflow.textContent="未分類流入";
+      unknownInflow.addEventListener("click",function(){showInflow("unclassified",unknownInflow);});
       controls.append(history,snapshot,comparePeriod,compareButton,report,
-                      candidateInput,postNotes);
+                      candidateInput,postNotes,telegramInflow,unknownInflow);
       panel.appendChild(controls);
       section.appendChild(panel);
     }
     const items=[
       {goal:"キャンペーン",heading:"キャンペーン管理",endpoint:"/campaigns",
-       actions:["list","create","configure","enter","entries","audit","outcomes","notices","expiries","issue_claim","redeem_claim","reschedule","draw","promote","close"]},
+       actions:["list","create","copy","configure","enter","entries","audit","outcomes","notices","notify","expiries","issue_claim","redeem_claim","reschedule","draw","promote","close"]},
       {goal:"紹介",heading:"紹介管理",endpoint:"/referrals",
-       actions:["issue","confirm","set_tier","report","revoke"]},
+       actions:["issue","share_text","share_link","share_send","configure_campaign","confirm","set_tier","report","revoke"]},
     ];
     items.filter(item=>goals.includes(item.goal)).forEach(function(item){
       const details=document.createElement("details");
@@ -1212,7 +1287,10 @@
           list:"一覧",create:"新規作成",configure:"応募前の条件設定",enter:"GATE確認済み応募を登録",entries:"応募者を見る",
           outcomes:"抽選結果を見る",audit:"重複・GATE無効候補の確認（先頭20件）",notices:"通知台帳を確認",issue_claim:"当選者の受取コードを発行",redeem_claim:"受取コードで受取確定",reschedule:"締切を変更",
           draw:"抽選を実行",expiries:"期限切れ候補を確認（変更なし）",promote:"期限切れ・繰上りを実行",close:"企画を終了",
-          issue:"紹介コードを発行",confirm:"GATE確認済み紹介を記録",set_tier:"段階特典を設定（紹介開始前）",report:"紹介実績を見る",revoke:"紹介を停止"
+          copy:"企画文を下書き保存",notify:"当選者へ通知",
+          issue:"紹介コードを発行",share_text:"ワンタッチ共有文を作る",share_link:"共有リンク参照を作る",
+          share_send:"リンクを共有（確認後）",configure_campaign:"紹介キャンペーンを設定",
+          confirm:"GATE確認済み紹介を記録",set_tier:"段階特典を設定（紹介開始前）",report:"紹介実績を見る",revoke:"紹介を停止"
         })[action]||action;selector.appendChild(opt);
       });
       form.appendChild(selector);
@@ -1221,10 +1299,13 @@
            ["deadline","締切（日時）"],["winners","当選数"],
            ["claim_seconds","受取期限（秒）"],
            ["gate_topic_id","GATE確認先Topic ID（応募時に必要）"],
-           ["applicant_id","応募ユーザーID"],["claim_ticket","受取コード"]]
+           ["applicant_id","応募ユーザーID"],["claim_ticket","受取コード"],
+           ["event_id","通知ID"]]
         : [["campaign_id","キャンペーンID"],["referrer_id","紹介者ID"],
            ["member_id","参加ユーザーID"],["referral_code","紹介コード"],
-           ["threshold","紹介成立人数（しきい値）"],["reward","特典内容"]];
+           ["threshold","紹介成立人数（しきい値）"],["reward","特典内容"],
+           ["source_post_id","元投稿ID"],["destination","共有先"],
+           ["name","紹介キャンペーン名"]];
       const fields={};
       fieldDefs.forEach(function(def){
         const wrapper=document.createElement("label");
@@ -1245,8 +1326,14 @@
           : action==="configure"
           ? ["campaign_id","deadline","winners","claim_seconds","gate_topic_id"]
           : action==="reschedule"?["campaign_id","deadline"]
+          : action==="copy"?["campaign_id"]
+          : action==="notify"?["campaign_id","event_id"]
           : action==="enter"||action==="issue_claim"?["campaign_id","applicant_id"]
           : action==="redeem_claim"?["campaign_id","applicant_id","claim_ticket"]
+          : action==="share_text"?["campaign_id","referrer_id"]
+          : action==="share_link"?["campaign_id","source_post_id"]
+          : action==="share_send"?["campaign_id","source_post_id","destination"]
+          : action==="configure_campaign"?["campaign_id","name"]
           : action==="confirm"?["campaign_id","member_id","referral_code"]
           : action==="set_tier"?["campaign_id","threshold","reward"]
           : item.goal==="紹介"&&action!=="report"
@@ -1270,6 +1357,25 @@
           if(action==="list"){
             const response=await fetch(item.endpoint,{credentials:"same-origin"});
             if(!response.ok)throw new Error("request_failed");
+            result=await response.json();
+          }else if(["copy","notify","share_text","share_link","share_send","configure_campaign"].includes(action)){
+            const catalog={
+              copy:"campaign.02",notify:"campaign.08",share_text:"referral.02",
+              share_link:"referral.03",share_send:"referral.03",
+              configure_campaign:"referral.04"}[action];
+            const payload={action:catalog};
+            if(action==="share_send")payload.confirmed=true;
+            for(const [name,input] of Object.entries(fields)){
+              if(input.parentElement.hidden)continue;
+              const value=input.value.trim();
+              if(!value)throw new Error("field_missing");
+              payload[name]=value;
+            }
+            const response=await fetch("/catalog-operations",{
+              method:"POST",credentials:"same-origin",
+              headers:{"Content-Type":"application/json"},
+              body:JSON.stringify(payload)});
+            if(!response.ok)throw new Error("request_"+response.status);
             result=await response.json();
           }else{
             const payload={action:action};
@@ -1757,6 +1863,73 @@
             display("下書きを削除できませんでした。投稿履歴のある下書きは保護されます。","system");
           });
         });
+        const reuse=document.createElement("button");
+        reuse.type="button";reuse.textContent="過去文から作り直す";
+        reuse.addEventListener("click",async function(){
+          reuse.disabled=true;
+          try{
+            const response=await fetch("/catalog-operations",{
+              method:"POST",credentials:"same-origin",
+              headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({action:"publisher.03",draft_id:draft.id})});
+            if(!response.ok)throw new Error("reuse_failed");
+            const created=await response.json();
+            if(created.published!==false||created.source_draft_id!==draft.id)
+              throw new Error("reuse_unverified");
+            display("過去文を新しい下書きとして保存しました。公開はしていません。","system");
+            refreshDrafts();
+          }catch(error){
+            display("過去文の作り直しに失敗しました。公開はしていません。","system");
+            reuse.disabled=false;
+          }
+        });
+        const suggest=document.createElement("button");
+        suggest.type="button";suggest.textContent="タグを提案";
+        suggest.addEventListener("click",async function(){
+          suggest.disabled=true;
+          try{
+            const response=await fetch("/catalog-operations",{
+              method:"POST",credentials:"same-origin",
+              headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({action:"publisher.05",draft_id:draft.id})});
+            if(!response.ok)throw new Error("tags_failed");
+            const suggested=await response.json();
+            if(!Array.isArray(suggested.suggestions))throw new Error("tags_unverified");
+            display("観測済みタグの提案です。Tumblrへは付けていません。\n"+
+                    (suggested.suggestions.join(" ")||"（観測済みタグはありません）"),"system");
+          }catch(error){
+            display("タグ提案を確認できませんでした。","system");
+          }finally{suggest.disabled=false;}
+        });
+        const attach=document.createElement("button");
+        attach.type="button";attach.textContent="画像・動画を添付";
+        attach.disabled=draft.locked===true;
+        attach.addEventListener("click",async function(){
+          const raw=window.prompt("画像は a:添付ID、保存済み動画は m:job id。カンマ区切り。Tumblrへは送りません。");
+          if(!raw||!raw.trim())return;
+          const attachmentIds=[];
+          const mediaJobIds=[];
+          raw.split(",").forEach(function(part){
+            const value=part.trim();
+            if(value.startsWith("a:"))attachmentIds.push(value.slice(2));
+            else if(value.startsWith("m:"))mediaJobIds.push(value.slice(2));
+          });
+          attach.disabled=true;
+          try{
+            const response=await fetch("/catalog-operations",{
+              method:"POST",credentials:"same-origin",
+              headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({action:"publisher.04",draft_id:draft.id,
+                attachment_ids:attachmentIds,media_job_ids:mediaJobIds})});
+            if(!response.ok)throw new Error("attach_failed");
+            const bound=await response.json();
+            if(bound.tumblr_upload!==false||bound.published!==false)throw new Error("attach_unverified");
+            display("下書きへ添付しました。Tumblrへのアップロードはしていません。","system");
+          }catch(error){
+            display("添付できませんでした。Tumblrへは送っていません。","system");
+            attach.disabled=false;
+          }
+        });
         const publish=document.createElement("button");
         publish.type="button";
         publish.textContent="Tumblrへ投稿";
@@ -1784,7 +1957,7 @@
             display("下書きプレビューを取得できませんでした。投稿はしていません。","system");
           }finally{preview.disabled=false;}
         });
-        controls.append(load,preview,publish,remove);
+        controls.append(load,reuse,suggest,attach,preview,publish,remove);
         if(draft.publish_state==="local" && draft.locked!==true &&
            /^[0-9a-f]{64}$/.test(draft.text_digest||"")){
           const schedule=document.createElement("button");

@@ -1183,6 +1183,51 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._json(201, record)
             return
+        if parts.path == "/catalog-operations":
+            if not _authorized(self):
+                self._unauthorized()
+                return
+            bearer_ok = self.headers.get("Authorization", "").startswith("Bearer ") and _authorized(self)
+            if (self.headers.get("Origin") and not _same_origin(self)) or (not self.headers.get("Origin") and not bearer_ok):
+                self._send(403, "origin rejected\n", "text/plain; charset=utf-8")
+                return
+            try:
+                from contextlib import closing
+                from tumblrkit.catalog_operations import perform as catalog_perform
+                from tumblrkit.core import connect as campaign_connect
+                if self.headers.get("Content-Type","").split(";",1)[0].strip().lower()!="application/json":
+                    raise ValueError("catalog_operation_invalid")
+                data=json.loads(self._read_body(8192).decode("utf-8"))
+                if not isinstance(data,dict) or not isinstance(data.get("action"),str):
+                    raise ValueError("catalog_operation_invalid")
+                action=data.pop("action")
+                adapters=self.server.assistant.bridge.adapters
+                with closing(campaign_connect(str(self.server.draft_store.path))) as db:
+                    result=catalog_perform(
+                        action,data,
+                        drafts=self.server.draft_store,
+                        discovery=getattr(adapters.get("analytics"),"store",None),
+                        engagement=adapters.get("engagement"),
+                        campaign_db=db,
+                        attachments=self.server.attachment_store,
+                        media=self.server.media_save,
+                        telegram=adapters.get("telegram"),
+                        analytics=adapters.get("analytics"))
+            except ValueError as exc:
+                code=str(exc)
+                conflict=code.endswith("_not_connected") or code in (
+                    "engagement_reconcile_required","engagement_undo_not_verified",
+                    "campaign_notification_not_pending","referral_share_confirmation_required")
+                if code and " " not in code and len(code)<80:
+                    self._json(409 if conflict else 400,{"error":code})
+                else:
+                    self._json(400,{"error":"catalog_operation_invalid"})
+                return
+            except (OSError,sqlite3.Error,TypeError,UnicodeError,json.JSONDecodeError):
+                self._json(503,{"error":"catalog_operation_unavailable"})
+                return
+            self._json(200,result)
+            return
         if parts.path == "/drafts":
             if not _authorized(self):
                 self._unauthorized()

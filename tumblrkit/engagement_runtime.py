@@ -30,6 +30,15 @@ CREATE TABLE IF NOT EXISTS engagement_receipts (
   PRIMARY KEY(action,target)
 );
 """
+UNDOS = """
+CREATE TABLE IF NOT EXISTS engagement_undos (
+  action TEXT NOT NULL,
+  target TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('reserved','sent','verified')),
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY(action,target)
+);
+"""
 
 
 class _RejectRedirect(HTTPRedirectHandler):
@@ -40,8 +49,9 @@ class _RejectRedirect(HTTPRedirectHandler):
 class EngagementTransport:
     """No caller-supplied URL, method, headers, or arbitrary provider body."""
     def post(self, path, bearer, params, budget):
-        if path not in ("/v2/user/like", "/v2/user/follow") and not re.fullmatch(
-                r"/v2/blog/[a-z0-9-]+\.tumblr\.com/post/reblog", path):
+        if path not in ("/v2/user/like", "/v2/user/follow",
+                        "/v2/user/unlike", "/v2/user/unfollow") and not re.fullmatch(
+                r"/v2/blog/[a-z0-9-]+\.tumblr\.com/post/(?:reblog|delete)", path):
             raise ValueError("engagement_path_invalid")
         request=Request(API+path, data=urlencode(params).encode("utf-8"),
             headers={"Authorization":"Bearer "+bearer,
@@ -98,16 +108,20 @@ class EngagementAdapter:
             raise ValueError("engagement_history_limit_invalid")
         with closing(self.store._open()) as db:
             db.executescript(RECEIPTS)
+            db.executescript(UNDOS)
             total=db.execute("SELECT COUNT(*) FROM engagement_receipts").fetchone()[0]
             rows=db.execute(
                 "SELECT action,target,state,provider_post_id,updated_at "
                 "FROM engagement_receipts ORDER BY updated_at DESC,action,target "
                 "LIMIT ? OFFSET ?",(limit,offset)).fetchall()
+            undone={(action,target):state for action,target,state in db.execute(
+                "SELECT action,target,state FROM engagement_undos")}
         return {"verified":True,"source":"owner_private_engagement_receipts",
                 "total":total,"offset":offset,"limit":limit,
                 "items":[{"action":a,"target":target,"state":state,
                           "provider_post_id":post_id if state=="verified" else "",
-                          "updated_at":updated}
+                          "updated_at":updated,
+                          "undone":undone.get((a,target))=="verified"}
                          for a,target,state,post_id,updated in rows]}
 
     def _lookup(self, db, action, target):
@@ -197,12 +211,22 @@ class EngagementAdapter:
     def _claim(self, action, target):
         with closing(self.store._open()) as db:
             db.execute(RECEIPTS)
+            db.execute(UNDOS)
             db.execute("BEGIN IMMEDIATE")
             self._lookup(db,action,target)
             row=db.execute(
                 "SELECT state,provider_post_id,updated_at FROM engagement_receipts "
                 "WHERE action=? AND target=?",(action,target)).fetchone()
-            if not row:
+            undo=db.execute(
+                "SELECT state FROM engagement_undos WHERE action=? AND target=?",
+                (action,target)).fetchone()
+            if row and row[0]=="verified" and undo and undo[0]=="verified":
+                db.execute(
+                    "UPDATE engagement_receipts SET state='reserved',"
+                    "provider_post_id='',updated_at=? WHERE action=? AND target=?",
+                    (int(time.time()),action,target))
+                row=None
+            elif not row:
                 db.execute(
                     "INSERT INTO engagement_receipts(action,target,state,updated_at) "
                     "VALUES(?,?,'reserved',?)",(action,target,int(time.time())))
@@ -245,12 +269,164 @@ class EngagementAdapter:
                            if post_id else candidate["url"]}],
         }
 
+    def _undo_state(self, action, target):
+        with closing(self.store._open()) as db:
+            db.execute(UNDOS)
+            row=db.execute(
+                "SELECT state FROM engagement_undos WHERE action=? AND target=?",
+                (action,target)).fetchone()
+        return row[0] if row else None
+
+    def _clear_undo(self, action, target):
+        with closing(self.store._open()) as db:
+            db.execute(UNDOS)
+            db.execute("DELETE FROM engagement_undos WHERE action=? AND target=?",
+                       (action,target))
+            db.commit()
+
+    def _claim_undo(self, action, target):
+        with closing(self.store._open()) as db:
+            db.execute(UNDOS)
+            db.execute("BEGIN IMMEDIATE")
+            row=db.execute(
+                "SELECT state FROM engagement_undos WHERE action=? AND target=?",
+                (action,target)).fetchone()
+            if not row:
+                db.execute(
+                    "INSERT INTO engagement_undos(action,target,state,updated_at) "
+                    "VALUES(?,?,'reserved',?)",(action,target,int(time.time())))
+            db.commit()
+        return row
+
+    def _undo_mark(self, action, target, state):
+        with closing(self.store._open()) as db:
+            db.execute(UNDOS)
+            db.execute(
+                "UPDATE engagement_undos SET state=?,updated_at=? "
+                "WHERE action=? AND target=?",
+                (state,int(time.time()),action,target))
+            db.commit()
+
+    def _clear_undo_reserved(self, action, target):
+        with closing(self.store._open()) as db:
+            db.execute(UNDOS)
+            db.execute(
+                "DELETE FROM engagement_undos WHERE action=? AND target=? "
+                "AND state='reserved'",(action,target))
+            db.commit()
+
+    def save_reblog_draft(self, target, comment, draft_store):
+        """Store a local reblog comment bound to one observed post. No Tumblr write."""
+        if not isinstance(comment,str) or not comment.strip() or len(comment)>2000:
+            raise ValueError("engagement_draft_invalid")
+        candidate=self.preview("engagement.reblog", target)
+        saved=draft_store.save(comment)
+        draft_store.set_meta(saved["id"], saved["text"], {
+            "catalog":"engagement.02","candidate_id":target,
+            "blog":candidate["blog"],"post_id":candidate["post_id"],
+            "url":candidate["url"]})
+        return {"verified":True,"draft_id":saved["id"],"text":saved["text"],
+                "candidate_id":target,"blog":candidate["blog"],
+                "published":False,"external_publication":False}
+
+    def undo(self, action, target):
+        """Reverse one verified like, reblog, or follow. No second write after uncertainty."""
+        if action not in ACTIONS or not isinstance(target,str):
+            raise ValueError("engagement_target_invalid")
+        candidate=self.preview(action, target)
+        receipt=self._receipt(action, target)
+        if not receipt or receipt[0]!="verified":
+            raise ValueError("engagement_undo_not_verified")
+        existing=self._undo_state(action, target)
+        if existing=="verified":
+            return {"verified":True,"reused_existing_receipt":True,
+                    "state":"undone","provider_call":False,
+                    "external_publication":False}
+        if existing=="reserved":
+            raise ValueError("engagement_reconcile_required")
+        self.budget.reserve(1 if existing=="sent" else 3)
+        bearer=self.token_provider()
+        if existing=="sent":
+            self._confirm_undo(action, candidate, receipt[1], bearer)
+            self._undo_mark(action, target, "verified")
+            return {"verified":True,"reused_existing_receipt":False,
+                    "state":"undone","provider_call":False}
+        claimed=self._claim_undo(action, target)
+        if claimed:
+            raise ValueError("engagement_reconcile_required")
+        try:
+            self._post_undo(action, candidate, receipt[1], bearer)
+        except ValueError as exc:
+            if str(exc) in ("tumblr_auth_expired","tumblr_permission_denied",
+                            "engagement_provider_refused","tumblr_rate_limited"):
+                self._clear_undo_reserved(action, target)
+            raise
+        self._undo_mark(action, target, "sent")
+        self._confirm_undo(action, candidate, receipt[1], bearer)
+        self._undo_mark(action, target, "verified")
+        return {"verified":True,"state":"undone","provider_call":True,
+                "target":target,"published":False}
+
+    def _post_undo(self, action, candidate, post_id, bearer):
+        if action=="engagement.follow":
+            path="/v2/user/unfollow"
+            params={"url":"https://"+candidate["blog"]+".tumblr.com"}
+            expected=200
+        elif action=="engagement.like":
+            found=self._read("/v2/blog/"+candidate["blog"]+".tumblr.com/posts/"+
+                             candidate["post_id"]+"?post_format=npf",bearer)
+            post=self._post_info(found,candidate["blog"],candidate["post_id"])
+            reblog_key=post.get("reblog_key")
+            if not isinstance(reblog_key,str) or not KEY.fullmatch(reblog_key):
+                raise ValueError("engagement_target_missing")
+            path="/v2/user/unlike"
+            params={"id":candidate["post_id"],"reblog_key":reblog_key}
+            expected=200
+        else:
+            if not POST_ID.fullmatch(post_id or ""):
+                raise ValueError("engagement_undo_not_verified")
+            path="/v2/blog/"+self.owner+".tumblr.com/post/delete"
+            params={"id":post_id}
+            expected=200
+        status,result=self.writer.post(path,bearer,params,self.budget)
+        if status!=expected or not isinstance(result,dict):
+            raise ValueError("engagement_post_uncertain")
+
+    def _confirm_undo(self, action, candidate, post_id, bearer):
+        if action=="engagement.follow":
+            info=self._read("/v2/blog/"+candidate["blog"]+".tumblr.com/info",bearer)
+            details=info.get("blog") if isinstance(info,dict) else None
+            if not isinstance(details,dict) or details.get("followed") is not False:
+                raise ValueError("engagement_readback_unverified")
+            following=self._read("/v2/user/following?limit=20&offset=0",bearer)
+            users=following.get("blogs") if isinstance(following,dict) else None
+            if not isinstance(users,list) or any(
+                    isinstance(item,dict) and item.get("name")==candidate["blog"]
+                    for item in users):
+                raise ValueError("engagement_readback_unverified")
+            return
+        if action=="engagement.like":
+            found=self._read("/v2/blog/"+candidate["blog"]+".tumblr.com/posts/"+
+                             candidate["post_id"]+"?post_format=npf",bearer)
+            post=self._post_info(found,candidate["blog"],candidate["post_id"])
+            if post.get("liked") is not False:
+                raise ValueError("engagement_readback_unverified")
+            return
+        try:
+            self.reader.get("/v2/blog/"+self.owner+".tumblr.com/posts/"+
+                            post_id+"?post_format=npf",bearer)
+        except ValueError as exc:
+            if str(exc)=="tumblr_post_unavailable":
+                return
+            raise
+        raise ValueError("engagement_readback_unverified")
+
     def perform(self, action, target, payload):
         if action not in ACTIONS or payload not in ({},None):
             raise ValueError("engagement_action_invalid")
         candidate=self.preview(action,target)
         earlier=self._receipt(action,target)
-        if earlier and earlier[0]=="verified":
+        if earlier and earlier[0]=="verified" and self._undo_state(action,target)!="verified":
             return self._result(action,candidate,earlier[2],reused=True,
                                 post_id=earlier[1])
         if earlier and earlier[0]=="reserved":
@@ -262,6 +438,7 @@ class EngagementAdapter:
         if earlier and earlier[0]=="sent":
             self._verify(action,candidate,earlier[1],bearer)
             self._state(action,target,"verified",earlier[1])
+            self._clear_undo(action,target)
             return self._result(action,candidate,post_id=earlier[1])
         blog=candidate["blog"]
         if action=="engagement.follow":
@@ -312,4 +489,5 @@ class EngagementAdapter:
         self._state(action,target,"sent",new_id)
         self._verify(action,candidate,new_id,bearer)
         self._state(action,target,"verified",new_id)
+        self._clear_undo(action,target)
         return self._result(action,candidate,post_id=new_id)

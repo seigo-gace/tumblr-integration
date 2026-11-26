@@ -31,6 +31,7 @@ class Reader:
         self.followed=False
         self.reblog_parent="123"
         self.fail_readback=False
+        self.deleted=False
 
     def get(self,path,bearer):
         assert bearer=="valid-owner-token"
@@ -49,6 +50,8 @@ class Reader:
             if self.fail_readback and self.liked:
                 post["id_string"]="999"
             return {"meta":{"status":200},"response":post}
+        if self.deleted and "/owner.tumblr.com/posts/456?" in path:
+            raise ValueError("tumblr_post_unavailable")
         if "/owner.tumblr.com/posts/456?" in path:
             post={"blog_name":"owner","id_string":"456","parent_post_id":
                   self.reblog_parent,"state":"published"}
@@ -75,6 +78,15 @@ class Writer:
             return 200,{"meta":{"status":200},"response":{}}
         if path=="/v2/blog/owner.tumblr.com/post/reblog":
             return 201,{"meta":{"status":201},"response":{"id":"456"}}
+        if path=="/v2/user/unlike":
+            self.reader.liked=False
+            return 200,{"meta":{"status":200},"response":{}}
+        if path=="/v2/user/unfollow":
+            self.reader.followed=False
+            return 200,{"meta":{"status":200},"response":{}}
+        if path=="/v2/blog/owner.tumblr.com/post/delete":
+            self.reader.deleted=True
+            return 200,{"meta":{"status":200},"response":{}}
         raise AssertionError("Unsafe path")
 
 
@@ -288,6 +300,25 @@ class EngagementTests(unittest.TestCase):
                         EngagementTransport().post("/v2/user/like",
                             "valid-owner-token",{"id":"123","reblog_key":"verified-key"},
                             self.budget)
+
+    def test_verified_like_reblog_and_follow_can_be_undone_once(self):
+        chat=self.bot()
+        for action,target,undo_path in (
+                ("engagement.like","source:123","/v2/user/unlike"),
+                ("engagement.reblog","source:123","/v2/blog/owner.tumblr.com/post/delete"),
+                ("engagement.follow","source","/v2/user/unfollow")):
+            proposal=chat.turn(selected_action=action,selected_target=target)
+            done=chat.turn(confirm=True,request_id=proposal["request_id"])
+            self.assertEqual(done["state"],"completed")
+            before=len(self.writer.calls)
+            undone=self.adapter.undo(action,target)
+            self.assertEqual(undone["state"],"undone")
+            self.assertTrue(undone["provider_call"])
+            self.assertEqual(self.writer.calls[before][0],undo_path)
+            again=self.adapter.undo(action,target)
+            self.assertTrue(again["reused_existing_receipt"])
+            self.assertEqual(len(self.writer.calls),before+1)
+        self.assertTrue(self.adapter.history()["items"])
 
     def test_no_unlisted_action_or_batch_payload(self):
         with self.assertRaises(ValueError):

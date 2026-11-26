@@ -1,6 +1,7 @@
 """Local drafts owned only by the Tumblr operation app. No external API."""
 import os
 import hashlib
+import json
 import sqlite3
 import time
 import uuid
@@ -24,6 +25,10 @@ class DraftStore:
             "CREATE TABLE IF NOT EXISTS operation_drafts("
             "id TEXT PRIMARY KEY, text TEXT NOT NULL, updated INTEGER NOT NULL)"
         )
+        columns=[row[1] for row in db.execute("PRAGMA table_info(operation_drafts)")]
+        if "meta" not in columns:
+            db.execute(
+                "ALTER TABLE operation_drafts ADD COLUMN meta TEXT NOT NULL DEFAULT ''")
         db.commit()
         return db
 
@@ -179,6 +184,61 @@ class DraftStore:
             db.execute("UPDATE operation_drafts SET text=?,updated=? WHERE id=?",
                        (value,updated,ident))
         return {"id":ident,"text":value,"updated":updated}
+
+    def _validated_id(self, ident):
+        if (not isinstance(ident,str) or len(ident)!=32
+                or any(c not in "0123456789abcdef" for c in ident)):
+            raise ValueError("INVALID_DRAFT")
+        return ident
+
+    def meta_of(self, ident):
+        """Owner-private annotation. Empty when the draft has no attachment/tag/link."""
+        self._validated_id(ident)
+        with self._connect() as db:
+            row=db.execute(
+                "SELECT meta FROM operation_drafts WHERE id=?",(ident,)).fetchone()
+        if row is None:
+            raise ValueError("DRAFT_NOT_FOUND")
+        if not row[0]:
+            return {}
+        try:
+            value=json.loads(row[0])
+        except ValueError:
+            return {}
+        return value if isinstance(value,dict) else {}
+
+    def set_meta(self, ident, expected_text, meta):
+        """Attach owner metadata without changing the saved text or publishing."""
+        self._validated_id(ident)
+        if (not isinstance(expected_text,str) or len(expected_text)>2000
+                or not isinstance(meta,dict)):
+            raise ValueError("INVALID_DRAFT")
+        raw=json.dumps(meta,ensure_ascii=False,separators=(",",":"),sort_keys=True)
+        if len(raw)>4000:
+            raise ValueError("INVALID_DRAFT")
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if self._has_publish_receipt(db,ident):
+                raise ValueError("DRAFT_PUBLISH_LOCKED")
+            row=db.execute(
+                "SELECT text FROM operation_drafts WHERE id=?",(ident,)).fetchone()
+            if row is None:
+                raise ValueError("DRAFT_NOT_FOUND")
+            if row[0]!=expected_text:
+                raise ValueError("DRAFT_EDIT_CONFLICT")
+            db.execute(
+                "UPDATE operation_drafts SET meta=?,updated=? WHERE id=?",
+                (raw,int(time.time()),ident))
+        return {"id":ident,"text":expected_text,"meta":meta,"published":False}
+
+    def reuse(self, ident):
+        """Copy one saved draft into a new unlocked draft. Does not publish."""
+        current=self.get(ident)
+        saved=self.save(current["text"])
+        meta={"catalog":"publisher.03","source_draft_id":ident}
+        self.set_meta(saved["id"],saved["text"],meta)
+        return {"id":saved["id"],"text":saved["text"],
+                "source_draft_id":ident,"published":False}
 
     def delete(self, ident):
         if not isinstance(ident, str) or len(ident) != 32 or not all(c in "0123456789abcdef" for c in ident):

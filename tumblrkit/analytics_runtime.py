@@ -305,3 +305,67 @@ class AnalyticsAdapter:
                 "Tumblr反応総数", "Telegram参加転換率", "キャンペーン成果",
             ],
         }
+
+    def inflow(self, kind):
+        """Group recorded events into Telegram paths or still-unclassified sources.
+
+        A campaign link id is classified as linked, not as Telegram and not as
+        unclassified. Counts are ledger rows only; they are not conversions.
+        """
+        if kind not in ("telegram","unclassified"):
+            raise ValueError("analytics_inflow_kind_invalid")
+        empty={"verified":True,"kind":kind,"total":0,"items":[],
+               "basis":"owner_private_event_ledger",
+               "not_measured":["転換率","表示回数","未計測の外部流入"]}
+        db=self.campaign_db
+        opened=None
+        if db is None and self.campaign_db_path is not None:
+            opened=sqlite3.connect(str(self.campaign_db_path))
+            db=opened
+        if db is None:
+            empty["basis"]="campaign_ledger_not_connected"
+            return empty
+        try:
+            present=db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'"
+            ).fetchone()
+            if not present:
+                return empty
+            rows=db.execute(
+                "SELECT e.source,e.kind,COUNT(*),"
+                "(SELECT l.source_post_id FROM campaign_links l "
+                "WHERE l.link_id=e.source) "
+                "FROM events e GROUP BY e.source,e.kind "
+                "ORDER BY e.source,e.kind").fetchall()
+        finally:
+            if opened is not None:
+                opened.close()
+        items=[]
+        for source,event_kind,count,source_post in rows:
+            channel=self._inflow_channel(source,source_post)
+            if kind=="telegram" and channel!="telegram":
+                continue
+            if kind=="unclassified" and channel!="unclassified":
+                continue
+            items.append({"source":source,"kind":event_kind,"count":count,
+                          "channel":channel,
+                          "linked_post":source_post or ""})
+        return {"verified":True,"kind":kind,"total":sum(item["count"] for item in items),
+                "items":items[:100],"basis":"owner_private_event_ledger",
+                "not_measured":["転換率","表示回数","未計測の外部流入"]}
+
+    @staticmethod
+    def _inflow_channel(source, source_post):
+        if not isinstance(source,str) or not source:
+            return "unclassified"
+        if source=="telegram" or source.startswith("telegram:"):
+            return "telegram"
+        if isinstance(source_post,str) and (source_post=="telegram" or source_post.startswith("telegram:")):
+            return "telegram"
+        if source=="tumblr" or source.startswith("tumblr:"):
+            return "tumblr"
+        if source=="gate" or source.startswith("gate:"):
+            return "gate"
+        if isinstance(source_post,str) and source_post:
+            return "linked"
+        return "unclassified"
