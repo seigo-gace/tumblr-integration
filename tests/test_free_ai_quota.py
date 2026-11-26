@@ -66,6 +66,7 @@ class DurableFreeQuotaTests(unittest.TestCase):
     def test_all_three_live_providers_share_the_same_durable_quota(self):
         from tumblrkit.assistant import providers_from_env
         env={
+            "TUMBLR_AI_ROUTING_MODE":"legacy_split",
             "TUMBLR_AI_LIVE_ENABLED":"1",
             "TUMBLR_AI_QUOTA_DB":self.db,
             "TUMBLR_GEMINI_API_KEY":"example-gemini",
@@ -75,6 +76,20 @@ class DurableFreeQuotaTests(unittest.TestCase):
         providers=providers_from_env(env)
         self.assertEqual({p.name for p in providers},{"gemini","groq","openrouter"})
         self.assertTrue(all(p.quota is providers[0].quota for p in providers))
+
+    def test_default_uses_only_free_router_even_with_all_keys(self):
+        from tumblrkit.assistant import providers_from_env
+        env = {
+            "TUMBLR_GEMINI_API_KEY": "example-gemini",
+            "TUMBLR_GROQ_API_KEY": "example-groq",
+            "TUMBLR_OPENROUTER_API_KEY": "example-router",
+        }
+        providers = providers_from_env(env)
+        self.assertEqual([p.name for p in providers], ["openrouter"])
+        self.assertEqual(providers[0]._body("test")["model"], "openrouter/free")
+        self.assertFalse(providers[0].paid)
+        del env["TUMBLR_OPENROUTER_API_KEY"]
+        self.assertEqual(providers_from_env(env), [])
 
     def test_429_does_not_try_another_provider(self):
         primary = ScriptedProvider("groq", error="rate_limited")
