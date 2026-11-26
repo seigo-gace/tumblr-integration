@@ -189,7 +189,12 @@ def providers_from_env(env, transport=None):
     quota = DurableFreeQuota(env) if transport is None else None
     transport = transport or UrllibTransport()
     chosen = []
-    if env.get("TUMBLR_GEMINI_API_KEY"):
+    # Keep the existing provider keys, but use only zero-price models by default.
+    # The former provider split is available only through explicit owner configuration.
+    mode = env.get("TUMBLR_AI_ROUTING_MODE", "free_router")
+    if mode not in ("free_router", "legacy_split"):
+        raise ProviderError("invalid_routing_mode")
+    if mode == "legacy_split" and env.get("TUMBLR_GEMINI_API_KEY"):
         chosen.append(HttpProvider(
             "gemini",
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
@@ -198,7 +203,7 @@ def providers_from_env(env, transport=None):
             transport,
             quota=quota,
         ))
-    if env.get("TUMBLR_GROQ_API_KEY"):
+    if mode == "legacy_split" and env.get("TUMBLR_GROQ_API_KEY"):
         chosen.append(HttpProvider(
             "groq",
             "https://api.groq.com/openai/v1/chat/completions",
