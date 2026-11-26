@@ -374,7 +374,7 @@ class AssistantTests(unittest.TestCase):
         from unittest.mock import patch
         from urllib.error import URLError
         with patch("tumblrkit.assistant.urlopen", side_effect=URLError("offline")):
-            provider = providers_from_env({"TUMBLR_GROQ_API_KEY": "test-key"}, transport=UrllibTransport())[0]
+            provider = providers_from_env({"TUMBLR_AI_ROUTING_MODE": "legacy_split", "TUMBLR_GROQ_API_KEY": "test-key"}, transport=UrllibTransport())[0]
             result = Assistant(providers=[provider]).turn("検索して")
         self.assertEqual("network_unavailable", result["state"])
         self.assertFalse(result["executed"])
