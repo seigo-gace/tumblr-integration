@@ -74,6 +74,17 @@ class ProbeTests(unittest.TestCase):
         self.assertNotIn("example-gemini", output)
         self.assertNotIn("example-groq", output)
 
+    def test_gemini_status_can_be_checked_without_calling_groq(self):
+        transport = RecordingTransport(status=404, payload={"reply": "ok"})
+        code, output = self.capture(
+            self.env(TUMBLR_AI_ROUTING_MODE="legacy_split", TUMBLR_AI_PROBE_ONLY="gemini"),
+            transport,
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("CALL provider=gemini result=failed http=404", output)
+        self.assertNotIn("provider=groq", output)
+        self.assertEqual(transport.urls, ["https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"])
+
     def test_provider_exception_text_is_not_printed(self):
         transport = RecordingTransport(error=RuntimeError("example-openrouter leaked"))
         code, output = self.capture(self.env(), transport)

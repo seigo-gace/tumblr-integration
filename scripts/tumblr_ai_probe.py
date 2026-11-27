@@ -23,12 +23,14 @@ SAFE_CODES = {
     "quota_unavailable",
     "paid_model_forbidden",
 }
+LAST_STATUS = {"value": None}
 
 
 def run(env, transport=None, sleep=time.sleep):
     mode = env.get("TUMBLR_AI_ROUTING_MODE", "free_router")
+    selected = _StatusTransport(transport) if transport is not None else None
     try:
-        providers = providers_from_env(env, transport)
+        providers = providers_from_env(env, selected)
     except ProviderError as exc:
         code = exc.code if exc.code in SAFE_CODES else "failed"
         print(f"PROBE=FAIL reason={code}")
@@ -36,6 +38,7 @@ def run(env, transport=None, sleep=time.sleep):
     names = [item.name for item in providers]
     print(f"ROUTING={mode}")
     print("PROVIDERS=" + ",".join(names))
+    only = env.get("TUMBLR_AI_PROBE_ONLY", "").strip()
     if mode == "free_router":
         targets = providers
         if names != ["openrouter"]:
@@ -43,12 +46,17 @@ def run(env, transport=None, sleep=time.sleep):
             return 2
     elif mode == "legacy_split":
         targets = [item for item in providers if item.name in ("gemini", "groq")]
-        if [item.name for item in targets] != ["gemini", "groq"]:
+        if not only and [item.name for item in targets] != ["gemini", "groq"]:
             print("PROBE=FAIL reason=legacy_provider_mismatch")
             return 2
     else:
         print("PROBE=FAIL reason=invalid_routing_mode")
         return 2
+    if only:
+        targets = [item for item in targets if item.name == only]
+        if [item.name for item in targets] != [only]:
+            print("PROBE=FAIL reason=probe_provider_mismatch")
+            return 2
     if env.get("TUMBLR_AI_LIVE_ENABLED") != "1":
         print("PROBE=FAIL reason=ai_disabled")
         return 2
@@ -60,11 +68,12 @@ def run(env, transport=None, sleep=time.sleep):
     for index, provider in enumerate(targets):
         if index:
             sleep(61)
+        LAST_STATUS["value"] = None
         try:
             plan = provider.complete(PROMPT)
         except ProviderError as exc:
             code = exc.code if exc.code in SAFE_CODES else "failed"
-            print(f"CALL provider={provider.name} result={code}")
+            print(f"CALL provider={provider.name} result={code}{_http()}")
             ok = False
             continue
         except Exception:
@@ -74,7 +83,7 @@ def run(env, transport=None, sleep=time.sleep):
         if isinstance(plan, dict):
             print(f"CALL provider={provider.name} result=ok")
         else:
-            print(f"CALL provider={provider.name} result=invalid_response")
+            print(f"CALL provider={provider.name} result=invalid_response{_http()}")
             ok = False
     print("PROBE=" + ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
@@ -99,7 +108,34 @@ def _private_quota(path):
         return False
 
 
+class _StatusTransport:
+    def __init__(self, inner):
+        self.inner = inner
+
+    def post(self, url, headers, body):
+        status, payload = self.inner.post(url, headers, body)
+        LAST_STATUS["value"] = status
+        return status, payload
+
+
+def _http():
+    status = LAST_STATUS["value"]
+    if isinstance(status, int) and 100 <= status <= 599:
+        return f" http={status}"
+    return ""
+
+
 def main():
+    import tumblrkit.assistant as assistant_mod
+    from tumblrkit.assistant import UrllibTransport
+
+    class RecordingTransport(UrllibTransport):
+        def post(self, url, headers, body):
+            status, payload = super().post(url, headers, body)
+            LAST_STATUS["value"] = status
+            return status, payload
+
+    assistant_mod.UrllibTransport = RecordingTransport
     return run(os.environ)
 
 
