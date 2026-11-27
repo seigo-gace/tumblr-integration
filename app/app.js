@@ -1151,8 +1151,17 @@
     pending=pendingState&&turn.request_id?turn.request_id:null;
     showAssist(turn);
   }
+  function canRetryInput(payload){
+    return Boolean(payload&&pendingState==="input_required"&&pending&&
+      payload.request_id===pending&&typeof payload.message==="string"&&
+      !payload.confirm&&!payload.abort&&!payload.draft&&
+      !payload.selected_action&&!payload.catalog_action);
+  }
   function fail(){
-    display("操作先の応答を確認できませんでした。実行結果は不明です。","system");
+    display("操作先の応答を確認できませんでした。実行結果は不明です。"+
+      (canRetryInput(lastRequest)
+        ?"入力待ちの同じ操作IDに限り再試行できます。"
+        :"重複実行を避けるため再送できません。保存先や操作結果を確認してください。"),"system");
     assist.hidden=false;
     confirm.hidden=true;
     connection.textContent="外部接続：結果未確認";
@@ -1161,9 +1170,9 @@
     if(assistantBusy||(sending&&!fromForm))return Promise.resolve();
     assistantBusy=true;
     const sent=JSON.parse(JSON.stringify(payload));
-    // Keep the exact original input and correlation ID for an explicit retry.
-    // Confirmation and abort are never replayed by the retry button.
-    lastRequest=sent.confirm||sent.abort||sent.draft?null:sent;
+    // Only an input follow-up with its original, current continuation ID
+    // can be retried. A lost initial response may already have created data.
+    lastRequest=canRetryInput(sent)?sent:null;
     return fetch("/assistant",{
       method:"POST",
       credentials:"same-origin",
@@ -1214,9 +1223,13 @@
     }
   });
   document.getElementById("retry").addEventListener("click",function(){
-    if(!lastRequest||assistantBusy||sending)return;
-    // Do not retry a failed follow-up against a newer conversation.
-    if(lastRequest.request_id&&lastRequest.request_id!==pending)return;
+    if(assistantBusy||sending)return;
+    if(!canRetryInput(lastRequest)){
+      lastRequest=null;
+      display("再試行できる入力待ちの操作はありません。応答を確認できなかった操作は重複実行を避けるため再送せず、保存先や操作結果を確認してください。","system");
+      assist.hidden=false;
+      return;
+    }
     post(lastRequest);
   });
   document.getElementById("draft").addEventListener("click",function(){
