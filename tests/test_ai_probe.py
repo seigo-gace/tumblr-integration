@@ -83,7 +83,15 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("CALL provider=gemini result=failed http=404", output)
         self.assertNotIn("provider=groq", output)
-        self.assertEqual(transport.urls, ["https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"])
+        self.assertEqual(transport.urls, ["https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"])
+
+    def test_gemini_answer_skips_a_leading_thought(self):
+        from tumblrkit.assistant import _provider_text
+        text = _provider_text("gemini", {"candidates": [{"content": {"parts": [
+            {"thought": True, "text": "thinking"},
+            {"text": '{"reply":"ok"}'},
+        ]}}]})
+        self.assertEqual(text, '{"reply":"ok"}')
 
     def test_provider_exception_text_is_not_printed(self):
         transport = RecordingTransport(error=RuntimeError("example-openrouter leaked"))

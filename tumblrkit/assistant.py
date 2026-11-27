@@ -197,7 +197,7 @@ def providers_from_env(env, transport=None):
     if mode == "legacy_split" and env.get("TUMBLR_GEMINI_API_KEY"):
         chosen.append(HttpProvider(
             "gemini",
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
             {"x-goog-api-key": env["TUMBLR_GEMINI_API_KEY"]},
             True,
             transport,
@@ -230,7 +230,11 @@ def providers_from_env(env, transport=None):
 
 def _provider_text(name, payload):
     if name == "gemini":
-        return payload["candidates"][0]["content"]["parts"][0]["text"]
+        parts = payload["candidates"][0]["content"]["parts"]
+        visible = [part.get("text") for part in parts if part.get("text") and not part.get("thought")]
+        if not visible:
+            visible = [part.get("text") for part in parts if part.get("text")]
+        return visible[-1]
     return payload["choices"][0]["message"]["content"]
 
 
