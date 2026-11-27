@@ -122,5 +122,86 @@ class ConversationFollowupTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
 
 
+    def test_same_cookie_interleaved_operation_ids_keep_separate_inputs(self):
+        a = self.ask(self.a, "当選者へ通知\n企画ID: campaign-tab-a")
+        b = self.ask(self.a, "当選者へ通知\n企画ID: campaign-tab-b")
+        self.assertNotEqual(a, b)
+        self.assertEqual(self.calls, [])
+        second = self.turn(self.a, message="event-tab-b", request_id=b)
+        self.assertEqual(second["state"], "confirmation_required", second)
+        first = self.turn(self.a, message="event-tab-a", request_id=a)
+        self.assertEqual(first["state"], "confirmation_required", first)
+        self.assertNotEqual(first["request_id"], second["request_id"])
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.turn(self.a, confirm=True,
+                                  request_id=first["request_id"])["state"], "completed")
+        self.assertEqual(self.turn(self.a, confirm=True,
+                                  request_id=second["request_id"])["state"], "completed")
+        self.assertEqual(self.calls, [
+            ("campaign.08", {"campaign_id": "campaign-tab-a", "event_id": "event-tab-a"}),
+            ("campaign.08", {"campaign_id": "campaign-tab-b", "event_id": "event-tab-b"}),
+        ])
+
+    def test_premature_confirmation_preserves_missing_input(self):
+        operation = self.ask(self.a, "当選者へ通知\n企画ID: campaign-incomplete")
+        refused = self.turn(self.a, confirm=True, request_id=operation)
+        self.assertNotIn(refused["state"], ("completed", "confirmation_required"))
+        self.assertFalse(refused["executed"])
+        self.assertEqual(self.calls, [])
+        proposed = self.turn(self.a, message="event-ready", request_id=operation)
+        self.assertEqual(proposed["state"], "confirmation_required", proposed)
+        self.assertFalse(proposed["executed"])
+        self.assertEqual(self.calls, [])
+        completed = self.turn(self.a, confirm=True, request_id=proposed["request_id"])
+        self.assertEqual(completed["state"], "completed", completed)
+        self.assertEqual(self.calls, [
+            ("campaign.08", {"campaign_id": "campaign-incomplete", "event_id": "event-ready"}),
+        ])
+
+    def test_client_claimed_session_id_cannot_override_authentication(self):
+        claimed = "same-client-supplied-session"
+        a = self.turn(self.a, message="投稿文をゼロから作る", session_id=claimed)
+        b = self.turn(self.b, message="投稿文をゼロから作る", session_id=claimed)
+        for result in (a, b):
+            self.assertEqual(result["state"], "input_required", result)
+            self.assertFalse(result["executed"])
+            self.assertTrue(result.get("request_id"))
+        self.assertNotEqual(a["request_id"], b["request_id"])
+        refused = self.turn(self.b, message="混入させない本文",
+                            request_id=a["request_id"], session_id=claimed)
+        self.assertNotEqual(refused["state"], "completed")
+        self.assertFalse(refused["executed"])
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.turn(self.b, message="Bの正しい本文",
+                                  request_id=b["request_id"], session_id=claimed)["state"],
+                         "completed")
+        self.assertEqual(self.turn(self.a, message="Aの正しい本文",
+                                  request_id=a["request_id"], session_id=claimed)["state"],
+                         "completed")
+        self.assertEqual(self.calls, [
+            ("publisher.01", {"text": "Bの正しい本文"}),
+            ("publisher.01", {"text": "Aの正しい本文"}),
+        ])
+
+    def test_bearer_authentication_supports_input_followup(self):
+        def bearer_turn(**payload):
+            status, body, _ = fetch(
+                self.base + "/assistant", token=TOKEN, method="POST",
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(status, 200, body)
+            return json.loads(body)
+
+        asked = bearer_turn(message="投稿文をゼロから作る")
+        self.assertEqual(asked["state"], "input_required", asked)
+        self.assertTrue(asked.get("request_id"))
+        self.assertFalse(asked["executed"])
+        self.assertEqual(self.calls, [])
+        completed = bearer_turn(message="Bearerの本文", request_id=asked["request_id"])
+        self.assertEqual(completed["state"], "completed", completed)
+        self.assertEqual(self.calls, [("publisher.01", {"text": "Bearerの本文"})])
+
+
 if __name__ == "__main__":
     unittest.main()
