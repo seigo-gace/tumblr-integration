@@ -238,5 +238,138 @@ class ConversationFollowupTests(unittest.TestCase):
         self.assertEqual(self.calls, [("publisher.01", {"text": body})])
 
 
+class BrowserRetryTests(unittest.TestCase):
+    def test_actual_browser_send_and_retry_handlers(self):
+        import subprocess
+
+        # Execute the production send/response/form/button block, not a
+        # reimplementation of its retry rules. Only DOM and fetch are mocked.
+        script = r"""
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
+const source = fs.readFileSync(process.argv[1], "utf8");
+const start = source.indexOf("  function showAssist(");
+const end = source.indexOf("  // Real app-owned drafts", start);
+assert.ok(start >= 0 && end > start, "production send block missing");
+function harness() {
+  const calls = [], notices = [], replies = [];
+  const nodes = new Map();
+  function node(id) {
+    if (!nodes.has(id)) nodes.set(id, {
+      handlers: {}, hidden: false, value: "", disabled: false,
+      addEventListener(name, fn) { this.handlers[name] = fn; }
+    });
+    return nodes.get(id);
+  }
+  const context = vm.createContext({
+    document: {getElementById: node},
+    form: node("form"), confirm: node("confirm"), assist: node("assist"),
+    connection: node("connection"), instruction: node("instruction"),
+    sendButton: node("send"), selectedGoals: new Set(["投稿"]),
+    pendingFiles: [], display: text => notices.push(text),
+    renderView() {}, renderPlan() {}, resetDraftEdit() {},
+    refreshAttachmentList() {}, displayAttachments() {},
+    uploadAttachment() { throw Error("unexpected attachment"); },
+    fetch(url, options) {
+      assert.equal(url, "/assistant");
+      assert.equal(options.method, "POST");
+      calls.push(JSON.parse(options.body));
+      assert.ok(replies.length, "unexpected fetch");
+      const reply = replies.shift();
+      if (reply === null) return Promise.reject(Error("lost response"));
+      return Promise.resolve({ok: true, json: async () => reply});
+    }
+  });
+  const names = ["sending", "lastText", "pending", "pendingState",
+                 "assistantBusy", "lastRequest"];
+  const declarations = names.map(name => {
+    const line = source.split("\n").find(line => line.trimStart().startsWith("let " + name + "="));
+    assert.ok(line, "missing production state: " + name);
+    return line;
+  }).join("\n");
+  vm.runInContext(declarations + "\n" + source.slice(start, end), context);
+  async function click(id, event = "click") {
+    await node(id).handlers[event]({preventDefault() {}});
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  async function send(message, reply) {
+    replies.push(reply);
+    node("instruction").value = message;
+    await click("form", "submit");
+  }
+  const waiting = id => ({state: "input_required", request_id: id,
+                          text: "本文を書いてください", recovery: true});
+  const done = {state: "completed", text: "完了", executed: false};
+  return {calls, notices, replies, node, context, click, send, waiting, done};
+}
+(async () => {
+  {
+    const h = harness();
+    await h.send("本文付きの初回依頼", null);
+    await h.click("retry");
+    assert.equal(h.calls.length, 1);
+    assert.ok(!("request_id" in h.calls[0]));
+    assert.ok(h.notices.some(text => text.includes("再送")));
+    assert.equal(h.node("connection").textContent, "外部接続：結果未確認");
+  }
+  {
+    const h = harness();
+    await h.send("依頼", h.waiting("id-a"));
+    await h.send("回答", null);
+    assert.deepEqual(h.calls[1], {message:"回答", goals:["投稿"],
+                                  attachments:[], request_id:"id-a"});
+    h.replies.push(h.done);
+    await h.click("retry");
+    assert.equal(h.calls.length, 3);
+    assert.deepEqual(h.calls[2], h.calls[1]);
+    await h.click("retry");
+    assert.equal(h.calls.length, 3);
+  }
+  {
+    const h = harness();
+    await h.send("依頼", h.waiting("id-a"));
+    await h.send("回答", null);
+    // Inject a new server response using the real response handler:
+    // an old failed payload must not become a reply to a newer operation.
+    h.context.apply(h.waiting("id-b"));
+    await h.click("retry");
+    assert.equal(h.calls.length, 2);
+    assert.ok(h.notices.some(text => text.includes("再送")));
+  }
+  for (const id of ["confirm", "abort", "draft"]) {
+    const h = harness();
+    const reply = id === "confirm"
+      ? {state:"confirmation_required", request_id:"id-c", recovery:true}
+      : h.waiting("id-a");
+    await h.send("依頼", reply);
+    h.replies.push(null);
+    await h.click(id);
+    assert.equal(h.calls.length, 2, id);
+    assert.equal(h.calls[1][id], true, id);
+    if (id !== "draft") assert.equal(h.calls[1].request_id, reply.request_id);
+    await h.click("retry");
+    assert.equal(h.calls.length, 2, id);
+  }
+  {
+    const h = harness();
+    await h.send("依頼", h.waiting("id-a"));
+    await h.send("回答", h.waiting("id-b"));
+    await h.click("retry");
+    assert.equal(h.calls.length, 2);
+    await h.send("次の回答", h.done);
+    assert.equal(h.calls[2].request_id, "id-b");
+    await h.click("retry");
+    assert.equal(h.calls.length, 3);
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+        result = subprocess.run(
+            ["node", "-e", script, str(APP / "app.js")],
+            capture_output=True, text=True, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
