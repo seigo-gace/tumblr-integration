@@ -1160,8 +1160,8 @@
   function fail(){
     display("操作先の応答を確認できませんでした。実行結果は不明です。"+
       (canRetryInput(lastRequest)
-        ?"入力待ちの同じ操作IDに限り再試行できます。"
-        :"重複実行を避けるため再送できません。保存先や操作結果を確認してください。"),"system");
+        ?"前の回答を再送できます。"
+        :"実行結果を確認できていないため、重複を避けるためにこの送信は再送しません。"),"system");
     assist.hidden=false;
     confirm.hidden=true;
     connection.textContent="外部接続：結果未確認";
@@ -1226,7 +1226,7 @@
     if(assistantBusy||sending)return;
     if(!canRetryInput(lastRequest)){
       lastRequest=null;
-      display("再試行できる入力待ちの操作はありません。応答を確認できなかった操作は重複実行を避けるため再送せず、保存先や操作結果を確認してください。","system");
+      display("再送できる回答はありません。実行結果が不明な送信は、重複を避けるため再送しません。","system");
       assist.hidden=false;
       return;
     }
