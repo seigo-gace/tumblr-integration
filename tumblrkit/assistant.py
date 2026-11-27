@@ -164,12 +164,9 @@ class HttpProvider:
         if self.quota is not None:
             self.quota.reserve(self.name)
         status, payload = self.transport.post(self.url, self.headers, json.dumps(self._body(prompt)).encode("utf-8"))
-        if status == 429:
-            raise ProviderError("rate_limited")
-        if status in (402, 403) or (isinstance(payload, dict) and payload.get("error") == "quota"):
-            raise ProviderError("free_tier_exhausted")
-        if status != 200 or not isinstance(payload, dict):
-            raise ProviderError("failed")
+        failure = _http_failure(status, payload)
+        if failure:
+            raise ProviderError(failure)
         try:
             plan = json.loads(_provider_text(self.name, payload))
             if not isinstance(plan, dict):
@@ -180,9 +177,15 @@ class HttpProvider:
 
     def _body(self, prompt):
         if self.name == "gemini":
-            return {"contents": [{"parts": [{"text": prompt}]}]}
-        model = self.model or ("llama-3.1-8b-instant" if self.name == "groq" else "openrouter/free")
-        return {"model": model, "messages": [{"role": "user", "content": prompt}]}
+            return {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"responseMimeType": "application/json"},
+            }
+        model = self.model or ("openai/gpt-oss-20b" if self.name == "groq" else "openrouter/free")
+        body = {"model": model, "messages": [{"role": "user", "content": prompt}]}
+        if self.name == "groq":
+            body["response_format"] = {"type": "json_object"}
+        return body
 
 
 def providers_from_env(env, transport=None):
@@ -197,7 +200,7 @@ def providers_from_env(env, transport=None):
     if mode == "legacy_split" and env.get("TUMBLR_GEMINI_API_KEY"):
         chosen.append(HttpProvider(
             "gemini",
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
             {"x-goog-api-key": env["TUMBLR_GEMINI_API_KEY"]},
             True,
             transport,
@@ -226,6 +229,19 @@ def providers_from_env(env, transport=None):
             quota=quota,
         ))
     return chosen
+
+
+def _http_failure(status, payload):
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if isinstance(error, dict) and error.get("type") == "permissions_error":
+        return "model_forbidden"
+    if status == 429 or (isinstance(error, dict) and error.get("status") == "RESOURCE_EXHAUSTED"):
+        return "rate_limited"
+    if status in (402, 403) or error == "quota":
+        return "free_tier_exhausted"
+    if status != 200 or not isinstance(payload, dict):
+        return "failed"
+    return None
 
 
 def _provider_text(name, payload):
@@ -402,7 +418,7 @@ class Assistant:
             plan = primary.complete(prompt)
             return plan, primary.name
         except ProviderError as exc:
-            if fallback is None or exc.code in ("rate_limited", "free_tier_exhausted", "ai_disabled", "quota_exhausted", "quota_cooldown", "quota_unavailable"):
+            if fallback is None or exc.code in ("rate_limited", "free_tier_exhausted", "model_forbidden", "ai_disabled", "quota_exhausted", "quota_cooldown", "quota_unavailable"):
                 raise
             try:
                 plan = fallback.complete(prompt)
@@ -776,6 +792,8 @@ class Assistant:
             return "AI Providerへの通信に失敗しました。実行していません。"
         if code == "rate_limited":
             return "AI Providerの回数制限です。実行していません。"
+        if code == "model_forbidden":
+            return "指定したモデルは停止済みか、このキーでは許可されていません。実行していません。"
         if code == "free_tier_exhausted":
             return "無料枠を超えたため停止しました。有料への自動切替はしていません。実行していません。"
         if code == "paid_model_forbidden":

@@ -14,6 +14,7 @@ PROMPT = (
 SAFE_CODES = {
     "rate_limited",
     "free_tier_exhausted",
+    "model_forbidden",
     "failed",
     "invalid_response",
     "network_unavailable",

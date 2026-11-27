@@ -369,6 +369,17 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual("invalid_response", result["state"])
         self.assertFalse(result["executed"])
 
+    def test_retired_groq_model_permission_is_not_a_quota_failure(self):
+        from tumblrkit.assistant import HttpProvider
+        class Transport:
+            def post(self, url, headers, body):
+                return 403, {"error": {"type": "permissions_error", "code": "model_permission_blocked_org"}}
+        provider = HttpProvider("groq", "https://example.invalid", {}, True, Transport())
+        with self.assertRaises(ProviderError) as error:
+            provider.complete("確認")
+        self.assertEqual("model_forbidden", error.exception.code)
+        self.assertEqual("openai/gpt-oss-20b", provider._body("確認")["model"])
+
     def test_transport_unavailable_replies_without_execution(self):
         from tumblrkit.assistant import UrllibTransport
         from unittest.mock import patch
