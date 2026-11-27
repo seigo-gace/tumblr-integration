@@ -256,7 +256,12 @@ def _provider_text(name, payload):
 
 class UrllibTransport:
     def post(self, url, headers, body):
-        request = Request(url, data=body, headers={"content-type": "application/json", **headers}, method="POST")
+        request = Request(url, data=body, headers={
+            "content-type": "application/json",
+            "accept": "application/json",
+            "user-agent": "tgtumbler-assistant",
+            **headers,
+        }, method="POST")
         try:
             with urlopen(request, timeout=20) as response:
                 return response.status, json.loads(response.read().decode("utf-8"))

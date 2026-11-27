@@ -369,6 +369,21 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual("invalid_response", result["state"])
         self.assertFalse(result["executed"])
 
+    def test_provider_request_identifies_the_client(self):
+        from tumblrkit.assistant import HttpProvider, UrllibTransport
+        from unittest.mock import patch
+        from urllib.error import URLError
+        seen = {}
+        def capture(request, timeout):
+            seen["agent"] = request.get_header("User-agent")
+            seen["accept"] = request.get_header("Accept")
+            raise URLError("stop")
+        with patch("tumblrkit.assistant.urlopen", side_effect=capture):
+            with self.assertRaises(ProviderError):
+                HttpProvider("groq", "https://example.invalid", {"authorization": "Bearer test"}, True, UrllibTransport()).complete("確認")
+        self.assertEqual("tgtumbler-assistant", seen["agent"])
+        self.assertEqual("application/json", seen["accept"])
+
     def test_retired_groq_model_permission_is_not_a_quota_failure(self):
         from tumblrkit.assistant import HttpProvider
         class Transport:
