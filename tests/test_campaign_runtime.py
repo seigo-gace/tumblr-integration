@@ -1,0 +1,309 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from tumblrkit.core import connect
+from tumblrkit.campaign_runtime import CampaignContest
+
+
+class CampaignRuntimeTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path=Path(self.temp.name)/"existing-private-ledger.sqlite3"
+        self.db=connect(str(self.path))
+        self.addCleanup(self.db.close)
+        self.now=1000
+        self.allow={"alice","bob","charlie","dan"}
+        self.calls=[]
+        def eligibility(campaign,applicant):
+            self.calls.append((campaign,applicant))
+            return applicant in self.allow
+        self.owner=CampaignContest(self.db,clock=lambda:self.now,
+                                   eligibility=eligibility)
+        self.result=self.owner.create("launch","賞品",deadline=1100,
+                                      winners=2,claim_seconds=60)
+
+    def test_entry_draw_claim_expiry_promotion_and_restart_are_idempotent(self):
+        self.assertEqual(self.owner.enter("launch","alice"),"entered")
+        self.assertEqual(self.owner.enter("launch","alice"),"already_entered")
+        for applicant in ("bob","charlie","dan"):
+            self.owner.enter("launch",applicant)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM campaign_entries").fetchone()[0],4)
+        with self.assertRaisesRegex(ValueError,"campaign_draw_too_early"):
+            self.owner.draw("launch")
+        self.now=1101
+        first=self.owner.draw("launch")
+        self.assertEqual(len(first.winners),2)
+        self.assertEqual(first.commitment,self.result["seed_commitment"])
+        self.assertEqual(self.owner.draw("launch"),first)
+        self.assertEqual(len(self.owner.outcomes("launch")),2)
+        winner=first.winners[0]
+        self.assertEqual(self.owner.claim("launch",winner),"claimed")
+        self.assertEqual(self.owner.claim("launch",winner),"already_claimed")
+        self.now=1162
+        promoted=self.owner.promote_expired("launch")
+        self.assertEqual(len(promoted),1)
+        self.assertEqual(self.owner.promote_expired("launch"),[])
+        self.assertEqual(len(self.owner.outcomes("launch")),5)
+        self.assertEqual(self.owner.close("launch"),"closed")
+        self.assertEqual(self.owner.close("launch"),"already_closed")
+        reopened=connect(str(self.path))
+        self.addCleanup(reopened.close)
+        second=CampaignContest(reopened,clock=lambda:self.now,
+                               eligibility=lambda *_:True)
+        self.assertEqual(second.close("launch"),"already_closed")
+        with self.assertRaisesRegex(ValueError,"campaign_closed"):
+            second.draw("launch")
+
+    def test_entry_terms_can_change_before_entry_but_never_after_entry(self):
+        initial=self.result["seed_commitment"]
+        changed=self.owner.configure_entry_terms(
+            "launch",deadline=1200,winners=3,claim_seconds=300,gate_topic_id="123")
+        self.assertEqual(changed["winners"],3)
+        self.assertEqual(changed["gate_topic_id"],"123")
+        self.assertEqual(self.db.execute(
+            "SELECT seed_commitment FROM campaign_contests WHERE campaign_id='launch'"
+        ).fetchone()[0],initial)
+        self.assertEqual(self.db.execute(
+            "SELECT posting_topic_id FROM campaign_gate_topics WHERE campaign_id='launch'"
+        ).fetchone()[0],"123")
+        for invalid in ("-1","0","x"):
+            with self.assertRaisesRegex(ValueError,"campaign_gate_topic_invalid"):
+                self.owner.configure_entry_terms(
+                    "launch",deadline=1250,winners=1,claim_seconds=300,
+                    gate_topic_id=invalid)
+        self.owner.enter("launch","alice")
+        with self.assertRaisesRegex(ValueError,"campaign_terms_locked"):
+            self.owner.configure_entry_terms(
+                "launch",deadline=1300,winners=1,claim_seconds=60,
+                gate_topic_id="456")
+        self.assertEqual(self.db.execute(
+            "SELECT posting_topic_id FROM campaign_gate_topics WHERE campaign_id='launch'"
+        ).fetchone()[0],"123")
+        self.assertEqual(self.owner.entries("launch")[0]["status"],"entered")
+
+    def test_applicant_audit_reuses_gate_without_mutating_draw_or_entries(self):
+        self.owner.enter("launch","alice")
+        self.owner.enter("launch","bob")
+        self.owner.enter("launch","alice")
+        before=self.owner.entries("launch")
+        self.allow.remove("bob")
+        inspected=self.owner.audit_entries("launch")
+        self.assertEqual(inspected["total_entries"],2)
+        self.assertEqual(inspected["duplicate_current_rows"],0)
+        self.assertEqual(inspected["duplicate_attempts"],"not_recorded")
+        self.assertEqual(inspected["entries"],[
+            {"applicant_id":"alice","gate_state":"verified"},
+            {"applicant_id":"bob","gate_state":"not_verified"}])
+        self.assertFalse(inspected["mutated"])
+        self.assertEqual(self.owner.entries("launch"),before)
+        self.assertEqual(self.owner.audit_entries("launch",limit=1)["remaining"],1)
+        for bad in (0,21,"1",True):
+            with self.assertRaisesRegex(ValueError,"campaign_audit_limit_invalid"):
+                self.owner.audit_entries("launch",limit=bad)
+        with self.assertRaisesRegex(PermissionError,"campaign_eligibility_not_connected"):
+            CampaignContest(self.db,clock=lambda:self.now).audit_entries("launch")
+
+    def test_missing_adapter_or_unverified_eligibility_never_enrolls(self):
+        with self.assertRaisesRegex(PermissionError,"campaign_eligibility_not_verified"):
+            self.owner.enter("launch","other")
+        disconnected=CampaignContest(self.db,clock=lambda:self.now)
+        with self.assertRaisesRegex(PermissionError,"campaign_eligibility_not_connected"):
+            disconnected.enter("launch","alice")
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM campaign_entries")
+                         .fetchone()[0],0)
+
+    def test_expiry_preview_never_changes_winners_or_waitlist(self):
+        for person in ("alice","bob","charlie","dan"):
+            self.owner.enter("launch",person)
+        self.now=1100
+        result=self.owner.draw("launch")
+        before=self.owner.entries("launch")
+        self.now=1160
+        inspection=self.owner.expiry_preview("launch")
+        self.assertEqual(inspection["state"],"drawn")
+        self.assertEqual(len(inspection["due_unclaimed"]),2)
+        self.assertEqual(len(inspection["waitlisted"]),2)
+        self.assertFalse(inspection["promotion_executed"])
+        self.assertEqual(self.owner.entries("launch"),before)
+        self.assertEqual(self.owner.draw("launch"),result)
+        promoted=self.owner.promote_expired("launch")
+        self.assertEqual(len(promoted),2)
+        after=self.owner.expiry_preview("launch")
+        self.assertEqual(len(after["due_unclaimed"]),0)
+        self.assertEqual(len(after["already_expired"]),2)
+        self.assertEqual(len(after["waitlisted"]),0)
+        with self.assertRaisesRegex(ValueError,"campaign_missing"):
+            self.owner.expiry_preview("missing")
+
+    def test_claim_after_deadline_fails_and_cannot_reopen_draw(self):
+        self.owner.enter("launch","alice")
+        self.now=1100
+        first=self.owner.draw("launch")
+        self.now=1160
+        with self.assertRaisesRegex(ValueError,"campaign_claim_not_available"):
+            self.owner.claim("launch",first.winners[0])
+        self.assertEqual(self.owner.promote_expired("launch"),[])
+        self.assertEqual(self.owner.draw("launch"),first)
+
+    def test_existing_notification_outbox_never_reposts_after_uncertain_send(self):
+        self.owner.enter("launch","alice")
+        self.now=1100
+        self.owner.draw("launch")
+        pending=self.owner.pending_notifications("launch")
+        self.assertEqual(len(pending),1)
+        notice=pending[0]
+        self.assertEqual(self.owner.notification_history("launch")[0]["state"],"pending")
+        class Uncertain:
+            def __init__(self):self.calls=[]
+            def publish(self,*args):
+                self.calls.append(args)
+                return {"message_ref":"message-5"}
+            def readback(self,*args):return False
+        uncertain=Uncertain()
+        with self.assertRaisesRegex(ValueError,"campaign_messenger_not_connected"):
+            self.owner.dispatch_notification(notice["event_id"],None)
+        first=self.owner.dispatch_notification(notice["event_id"],uncertain)
+        self.assertEqual(first["state"],"needs_reconcile")
+        self.assertEqual(len(uncertain.calls),1)
+        self.assertEqual(self.owner.pending_notifications("launch"),[])
+        self.assertEqual(self.owner.notification_history("launch")[0]["state"],"needs_reconcile")
+        with self.assertRaisesRegex(ValueError,"campaign_notification_not_pending"):
+            self.owner.dispatch_notification(notice["event_id"],uncertain)
+        self.assertEqual(len(uncertain.calls),1)
+
+    def test_notice_reconcile_uses_saved_ref_and_never_sends_again(self):
+        self.owner.enter("launch","alice")
+        self.now=1100
+        self.owner.draw("launch")
+        notice=self.owner.pending_notifications("launch")[0]
+        class Provider:
+            def __init__(self):
+                self.sent=0
+                self.verified=False
+                self.readbacks=0
+            def publish(self,*args):
+                self.sent+=1
+                return {"message_ref":"provider-message-21"}
+            def readback(self,*args):
+                self.readbacks+=1
+                return self.verified
+        provider=Provider()
+        first=self.owner.dispatch_notification(notice["event_id"],provider)
+        self.assertEqual(first["state"],"needs_reconcile")
+        self.assertEqual(provider.sent,1)
+        self.assertEqual(self.owner.reconcile_notification(
+            notice["event_id"],provider)["state"],"needs_reconcile")
+        provider.verified=True
+        confirmed=self.owner.reconcile_notification(notice["event_id"],provider)
+        self.assertEqual(confirmed["state"],"verified")
+        self.assertEqual(provider.sent,1)
+        self.assertEqual(self.owner.notification_history("launch")[0]["state"],"verified")
+        self.assertEqual(self.owner.reconcile_notification(
+            notice["event_id"],provider)["state"],"verified")
+        self.assertEqual(provider.sent,1)
+
+    def test_notice_without_reference_does_not_try_to_publish(self):
+        self.owner.enter("launch","alice")
+        self.now=1100
+        self.owner.draw("launch")
+        notice=self.owner.pending_notifications("launch")[0]
+        class NoReceipt:
+            def __init__(self):self.sends=0
+            def publish(self,*args):
+                self.sends+=1
+                raise TimeoutError("provider may have accepted")
+            def readback(self,*args):raise AssertionError("no reference")
+        provider=NoReceipt()
+        first=self.owner.dispatch_notification(notice["event_id"],provider)
+        self.assertEqual(first["state"],"needs_reconcile")
+        self.assertIsNone(first["message_ref"])
+        recovery=self.owner.reconcile_notification(notice["event_id"],provider)
+        self.assertEqual(recovery["state"],"needs_reconcile")
+        self.assertIsNone(recovery["message_ref"])
+        self.assertEqual(provider.sends,1)
+
+    def test_existing_notification_verified_only_after_owner_readback(self):
+        self.owner.enter("launch","alice")
+        self.now=1100
+        self.owner.draw("launch")
+        notice=self.owner.pending_notifications("launch")[0]
+        class Verified:
+            def __init__(self):self.calls=0
+            def publish(self,*args):
+                self.calls+=1
+                return {"message_ref":"message-5"}
+            def readback(self,*args):
+                return True
+        sender=Verified()
+        result=self.owner.dispatch_notification(notice["event_id"],sender)
+        self.assertEqual(result["state"],"verified")
+        self.assertEqual(sender.calls,1)
+        self.assertEqual(self.owner.notification_history("launch")[0]["message_ref"],"message-5")
+        self.assertEqual(self.owner.notification_history("launch")[0]["state"],"verified")
+        self.assertEqual(self.owner.pending_notifications("launch"),[])
+
+    def test_one_time_claim_ticket_never_persists_plaintext_or_redeems_twice(self):
+        self.owner.enter("launch","alice")
+        self.now=1100
+        draw=self.owner.draw("launch")
+        ticket=self.owner.issue_claim_ticket("launch",draw.winners[0])
+        self.assertFalse(ticket["sent"])
+        self.assertTrue(ticket["disclosed_once"])
+        import sqlite3
+        with sqlite3.connect(str(self.path)) as db:
+            row=db.execute(
+                "SELECT ticket_digest FROM campaign_claim_tickets WHERE campaign_id=?",
+                ("launch",)).fetchone()
+        self.assertNotEqual(ticket["claim_ticket"],row[0])
+        with self.assertRaisesRegex(ValueError,"campaign_ticket_already_issued"):
+            self.owner.issue_claim_ticket("launch",draw.winners[0])
+        with self.assertRaisesRegex(ValueError,"campaign_claim_ticket_invalid"):
+            self.owner.redeem_claim_ticket("launch",draw.winners[0],"invalid_claim_ticket_123456789012")
+        receipt=self.owner.redeem_claim_ticket(
+            "launch",draw.winners[0],ticket["claim_ticket"])
+        self.assertEqual(receipt["status"],"claimed")
+        with self.assertRaisesRegex(ValueError,"campaign_claim_ticket_consumed"):
+            self.owner.redeem_claim_ticket(
+                "launch",draw.winners[0],ticket["claim_ticket"])
+        self.assertEqual([r["state"] for r in self.owner.outcomes("launch")].count("claimed"),1)
+
+    def test_expired_claim_ticket_never_converts_to_claimed(self):
+        self.owner.enter("launch","alice")
+        self.now=1100
+        winner=self.owner.draw("launch").winners[0]
+        ticket=self.owner.issue_claim_ticket("launch",winner)
+        self.now=ticket["expires_at"]
+        with self.assertRaisesRegex(ValueError,"campaign_claim_not_available"):
+            self.owner.redeem_claim_ticket("launch",winner,ticket["claim_ticket"])
+        self.assertEqual(self.owner.entries("launch")[0]["status"],"winner")
+
+    def test_deadline_can_change_only_before_draw_and_entries_have_status(self):
+        revised=self.owner.change_deadline("launch",1200)
+        self.assertEqual(revised["deadline"],1200)
+        self.owner.enter("launch","alice")
+        entries=self.owner.entries("launch")
+        self.assertEqual(entries[0]["status"],"entered")
+        self.assertIsNone(entries[0]["rank"])
+        self.now=1200
+        result=self.owner.draw("launch")
+        self.assertEqual(result.winners,("alice",))
+        with self.assertRaisesRegex(ValueError,"campaign_deadline_locked"):
+            self.owner.change_deadline("launch",2000)
+
+    def test_durable_outcomes_do_not_send_unverified_notifications(self):
+        self.owner.enter("launch","alice")
+        self.now=1101
+        self.owner.draw("launch")
+        outcome=self.owner.outcomes("launch")
+        self.assertEqual(len(outcome),1)
+        self.assertEqual(outcome[0]["state"],"winner")
+        self.assertEqual(len(outcome[0]["event_id"]),64)
+        self.assertFalse(hasattr(self.owner,"send"))
+        self.assertEqual(len(self.owner.outcomes("launch")),1)
+
+
+if __name__=="__main__":
+    unittest.main()
