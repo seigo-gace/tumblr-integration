@@ -10,7 +10,7 @@ from pathlib import Path
 
 from test_app_serve import APP, SHA_A, TOKEN, fetch
 from tumblrkit.appserve import AppServer, build_release
-from tumblrkit.assistant import Assistant
+from tumblrkit.assistant import Assistant, ScriptedProvider
 
 
 class ConversationFollowupTests(unittest.TestCase):
@@ -201,6 +201,41 @@ class ConversationFollowupTests(unittest.TestCase):
         completed = bearer_turn(message="Bearerの本文", request_id=asked["request_id"])
         self.assertEqual(completed["state"], "completed", completed)
         self.assertEqual(self.calls, [("publisher.01", {"text": "Bearerの本文"})])
+
+    def test_ai_selected_operation_continues_missing_input_and_goals_over_http(self):
+        provider = ScriptedProvider("openrouter", payload={
+            "action": "publisher.01", "target": "", "fields": {},
+            "question": "本文はどうしますか？", "reply": "",
+        }, paid=False)
+        self.server.assistant.providers = [provider]
+        request = "次に載せる文章を用意したいです"
+        goals = ["投稿", "集計"]
+        asked = self.turn(self.a, message=request, goals=goals)
+        self.assertEqual(asked["state"], "input_required", asked)
+        self.assertEqual(asked["action"], "publisher.01")
+        self.assertIn("本文", asked["text"])
+        self.assertTrue(asked.get("request_id"))
+        self.assertFalse(asked["executed"])
+        self.assertEqual(asked["plan"]["goals"], goals)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(len(provider.prompts), 1)
+        self.assertIn(request, provider.prompts[0])
+        for goal in goals:
+            self.assertIn(goal, provider.prompts[0])
+        self.assertNotIn(TOKEN, provider.prompts[0])
+        self.assertNotIn(self.a.split("=", 1)[1], provider.prompts[0])
+
+        body = "今日は新しい一日を楽しみましょう。"
+        completed = self.turn(self.a, message=body, request_id=asked["request_id"])
+        self.assertEqual(completed["state"], "completed", completed)
+        self.assertEqual(completed["plan"]["goals"], goals)
+        self.assertEqual(self.calls, [("publisher.01", {"text": body})])
+        self.assertEqual(len(provider.prompts), 1)
+        self.assertFalse(completed["executed"])
+
+        replay = self.turn(self.a, message=body, request_id=asked["request_id"])
+        self.assertNotEqual(replay["state"], "completed")
+        self.assertEqual(self.calls, [("publisher.01", {"text": body})])
 
 
 if __name__ == "__main__":
