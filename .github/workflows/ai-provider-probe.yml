@@ -15,7 +15,7 @@ jobs:
       TUMBLR_AI_ROUTING_MODE: free_router
       TUMBLR_OPENROUTER_MODEL: openrouter/free
       TUMBLR_OPENROUTER_API_KEY: ${{ secrets.TUMBLR_OPENROUTER_API_KEY }}
-      TUMBLR_AI_QUOTA_DB: ${{ runner.temp }}/ai-quota.sqlite3
+      TUMBLR_AI_QUOTA_DB: /tmp/ai-quota.sqlite3
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,7 +32,7 @@ jobs:
       TUMBLR_AI_ROUTING_MODE: legacy_split
       TUMBLR_GEMINI_API_KEY: ${{ secrets.TUMBLR_GEMINI_API_KEY }}
       TUMBLR_GROQ_API_KEY: ${{ secrets.TUMBLR_GROQ_API_KEY }}
-      TUMBLR_AI_QUOTA_DB: ${{ runner.temp }}/ai-quota.sqlite3
+      TUMBLR_AI_QUOTA_DB: /tmp/ai-quota.sqlite3
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
