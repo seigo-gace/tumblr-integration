@@ -1432,6 +1432,7 @@ class _Handler(BaseHTTPRequestHandler):
             selected_action=payload.get("selected_action"),
             selected_target=payload.get("selected_target"),
             catalog_action=payload.get("catalog_action"),
+            catalog_payload=payload.get("catalog_payload") if isinstance(payload.get("catalog_payload"), dict) else None,
             existing_buttons=payload.get("existing_buttons"),
         ))
 
@@ -1530,6 +1531,25 @@ class AppServer:
                 self.httpd.assistant.bridge.adapters.get("tumblr"),"publisher",None))
         self.httpd.assistant.draft_store = self.httpd.draft_store
         self.httpd.attachment_store = AttachmentStore(self.release.resolve().parent.parent / "data")
+
+        def catalog_perform(action, payload):
+            from contextlib import closing
+            from tumblrkit.catalog_operations import perform as catalog_run
+            from tumblrkit.core import connect as campaign_connect
+            adapters = self.httpd.assistant.bridge.adapters
+            with closing(campaign_connect(str(self.httpd.draft_store.path))) as db:
+                return catalog_run(
+                    action, payload,
+                    drafts=self.httpd.draft_store,
+                    discovery=getattr(adapters.get("analytics"), "store", None),
+                    engagement=adapters.get("engagement"),
+                    campaign_db=db,
+                    attachments=self.httpd.attachment_store,
+                    media=self.httpd.media_save,
+                    telegram=adapters.get("telegram"),
+                    analytics=adapters.get("analytics"))
+
+        self.httpd.assistant.catalog_perform = catalog_perform
         if self.ticket:
             ticket = secrets.token_urlsafe(24)
             self.httpd.tickets.add(ticket)

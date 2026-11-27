@@ -53,6 +53,36 @@ GOAL_ACTIONS = {
     "集計": ("analytics.get_summary",),
     "メディア": ("tumblr.discover",),
 }
+# Owner operations already implemented outside the Bridge. They become assistant
+# actions only when the running app binds the same stores the owner screens use.
+CATALOG_FIELDS = {
+    "publisher.01": (frozenset({"text"}),),
+    "publisher.02": (frozenset({"draft_id", "text", "expected_text"}),),
+    "publisher.03": (frozenset({"draft_id"}),),
+    "publisher.04": (frozenset({"draft_id", "attachment_ids", "media_job_ids"}),),
+    "publisher.05": (frozenset({"draft_id"}), frozenset({"draft_id", "apply"})),
+    "engagement.02": (frozenset({"candidate_id", "comment"}),),
+    "engagement.07": (frozenset({"engagement_action", "target"}),),
+    "campaign.02": (frozenset({"campaign_id"}),),
+    "campaign.08": (frozenset({"campaign_id", "event_id"}),),
+    "referral.02": (frozenset({"campaign_id", "referrer_id"}),),
+    "referral.03": (
+        frozenset({"campaign_id", "source_post_id"}),
+        frozenset({"campaign_id", "source_post_id", "destination", "confirmed"}),
+    ),
+    "referral.04": (frozenset({"campaign_id", "name"}),),
+    "analytics.09": (frozenset(),),
+    "analytics.10": (frozenset(),),
+}
+CATALOG_GOALS = {
+    "巡回": (("engagement.02", "discovery"), ("engagement.07", "engagement_history")),
+    "投稿": tuple((action, "drafts") for action in (
+        "publisher.01", "publisher.02", "publisher.03", "publisher.04", "publisher.05")),
+    "キャンペーン": (("campaign.02", "campaign"), ("campaign.08", "campaign")),
+    "紹介": (("referral.02", "referral"), ("referral.03", "referral"), ("referral.04", "referral")),
+    "集計": (("analytics.09", "analytics"), ("analytics.10", "analytics")),
+}
+CATALOG_EXTERNAL = frozenset({"engagement.07", "campaign.08"})
 
 
 
@@ -287,13 +317,15 @@ def _order(text, providers):
 
 
 class Assistant:
-    def __init__(self, bridge=None, providers=None, transport=None, draft_store=None):
+    def __init__(self, bridge=None, providers=None, transport=None, draft_store=None,
+                 catalog_perform=None):
         self.bridge = bridge or Bridge({})
         self.providers = providers
         self.transport = transport
         self.pending = {}
         # One durable Owner draft store; no second in-memory draft ledger.
         self.draft_store = draft_store
+        self.catalog_perform = catalog_perform
 
     def _available(self):
         if self.providers is not None:
@@ -302,7 +334,7 @@ class Assistant:
 
     def turn(self, message="", confirm=False, request_id=None, draft=False, abort=False,
              goals=None, selected_action=None, selected_target=None, catalog_action=None,
-             existing_buttons=None):
+             catalog_payload=None, existing_buttons=None):
         if abort:
             self.pending.clear()
             return self._pack("aborted", "中断しました。実行していません。", False)
@@ -328,6 +360,9 @@ class Assistant:
                 or any(not isinstance(goal,str) or goal not in GOALS for goal in goals)
                 or len(set(goals))!=len(goals)):
             return self._pack("invalid_goals", "目的の選択が不正です。実行していません。", False, recovery=True)
+        if catalog_action in CATALOG_FIELDS:
+            payload = catalog_payload if isinstance(catalog_payload, dict) else {}
+            return self._catalog(catalog_action, payload, "owner_selected", owner_selected=True)
         if catalog_action is not None:
             from tumblrkit.action_catalog import resolve_bridge_action
             try:
@@ -385,6 +420,12 @@ class Assistant:
             return self._pack("invalid_response", "AI応答形式が不正なため実行していません。" + omitted, False, recovery=True)
         if len(action) > 128 or len(target) > 256 or len(question) > 2000 or len(reply) > 4000:
             return self._pack("invalid_response", "AI応答が長すぎるため実行していません。" + omitted, False, recovery=True)
+        if action in CATALOG_FIELDS:
+            fields = plan.get("fields") if isinstance(plan.get("fields"), dict) else {}
+            response = self._catalog(action, fields, provider_name, owner_selected=False)
+            if goals:
+                response["plan"] = self._goal_plan(goals)
+            return response
         if action and action not in ALLOWED:
             return self._pack("invalid_tool", "AIの応答に未登録の操作があったため捨てました。実行していません。" + omitted, False, recovery=True)
         if not action:
@@ -413,6 +454,9 @@ class Assistant:
             "不足情報はquestionで一つずつ確認する。接続・公開済みと推測で主張しない。"
             "実操作の提案は登録済アクションのみ。許可された操作: "
             + ",".join(sorted(ALLOWED))
+            + ("。運営画面に接続済みの操作: " + ",".join(sorted(CATALOG_FIELDS))
+               + "。その操作の入力はfieldsオブジェクトに入れる。"
+               if self.catalog_perform is not None else "")
             + "。選択目的: " + "・".join(goals or [])
             + "。複数の目的は必ず考慮するが、未接続操作は実行済みと主張しない。"
             + "。利用者の文: " + cleaned
@@ -438,7 +482,8 @@ class Assistant:
         seen=set()
         for goal in goals:
             candidates=GOAL_ACTIONS[goal]
-            if not candidates:
+            catalog=CATALOG_GOALS.get(goal, ()) if self.catalog_perform is not None else ()
+            if not candidates and not catalog:
                 unavailable.append(goal)
             for action in candidates:
                 if action in ALLOWED and action not in seen:
@@ -451,6 +496,19 @@ class Assistant:
                         "requires_target":True,
                         "confirmation_required":action in CONFIRM,
                     })
+            for action, screen in catalog:
+                if action in seen:
+                    continue
+                seen.add(action)
+                actions.append({
+                    "action":action,"goal":goal,
+                    "basis":"既存の運営操作",
+                    "connected":True,
+                    "catalog":True,
+                    "owner_ui":screen,
+                    "requires_target":action not in ("analytics.09","analytics.10"),
+                    "confirmation_required":action in CATALOG_EXTERNAL,
+                })
         return {"goals":list(goals),"recommendations":actions,
                 "not_connected_goals":unavailable,
                 "all_actions_count":len(actions),"evidence":"existing_bridge_registry",
@@ -471,6 +529,66 @@ class Assistant:
             return self._pack("unclear", notice + omitted + question, False, recovery=True, provider="none")
         target = TARGET.search(cleaned)
         return self._propose(local[0], target.group(1) if target else "", cleaned, omitted, question, "none", ai=False)
+
+    def _catalog(self, action, payload, provider, owner_selected=False):
+        if self.catalog_perform is None:
+            return self._pack("not_connected",
+                "この運営操作の保存先が未接続です。実行していません。",
+                False, recovery=True, action=action, provider=provider)
+        if not self._catalog_payload_ok(payload) or set(payload) not in CATALOG_FIELDS[action]:
+            return self._pack("unclear",
+                "この運営操作に必要な入力が不足しています。画面の項目を指定してください。実行していません。",
+                False, recovery=True, action=action, provider=provider)
+        external = action in CATALOG_EXTERNAL or (action == "referral.03" and "destination" in payload)
+        if (external or not owner_selected) and provider != "confirmed":
+            request_id = uuid.uuid4().hex
+            self.pending[request_id] = {"kind": "catalog", "action": action, "payload": payload}
+            return self._pack("confirmation_required",
+                "運営操作の確認: " + action + "。確認を押すまで実行しません。",
+                False, request_id=request_id, action=action, provider=provider)
+        try:
+            result = self.catalog_perform(action, payload)
+        except ValueError as exc:
+            code = str(exc)
+            if not code or " " in code or len(code) > 80:
+                code = "catalog_operation_invalid"
+            return self._pack("failed",
+                "運営操作を完了できませんでした（" + code + "）。完了扱いしません。",
+                False, recovery=True, action=action, provider=provider)
+        if not isinstance(result, dict) or result.get("verified") is not True:
+            return self._pack("failed", "運営操作の結果を確認できません。完了扱いしません。",
+                              False, recovery=True, action=action, provider=provider)
+        external_done = external and result.get("verified") is True
+        text = "運営操作を実行しました。"
+        if result.get("published") is False or result.get("tumblr_upload") is False:
+            text = "運営操作を既存の保存先で実行しました。Tumblrへは公開していません。"
+        if action in ("analytics.09", "analytics.10"):
+            text = "記録済みの流入を確認しました。新しい計測はしていません。件数: " + str(result.get("total", 0))
+        if isinstance(result.get("draft_id"), str):
+            text += " 下書きID: " + result["draft_id"]
+        response = self._pack("completed", text, external_done, action=action, provider=provider)
+        response["catalog_result"] = {
+            key: result[key] for key in ("verified", "draft_id", "published", "tumblr_upload", "total", "kind")
+            if key in result
+        }
+        return response
+
+    @staticmethod
+    def _catalog_payload_ok(payload):
+        if not isinstance(payload, dict) or len(payload) > 8:
+            return False
+        for key, value in payload.items():
+            if not isinstance(key, str) or len(key) > 40:
+                return False
+            if isinstance(value, str) and len(value) <= 2000:
+                continue
+            if isinstance(value, bool):
+                continue
+            if (isinstance(value, list) and len(value) <= 8
+                    and all(isinstance(item, str) and 0 < len(item) <= 128 for item in value)):
+                continue
+            return False
+        return True
 
     def _propose(self, action, target, cleaned, omitted, question, provider, ai, existing_buttons=None):
         if not target:
@@ -593,9 +711,12 @@ class Assistant:
         return self._from_bridge(result, provider)
 
     def _confirm(self, request_id):
-        item = self.pending.get(request_id or "")
+        item = self.pending.pop(request_id or "", None)
+        if isinstance(item, dict) and item.get("kind") == "catalog":
+            return self._catalog(item["action"], item["payload"], "confirmed", owner_selected=True)
         if not item:
             return self._pack("failed", "確認できる提案がありません。実行していません。", False, recovery=True)
+        self.pending[request_id] = item
         action, target, expected_digest, cm_disabled, preserved_buttons = item
         if action=="tumblr.publish_draft":
             tumblr=self.bridge.adapters.get("tumblr")

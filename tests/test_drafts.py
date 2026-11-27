@@ -71,6 +71,30 @@ class DraftEndpointTests(unittest.TestCase):
         self.assertEqual(status,404)
         self.assertEqual(self.service.assistant.providers,[])
 
+    def test_preview_includes_saved_attachments_and_tags_without_upload(self):
+        status,body=req(self.service.port,"POST","/drafts",
+                        json.dumps({"text":"添付とタグの確認"}).encode(),self.auth)
+        self.assertEqual(status,201)
+        ident=json.loads(body)["id"]
+        self.service.httpd.draft_store.set_meta(ident,"添付とタグの確認",{
+            "catalog":"publisher.05",
+            "attachment_ids":["a"*32],
+            "media_job_ids":["m"*32],
+            "tags":["observed"],
+            "ignored":"not-shown",
+        })
+        status,body=req(self.service.port,"GET","/drafts/"+ident+"/preview",headers=self.auth)
+        self.assertEqual(status,200)
+        preview=json.loads(body)
+        self.assertEqual(preview["text"],"添付とタグの確認")
+        self.assertEqual(preview["attachment_ids"],["a"*32])
+        self.assertEqual(preview["media_job_ids"],["m"*32])
+        self.assertEqual(preview["tags"],["observed"])
+        self.assertNotIn("ignored",preview)
+        self.assertFalse(preview["tumblr_upload"])
+        self.assertFalse(preview["external_publication"])
+        self.assertEqual(preview["publish_state"],"local")
+
     def test_restart_preserves_drafts_and_no_external_provider(self):
         status,body=req(self.service.port,"POST","/drafts",'{"text":"再起動しても保存"}'.encode("utf-8"),self.auth)
         self.assertEqual(status,201)

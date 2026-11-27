@@ -1536,6 +1536,20 @@
       "engagement.reblog":"指定投稿をリブログ",
       "engagement.follow":"指定ブログをフォロー",
       "analytics.get_summary":"集計を確認",
+      "publisher.01":"投稿文を作る",
+      "publisher.02":"投稿文を直す",
+      "publisher.03":"過去文から作り直す",
+      "publisher.04":"画像・動画を添付",
+      "publisher.05":"タグを提案",
+      "engagement.02":"リブログ下書きを作る",
+      "engagement.07":"操作を取り消す",
+      "campaign.02":"企画文を作る",
+      "campaign.08":"当選者へ通知",
+      "referral.02":"共有文を作る",
+      "referral.03":"リンクを共有",
+      "referral.04":"紹介キャンペーンを設定",
+      "analytics.09":"Telegram流入を確認",
+      "analytics.10":"未分類流入を確認",
     };
     let visibleStart=0;
     const actions=document.createElement("div");
@@ -1566,6 +1580,35 @@
       const label=document.createElement("span");
       label.textContent=labels[item.action]+"（"+String(item.goal||"目的")+"）";
       wrapper.appendChild(label);
+      if(item.catalog===true){
+        const open=document.createElement("button");
+        open.type="button";
+        open.textContent=item.requires_target?"画面で入力":"記録を確認";
+        open.addEventListener("click",function(){
+          if(item.requires_target){
+            if(item.owner_ui==="drafts")refreshDrafts();
+            else if(item.owner_ui==="engagement_history")showEngagementHistory(0);
+            else {
+              const matching=Array.from(document.querySelectorAll("details")).find(function(node){
+                const summary=node.querySelector("summary");
+                if(!summary)return false;
+                return (item.owner_ui==="campaign"&&summary.textContent.includes("キャンペーン管理"))||
+                  (item.owner_ui==="referral"&&summary.textContent.includes("紹介管理"))||
+                  (item.owner_ui==="analytics"&&summary.textContent.includes("フォロワー"))||
+                  (item.owner_ui==="discovery"&&summary.textContent.includes("発見"));
+              });
+              if(matching){matching.open=true;matching.scrollIntoView({block:"nearest"});}
+              else display("この運営操作は下の該当画面で入力してください。実行はまだしていません。","system");
+            }
+            return;
+          }
+          open.disabled=true;
+          post({catalog_action:item.action,catalog_payload:{}}).finally(function(){open.disabled=false;});
+        });
+        wrapper.appendChild(open);
+        actions.appendChild(wrapper);
+        return;
+      }
       if(["tumblr.publish_draft","tumblr.edit_post","tumblr.delete_post",
           "tumblr.reconcile_post"].includes(item.action)){
         const browse=document.createElement("button");
@@ -1949,9 +1992,23 @@
             const data=await draftRequest("/drafts/"+encodeURIComponent(draft.id)+
               "/preview","GET");
             if(data.verified!==true||data.draft_id!==draft.id||
-               typeof data.text!=="string")throw new Error("draft_preview_unverified");
+               typeof data.text!=="string"||data.tumblr_upload!==false||
+               data.external_publication!==false)throw new Error("draft_preview_unverified");
+            const savedIds=function(value){
+              return Array.isArray(value)&&value.every(function(item){
+                return typeof item==="string"&&item.length>0&&item.length<=128;
+              })?value:[];
+            };
+            const attachmentIds=savedIds(data.attachment_ids);
+            const mediaJobIds=savedIds(data.media_job_ids);
+            const tags=savedIds(data.tags);
+            let authoring="";
+            if(attachmentIds.length)authoring+="\\n画像添付ID："+attachmentIds.join("、");
+            if(mediaJobIds.length)authoring+="\\n動画ジョブID："+mediaJobIds.join("、");
+            if(tags.length)authoring+="\\n適用タグ："+tags.join("、");
+            if(authoring)authoring+="\\nこれらは保存済みの参照です。Tumblrへはアップロードしていません。";
             display("保存済み下書きのプレビュー（Tumblr未送信）\\n"+
-              data.text+"\\n公開処理状態："+data.publish_state+
+              data.text+authoring+"\\n公開処理状態："+data.publish_state+
               "。公開する場合は別途「Tumblrへ投稿」で確認してください。","system");
           }catch(error){
             display("下書きプレビューを取得できませんでした。投稿はしていません。","system");

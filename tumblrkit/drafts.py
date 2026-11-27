@@ -96,12 +96,16 @@ class DraftStore:
                 raise ValueError("DRAFT_NOT_FOUND")
             text,updated=row
             state,post_id,current=self._published_info(db,ident,text)
+            meta=db.execute(
+                "SELECT meta FROM operation_drafts WHERE id=?",(ident,)).fetchone()
+            authoring=self._authoring(None if meta is None else meta[0])
             return {"verified":True,"draft_id":ident,"text":text,
                     "text_digest":hashlib.sha256(text.encode("utf-8")).hexdigest(),
                     "updated":updated,"publish_state":state,
                     "locked":self._has_publish_receipt(db,ident),
                     "provider_post_id":post_id,
-                    "external_publication":False}
+                    "external_publication":False,
+                    "tumblr_upload":False,**authoring}
 
     @staticmethod
     def _has_publish_receipt(db, ident):
@@ -184,6 +188,25 @@ class DraftStore:
             db.execute("UPDATE operation_drafts SET text=?,updated=? WHERE id=?",
                        (value,updated,ident))
         return {"id":ident,"text":value,"updated":updated}
+
+    @staticmethod
+    def _authoring(raw):
+        """Saved attachment and tag ids only. Invalid meta contributes nothing."""
+        found={"attachment_ids":[],"media_job_ids":[],"tags":[]}
+        if not raw:
+            return found
+        try:
+            value=json.loads(raw)
+        except ValueError:
+            return found
+        if not isinstance(value,dict):
+            return found
+        for key in found:
+            item=value.get(key,[])
+            if (isinstance(item,list) and len(item)<=8
+                    and all(isinstance(part,str) and 0<len(part)<=128 for part in item)):
+                found[key]=list(item)
+        return found
 
     def _validated_id(self, ident):
         if (not isinstance(ident,str) or len(ident)!=32

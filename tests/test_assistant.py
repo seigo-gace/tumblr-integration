@@ -236,6 +236,37 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(result["state"],"completed")
         self.assertEqual(adapter.calls,1)
 
+    def test_bound_catalog_operations_are_assistant_actions(self):
+        calls=[]
+        def perform(action, payload):
+            calls.append((action, dict(payload)))
+            if action=="engagement.07":
+                return {"verified": True}
+            if action=="analytics.09":
+                return {"verified": True, "kind": "telegram", "total": 0}
+            raise ValueError("catalog_operation_invalid")
+        assistant=Assistant(providers=[], catalog_perform=perform)
+        goals=assistant.turn(goals=["キャンペーン","紹介","集計"])
+        self.assertEqual(goals["plan"]["not_connected_goals"], [])
+        self.assertIn("campaign.02", {item["action"] for item in goals["plan"]["recommendations"]})
+        self.assertTrue(all(item["catalog"] is True and item["connected"] is True
+                            for item in goals["plan"]["recommendations"]
+                            if item["action"]=="campaign.02"))
+        inflow=assistant.turn(catalog_action="analytics.09", catalog_payload={})
+        self.assertEqual(inflow["state"], "completed")
+        self.assertFalse(inflow["executed"])
+        self.assertEqual(calls, [("analytics.09", {})])
+        undo=assistant.turn(catalog_action="engagement.07",
+                            catalog_payload={"engagement_action":"like","target":"post-1"})
+        self.assertEqual(undo["state"], "confirmation_required")
+        self.assertEqual(len(calls), 1)
+        done=assistant.turn(confirm=True, request_id=undo["request_id"])
+        self.assertEqual(done["state"], "completed")
+        self.assertTrue(done["executed"])
+        self.assertEqual(calls[-1][0], "engagement.07")
+        missing=Assistant(providers=[]).turn(catalog_action="publisher.01", catalog_payload={"text":"下書き"})
+        self.assertEqual(missing["state"], "not_connected")
+
     def test_unconfigured_goals_do_not_claim_an_action_is_implemented(self):
         assistant=Assistant(providers=[])
         result=assistant.turn(goals=["キャンペーン","紹介"])
@@ -271,6 +302,14 @@ class AssistantTests(unittest.TestCase):
                 self.assertEqual(status,200)
                 self.assertEqual(response["state"],"completed")
                 self.assertEqual(adapter.calls,1)
+                status,response=post(url,TOKEN,{"catalog_action":"analytics.09","catalog_payload":{}})
+                self.assertEqual(status,200)
+                self.assertNotEqual(response["state"],"not_connected")
+                self.assertFalse(response["executed"])
+                status,planned=post(url,TOKEN,{"message":"","goals":["キャンペーン"]})
+                self.assertEqual(status,200)
+                self.assertIn("campaign.02", {item["action"] for item in planned["plan"]["recommendations"]})
+                self.assertEqual(planned["plan"]["not_connected_goals"], [])
 
     def test_chat_does_not_require_a_module_and_does_not_execute(self):
         result = Assistant(providers=[]).turn("募集の状況を分析して 対象 campaign-1")
