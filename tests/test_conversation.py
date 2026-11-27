@@ -196,6 +196,31 @@ class ConversationTests(unittest.TestCase):
         self.assertNotIn("操作名", result["text"])
         self.assertIn("タグ", result["text"])
 
+    def test_registered_hashtag_patrol_continues_across_authenticated_turns(self):
+        probe = Probe()
+
+        def catalog_perform(action, payload):
+            if action == "discovery.registered_tags":
+                return {"verified": True, "tags": [], "summary": "なし"}
+            return perform(action, payload, {"tumblr": probe})
+
+        assistant = Assistant(bridge=Bridge({"tumblr": probe}), providers=[],
+                              catalog_perform=catalog_perform)
+        first = assistant.turn(
+            "登録されている#を巡回してフォロしてこい", goals=["巡回", "メディア"],
+            session_id="owner-a")
+        self.assertEqual(first["state"], "input_required")
+        self.assertIn("0件", first["text"])
+        self.assertNotIn("操作名", first["text"])
+        self.assertTrue(first.get("request_id"))
+        self.assertEqual(probe.seen, [])
+        second = assistant.turn(
+            "cats", goals=["巡回", "メディア"], session_id="owner-a",
+            request_id=first["request_id"])
+        self.assertEqual(probe.seen, [("tumblr.discover", "tag:cats")])
+        self.assertIn("フォロー", second["text"])
+        self.assertNotIn(("engagement.follow", "demo"), probe.seen)
+
     def test_registered_hashtag_with_a_saved_tag_scans_then_asks_before_follow(self):
         probe = Probe()
 

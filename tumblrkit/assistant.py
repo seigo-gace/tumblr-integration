@@ -400,7 +400,9 @@ class Assistant:
             response = self._turn(**args)
             confirmation = response.get("state") == "confirmation_required"
             waiting = (not confirmation and response.get("state") == "guidance"
-                       and bool(self.dialog.get("current") or self.dialog.get("queue")))
+                       and bool(self.dialog.get("current") or self.dialog.get("queue")
+                                or self.dialog.get("choices") or self.dialog.get("tag_queue")
+                                or self.dialog.get("follow_after") or self.dialog.get("follow_queue")))
             if confirmation or waiting:
                 next_id = response.get("request_id") if confirmation else None
                 next_id = next_id or uuid.uuid4().hex
