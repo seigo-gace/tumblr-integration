@@ -12,6 +12,8 @@ import socket
 import sqlite3
 import re
 import uuid
+import threading
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -330,6 +332,8 @@ class Assistant:
         self.transport = transport
         self.pending = {}
         self.dialog = blank_dialog()
+        self._turn_lock = threading.RLock()
+        self._scoped_turns = {}
         # One durable Owner draft store; no second in-memory draft ledger.
         self.draft_store = draft_store
         self.catalog_perform = catalog_perform
@@ -341,7 +345,80 @@ class Assistant:
 
     def turn(self, message="", confirm=False, request_id=None, draft=False, abort=False,
              goals=None, selected_action=None, selected_target=None, catalog_action=None,
-             catalog_payload=None, existing_buttons=None):
+             catalog_payload=None, existing_buttons=None, session_id=None):
+        """Correlate authenticated HTTP turns without sharing conversation state.
+
+        session_id is a trusted server-side scope, never prompt data.
+        Calls without a scope retain the original direct-call interface.
+        """
+        args = dict(message=message, confirm=confirm, request_id=request_id,
+                    draft=draft, abort=abort, goals=goals,
+                    selected_action=selected_action, selected_target=selected_target,
+                    catalog_action=catalog_action, catalog_payload=catalog_payload,
+                    existing_buttons=existing_buttons)
+        with self._turn_lock:
+            if session_id is None:
+                return self._turn(**args)
+            if not isinstance(session_id, str) or not session_id:
+                return self._pack("failed", "会話を識別できません。実行していません。",
+                                  False, recovery=True)
+            return self._scoped_turn(session_id, args)
+
+    def _scoped_turn(self, session_id, args):
+        now = time.monotonic()
+        # In-memory continuation only; expire abandoned operations.
+        for key, record in list(self._scoped_turns.items()):
+            if record["expires"] <= now:
+                self._scoped_turns.pop(key, None)
+        request_id = args["request_id"]
+        key = (session_id, request_id)
+        record = self._scoped_turns.get(key) if request_id else None
+        if request_id and record is None:
+            return self._pack("failed", "この会話の操作を確認できません。実行していません。",
+                              False, recovery=True)
+        if args["abort"]:
+            if record is not None:
+                self._scoped_turns.pop(key, None)
+            return self._pack("aborted", "中断しました。実行していません。", False)
+        if args["confirm"] and (record is None or record["kind"] != "confirm"):
+            return self._pack("failed", "確認できる提案がありません。実行していません。",
+                              False, recovery=True, request_id=request_id if record else None)
+        if record is not None and record["kind"] == "confirm" and not args["confirm"]:
+            if not find_actions(redact((args["message"] or "").strip())):
+                return self._pack("confirmation_required", "確認を押すまで実行しません。",
+                                  False, request_id=request_id)
+        # Serialize the existing stateful engine and restore direct-call state.
+        # Each scoped operation has its own dialog and pending dictionary.
+        previous_dialog, previous_pending = self.dialog, self.pending
+        self.dialog = record["dialog"] if record else blank_dialog()
+        self.pending = record["pending"] if record else {}
+        if record and not args["goals"]:
+            args["goals"] = record["goals"]
+        if record is not None:
+            self._scoped_turns.pop(key, None)
+        try:
+            response = self._turn(**args)
+            confirmation = response.get("state") == "confirmation_required"
+            waiting = (not confirmation and response.get("state") == "guidance"
+                       and bool(self.dialog.get("current") or self.dialog.get("queue")))
+            if confirmation or waiting:
+                next_id = response.get("request_id") if confirmation else None
+                next_id = next_id or uuid.uuid4().hex
+                response["request_id"] = next_id
+                if waiting:
+                    response["state"] = "input_required"
+                self._scoped_turns[(session_id, next_id)] = {
+                    "kind": "confirm" if confirmation else "input",
+                    "dialog": self.dialog, "pending": self.pending,
+                    "goals": list(args["goals"] or []), "expires": now + 12 * 60 * 60,
+                }
+            return response
+        finally:
+            self.dialog, self.pending = previous_dialog, previous_pending
+
+    def _turn(self, message="", confirm=False, request_id=None, draft=False, abort=False,
+              goals=None, selected_action=None, selected_target=None, catalog_action=None,
+              catalog_payload=None, existing_buttons=None):
         if abort:
             self.pending.clear()
             self.dialog = blank_dialog()
@@ -384,7 +461,7 @@ class Assistant:
                 return self._pack("invalid_tool",
                     "元の操作IDか対象が不正です。実行していません。",False,recovery=True)
             # Reuse exact selected action gate (same target constraints).
-            return self.turn(message="",goals=goals,
+            return self._turn(message="",goals=goals,
                              selected_action=action,selected_target=target)
         uttered = redact((message or "").strip())
         if uttered or self.dialog.get("current") or self.dialog.get("queue") or self.dialog.get("paused"):
@@ -749,10 +826,10 @@ class Assistant:
         extra = self._drain(goals)
         if extra and extra.get("text"):
             response["text"] += "\n" + extra["text"]
-            if extra.get("state") == "confirmation_required":
+            if extra.get("state") != "completed":
                 response["state"] = extra["state"]
                 response["request_id"] = extra.get("request_id")
-                response["recovery"] = True
+                response["recovery"] = extra.get("recovery", True)
                 response["executed"] = False
                 response["action"] = extra.get("action")
         return response
@@ -950,7 +1027,6 @@ class Assistant:
             return self._execute_owner(item["action"], item["payload"])
         if not item:
             return self._pack("failed", "確認できる提案がありません。実行していません。", False, recovery=True)
-        self.pending[request_id] = item
         action, target, expected_digest, cm_disabled, preserved_buttons = item
         if action=="tumblr.publish_draft":
             tumblr=self.bridge.adapters.get("tumblr")

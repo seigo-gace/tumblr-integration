@@ -188,15 +188,23 @@ def release_status(release):
     return {"service": "tumblr-operation-app", "commit": commit, "ui": "authenticated"}
 
 
-def _authorized(handler):
+def _authenticated_scope(handler):
+    """Return a server-derived scope only for an authenticated credential.
+
+    Domain-separated HMACs keep raw credentials out of Assistant state.
+    Bearer clients sharing the owner credential share an authentication scope,
+    but each continuation is still identified by its own request_id.
+    """
     now = time.time()
     header = handler.headers.get("Authorization", "")
     if header.startswith("Bearer "):
         try:
             if hmac.compare_digest(header[7:].encode('utf-8'), handler.server.token.encode('utf-8')):
-                return True
+                return "bearer:" + hmac.new(
+                    handler.server.conversation_scope_key, b"bearer", hashlib.sha256
+                ).hexdigest()
         except (TypeError, ValueError):
-            return False
+            return None
     cookie = handler.headers.get("Cookie", "")
     for part in cookie.split(";"):
         name, separator, value = part.strip().partition("=")
@@ -204,9 +212,16 @@ def _authorized(handler):
             with handler.server.session_lock:
                 expiry = handler.server.sessions.get(value, 0)
                 if expiry > now:
-                    return True
+                    return "cookie:" + hmac.new(
+                        handler.server.conversation_scope_key,
+                        b"cookie:" + value.encode("utf-8"), hashlib.sha256
+                    ).hexdigest()
                 handler.server.sessions.pop(value, None)
-    return False
+    return None
+
+
+def _authorized(handler):
+    return _authenticated_scope(handler) is not None
 
 
 def _same_origin(handler):
@@ -1250,10 +1265,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(201, record)
             return
         if parts.path == "/assistant":
-            if not _authorized(self):
+            scope = _authenticated_scope(self)
+            if scope is None:
                 self._unauthorized()
                 return
-            bearer_ok = self.headers.get("Authorization", "").startswith("Bearer ") and _authorized(self)
+            bearer_ok = scope.startswith("bearer:")
             if (self.headers.get("Origin") and not _same_origin(self)) or (not self.headers.get("Origin") and not bearer_ok):
                 self._send(403, "origin rejected\n", "text/plain; charset=utf-8")
                 return
@@ -1369,7 +1385,8 @@ class _Handler(BaseHTTPRequestHandler):
         self._json(200, {"deleted": deleted})
 
     def _assistant(self):
-        if not _authorized(self):
+        session_id = _authenticated_scope(self)
+        if session_id is None:
             self._unauthorized()
             return
         try:
@@ -1426,6 +1443,7 @@ class _Handler(BaseHTTPRequestHandler):
             message=message,
             confirm=payload.get("confirm") is True,
             request_id=request_id,
+            session_id=session_id,
             draft=payload.get("draft") is True,
             abort=payload.get("abort") is True,
             goals=payload.get("goals", []),
@@ -1496,6 +1514,7 @@ class AppServer:
         self.httpd = ThreadingHTTPServer((self.host, self.port), _Handler)
         self.httpd.release = self.release
         self.httpd.token = self.token
+        self.httpd.conversation_scope_key = secrets.token_bytes(32)
         self.httpd.tickets = set()
         self.httpd.sessions = {}
         self.httpd.session_lock = threading.Lock()

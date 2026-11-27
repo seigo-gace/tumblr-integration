@@ -716,6 +716,9 @@
   renderGoals();
   let lastText="";
   let pending=null;
+  let pendingState=null;
+  let assistantBusy=false;
+  let lastRequest=null;
   function display(text,role){
     const item=document.createElement("div");
     item.className="message "+role;
@@ -1144,26 +1147,55 @@
     renderView(turn.view);
     renderPlan(turn.plan);
     connection.textContent=turn.executed?"外部操作：結果を確認":"外部接続：未実行";
-    pending=turn.request_id||null;
+    pendingState=turn.state==="input_required"||turn.state==="confirmation_required"?turn.state:null;
+    pending=pendingState&&turn.request_id?turn.request_id:null;
     showAssist(turn);
   }
-  function fail(){
-    apply({text:"画面から操作先へ届きませんでした。実行していません。",executed:false,recovery:true,state:"failed"});
+  function canRetryInput(payload){
+    return Boolean(payload&&pendingState==="input_required"&&pending&&
+      payload.request_id===pending&&typeof payload.message==="string"&&
+      !payload.confirm&&!payload.abort&&!payload.draft&&
+      !payload.selected_action&&!payload.catalog_action);
   }
-  function post(payload){
+  function fail(){
+    display("操作先の応答を確認できませんでした。実行結果は不明です。"+
+      (canRetryInput(lastRequest)
+        ?"前の回答を再送できます。"
+        :"実行結果を確認できていないため、重複を避けるためにこの送信は再送しません。"),"system");
+    assist.hidden=false;
+    confirm.hidden=true;
+    connection.textContent="外部接続：結果未確認";
+  }
+  function post(payload, fromForm=false){
+    if(assistantBusy||(sending&&!fromForm))return Promise.resolve();
+    assistantBusy=true;
+    const sent=JSON.parse(JSON.stringify(payload));
+    // Only an input follow-up with its original, current continuation ID
+    // can be retried. A lost initial response may already have created data.
+    lastRequest=canRetryInput(sent)?sent:null;
     return fetch("/assistant",{
       method:"POST",
       credentials:"same-origin",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify(payload)
+      body:JSON.stringify(sent)
     }).then(function(response){
       if(!response.ok) throw new Error("http");
       return response.json();
-    }).then(apply,fail);
+    }).then(function(turn){
+      // A completed HTTP response supersedes the previous request. Never
+      // replay an answered input as the next question's answer.
+      lastRequest=null;
+      if((sent.draft||turn.state==="attachments_received")&&pending){
+        display(turn.text||"応答を受け取りました。","system");
+        showAssist({state:pendingState,request_id:pending,recovery:true});
+      }else{
+        apply(turn);
+      }
+    },fail).finally(function(){assistantBusy=false;});
   }
   form.addEventListener("submit",async function(event){
     event.preventDefault();
-    if(sending)return;
+    if(sending||assistantBusy)return;
     const text=instruction.value.trim();
     const goals=Array.from(selectedGoals);
     const files=pendingFiles.slice();
@@ -1180,7 +1212,9 @@
       resetDraftEdit();
       pendingFiles.splice(0,pendingFiles.length);
       refreshAttachmentList();
-      await post({message:message,goals:goals,attachments:uploaded.map(function(item){return item.id;})});
+      const payload={message:message,goals:goals,attachments:uploaded.map(function(item){return item.id;})};
+      if(pendingState==="input_required"&&pending)payload.request_id=pending;
+      await post(payload,true);
     }catch(error){
       display("添付の送信に失敗しました。選択したファイルと入力文は残しています。","system");
     }finally{
@@ -1189,17 +1223,26 @@
     }
   });
   document.getElementById("retry").addEventListener("click",function(){
-    if(!lastText) return;
-    post({message:lastText});
+    if(assistantBusy||sending)return;
+    if(!canRetryInput(lastRequest)){
+      lastRequest=null;
+      display("再送できる回答はありません。実行結果が不明な送信は、重複を避けるため再送しません。","system");
+      assist.hidden=false;
+      return;
+    }
+    post(lastRequest);
   });
   document.getElementById("draft").addEventListener("click",function(){
     post({draft:true,message:lastText});
   });
   document.getElementById("abort").addEventListener("click",function(){
-    post({abort:true});
+    if(assistantBusy||sending)return;
+    const payload={abort:true};
+    if(pending)payload.request_id=pending;
+    post(payload);
   });
   confirm.addEventListener("click",function(){
-    if(!pending) return;
+    if(!pending||pendingState!=="confirmation_required"||assistantBusy||sending)return;
     post({confirm:true,request_id:pending});
   });
   // Real app-owned drafts: server-side SQLite, not browser storage or AI.
