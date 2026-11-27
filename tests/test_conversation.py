@@ -146,6 +146,81 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(owner, ["analytics.10"])
         self.assertIn("流入を確認しました", result["text"])
 
+    def test_plain_patrol_request_asks_what_to_scan_then_runs_it(self):
+        probe = Probe()
+        assistant = Assistant(bridge=Bridge({"tumblr": probe}), providers=[])
+        asked = assistant.turn("巡回をしろ", goals=["巡回"])
+        self.assertEqual(asked["state"], "guidance")
+        self.assertIn("フォロワー", asked["text"])
+        self.assertIn("新着", asked["text"])
+        self.assertNotIn("操作名", asked["text"])
+        self.assertEqual(probe.seen, [])
+        done = assistant.turn("フォロワー")
+        self.assertEqual(done["state"], "completed")
+        self.assertEqual(probe.seen, [("tumblr.discover", "followers")])
+        self.assertTrue(done["executed"])
+
+    def test_summary_request_runs_today_without_an_official_name(self):
+        probe = Probe()
+        assistant = Assistant(bridge=Bridge({"analytics": probe}), providers=[])
+        result = assistant.turn("集計して", goals=["集計"])
+        self.assertEqual(result["state"], "completed")
+        self.assertEqual(probe.seen, [("analytics.get_summary", "today")])
+
+    def test_new_posts_request_asks_for_a_tag_then_scans_it(self):
+        probe = Probe()
+
+        def catalog_perform(action, payload):
+            return perform(action, payload, {"tumblr": probe})
+
+        assistant = Assistant(bridge=Bridge({"tumblr": probe}), providers=[],
+                              catalog_perform=catalog_perform)
+        asked = assistant.turn("巡回をしろ")
+        self.assertIn("新着", asked["text"])
+        narrowed = assistant.turn("新着")
+        self.assertIn("タグ", narrowed["text"])
+        self.assertEqual(probe.seen, [])
+        done = assistant.turn("cats")
+        self.assertEqual(done["state"], "completed")
+        self.assertEqual(probe.seen, [("tumblr.discover", "tag:cats")])
+
+    def test_registered_hashtag_patrol_checks_the_store_before_any_follow(self):
+        def catalog_perform(action, payload):
+            self.assertEqual(action, "discovery.registered_tags")
+            return {"verified": True, "tags": [], "summary": "なし"}
+
+        assistant = Assistant(providers=[], catalog_perform=catalog_perform)
+        result = assistant.turn("登録されている#を巡回してフォロしてこい", goals=["巡回", "メディア"])
+        self.assertFalse(result["executed"])
+        self.assertIn("0件", result["text"])
+        self.assertNotIn("操作名", result["text"])
+        self.assertIn("タグ", result["text"])
+
+    def test_registered_hashtag_with_a_saved_tag_scans_then_asks_before_follow(self):
+        probe = Probe()
+
+        def catalog_perform(action, payload):
+            if action == "discovery.registered_tags":
+                return {"verified": True, "tags": ["cats"], "summary": "登録済みタグ: cats。"}
+            raise AssertionError(action)
+
+        def perform(self, action, target, payload):
+            self.seen.append((action, target))
+            return {"verified": True, "rows": [{
+                "blog": "demo", "title": "demo", "type": "blog", "date": "",
+                "thumbnail_url": "", "url": "https://demo.tumblr.com",
+            }]}
+
+        probe.perform = perform.__get__(probe, Probe)
+        assistant = Assistant(
+            bridge=Bridge({"tumblr": probe, "engagement": probe}),
+            providers=[], catalog_perform=catalog_perform)
+        result = assistant.turn("登録されている#を巡回してフォロしてこい")
+        self.assertEqual(probe.seen, [("tumblr.discover", "tag:cats")])
+        self.assertEqual(result["state"], "confirmation_required")
+        self.assertIn("フォロー", result["text"])
+        self.assertFalse(result["executed"])
+
     def test_delete_by_its_official_name_asks_instead_of_refusing(self):
         result = Assistant(providers=[]).turn("投稿を削除")
         self.assertEqual(result["state"], "guidance")

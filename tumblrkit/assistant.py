@@ -17,8 +17,9 @@ from urllib.request import Request, urlopen
 
 from tumblrkit.bridge import ALLOWED, CONFIRM, Bridge, ActionRequest
 from tumblrkit.conversation import (
-    BRIDGE_TARGET_FIELD, FIELDS as OPERATION_FIELDS, blank_dialog, find_actions,
-    ingest, operation_names, step,
+    BRIDGE_TARGET_FIELD, FIELDS as OPERATION_FIELDS, blank_dialog, choice_prompt,
+    everyday, find_actions, ingest, operation_names, pick_waiting,
+    registered_patrol, step,
 )
 from tumblrkit.action_catalog import BRIDGE_ROUTES, resolve_bridge_action
 
@@ -542,15 +543,9 @@ class Assistant:
                 "executed":False}
 
     def _goal_guidance(self, goals):
-        response=self._pack(
-            "guidance",
-            "目的は「" + "・".join(goals) + "」です。"
-            "実行する操作名を会話で書いてください。足りない項目は一つずつ聞きます。",
-            False,recovery=True)
-        response["plan"]={"goals":list(goals),"recommendations":[],
-                          "not_connected_goals":[],"all_actions_count":0,
-                          "evidence":"existing_bridge_registry","executed":False}
-        return response
+        self.dialog = blank_dialog()
+        everyday(self.dialog, "", goals)
+        return self._drain(goals)
 
     def _conversation(self, text, goals):
         if self.dialog.get("paused"):
@@ -562,11 +557,24 @@ class Assistant:
                     False, recovery=True, request_id=request_id)
             self.pending.clear()
             self.dialog = blank_dialog()
-        if ingest(self.dialog, text) == "passthrough":
+        patrol = registered_patrol(text)
+        if patrol and not self.dialog.get("paused"):
+            return self._start_registered_patrol(patrol["follow"], goals)
+        if pick_waiting(self.dialog, text):
+            return self._drain(goals)
+        if ingest(self.dialog, text) == "passthrough" and not everyday(self.dialog, text, goals):
             return None
         return self._drain(goals)
 
     def _drain(self, goals):
+        prompt = choice_prompt(self.dialog)
+        if prompt and not self.dialog.get("current") and not self.dialog.get("queue"):
+            response = self._pack("guidance", prompt, False, recovery=True, provider="conversation")
+            if goals:
+                response["plan"] = {"goals": list(goals), "recommendations": [],
+                                    "not_connected_goals": [], "all_actions_count": 0,
+                                    "evidence": "existing_bridge_registry", "executed": False}
+            return response
         texts = []
         executed = False
         response = None
@@ -602,8 +610,22 @@ class Assistant:
                 break
             executed = executed or response["executed"] is True
             texts.append(response["text"])
+            self._note_blogs(response)
             self.dialog["current"] = None
             self.dialog["fields"] = {}
+            if self.dialog.get("tag_queue"):
+                self.dialog["current"] = "discovery.05"
+                self.dialog["fields"] = {"target": self.dialog["tag_queue"].pop(0)}
+                continue
+            if self.dialog.get("follow_after"):
+                self.dialog["follow_after"] = False
+                blogs = self.dialog.get("follow_blogs") or []
+                if blogs:
+                    self.dialog["follow_queue"] = blogs[1:]
+                    self.dialog["current"] = "engagement.05"
+                    self.dialog["fields"] = {"target": blogs[0]}
+                    continue
+                texts.append("フォローできる新しいブログはありません。フォローはしていません。")
             if not self.dialog.get("queue"):
                 response["text"] = "\n".join(texts)
                 response["executed"] = executed
@@ -656,6 +678,53 @@ class Assistant:
         external = action in CATALOG_EXTERNAL or result.get("external") is True
         return self._pack("completed", text[:2000], external, action=action, provider="conversation")
 
+    def _note_blogs(self, response):
+        if not self.dialog.get("follow_after"):
+            return
+        view = response.get("view") if isinstance(response.get("view"), dict) else {}
+        rows = view.get("rows") if isinstance(view.get("rows"), list) else []
+        found = self.dialog.setdefault("follow_blogs", [])
+        for row in rows:
+            blog = row.get("blog") if isinstance(row, dict) else None
+            if isinstance(blog, str) and blog and blog not in found and len(found) < 5:
+                found.append(blog)
+
+    def _start_registered_patrol(self, follow, goals):
+        self.dialog = blank_dialog()
+        self.dialog["follow_after"] = bool(follow)
+        self.dialog["follow_blogs"] = []
+        self.dialog["tag_queue"] = []
+        self.dialog["follow_queue"] = []
+        if self.catalog_perform is None:
+            return self._pack("not_connected",
+                              "登録タグの保存先が未接続です。巡回もフォローもしていません。",
+                              False, recovery=True, provider="conversation")
+        try:
+            listed = self.catalog_perform("discovery.registered_tags", {})
+        except ValueError as exc:
+            code = str(exc)
+            if not re.fullmatch(r"[A-Za-z0-9_]{1,80}", code):
+                code = "operation_failed"
+            return self._pack("failed", "登録タグを確認できませんでした（" + code + "）。巡回もフォローもしていません。",
+                              False, recovery=True, provider="conversation")
+        tags = listed.get("tags") if isinstance(listed, dict) else None
+        tags = [tag for tag in tags if isinstance(tag, str) and tag][:5] if isinstance(tags, list) else []
+        if not tags:
+            self.dialog["current"] = "discovery.05"
+            response = self._drain(goals)
+            response["text"] = ("登録済みのタグは0件です。巡回もフォローもしていません。\n"
+                                + response["text"])
+            return response
+        self.dialog["tag_queue"] = tags[1:]
+        self.dialog["current"] = "discovery.05"
+        self.dialog["fields"] = {"target": tags[0]}
+        response = self._drain(goals)
+        lead = "登録済みタグ " + "、".join(tags) + " を巡回します。"
+        if follow:
+            lead += "フォローは確認してから1件ずつ実行します。"
+        response["text"] = lead + "\n" + response["text"]
+        return response
+
     def _after_dialog(self, response, goals):
         if not self.dialog.get("paused"):
             return response
@@ -664,12 +733,19 @@ class Assistant:
             self.dialog["current"] = None
             self.dialog["fields"] = {}
             self.dialog["queue"] = []
+            self.dialog["tag_queue"] = []
+            self.dialog["follow_queue"] = []
+            self.dialog["follow_after"] = False
             return response
         self.dialog["current"] = None
         self.dialog["fields"] = {}
-        if not self.dialog.get("queue"):
+        if self.dialog.get("follow_queue"):
+            self.dialog["current"] = "engagement.05"
+            self.dialog["fields"] = {"target": self.dialog["follow_queue"].pop(0)}
+        elif self.dialog.get("queue"):
+            self.dialog["current"] = self.dialog["queue"].pop(0)
+        else:
             return response
-        self.dialog["current"] = self.dialog["queue"].pop(0)
         extra = self._drain(goals)
         if extra and extra.get("text"):
             response["text"] += "\n" + extra["text"]

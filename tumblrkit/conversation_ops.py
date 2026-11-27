@@ -151,8 +151,23 @@ def _account_disconnect(services, payload):
     return _done("この端末のTumblr接続情報を削除しました。Tumblr側の遠隔解除はしていません。", **result)
 
 
+def _scan_target(value):
+    text = value.strip()
+    tagged = re.fullmatch(r"タグ\s*[:：]?\s*(\S+)", text)
+    if tagged:
+        return "tag:" + tagged.group(1)
+    named = re.fullmatch(r"ブログ\s*[:：]?\s*(\S+)", text)
+    if named:
+        return "blog:" + named.group(1)
+    if text in ("followers", "following") or re.fullmatch(r"(tag|blog|related):[^\s:]{1,64}", text):
+        return text
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,62}", text):
+        return "tag:" + text
+    return text
+
+
 def _discovery_scan(services, payload):
-    result = _need(services, "tumblr").perform("tumblr.discover", payload["target"], {})
+    result = _need(services, "tumblr").perform("tumblr.discover", _scan_target(payload["target"]), {})
     if not isinstance(result, dict) or result.get("verified") is not True:
         return {"verified": False, "summary": "巡回結果を確認できません。完了扱いしません。"}
     result = dict(result)
@@ -457,7 +472,15 @@ for _action in (
     HANDLERS[_action] = (lambda action: (lambda services, payload: _catalog(services, action, payload)))(_action)
 
 
+def _registered_tags(services, payload):
+    tags = _need(services, "discovery").registered_tags()
+    shown = "、".join(tags) if tags else "なし"
+    return _done("登録済みタグ: " + shown + "。", tags=tags)
+
+
 def perform(action, payload, services):
+    if action == "discovery.registered_tags":
+        return _registered_tags(services, payload if isinstance(payload, dict) else {})
     handler = HANDLERS.get(action)
     if handler is None:
         raise ValueError("catalog_operation_invalid")

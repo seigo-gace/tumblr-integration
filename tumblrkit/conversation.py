@@ -122,7 +122,8 @@ _NAMES = tuple(sorted(((item.name, item.action_id) for item in CATALOG), key=lam
 
 
 def blank_dialog():
-    return {"current": None, "fields": {}, "queue": [], "paused": False}
+    return {"current": None, "fields": {}, "queue": [], "paused": False,
+            "choices": None, "goal_set": ()}
 
 
 def find_actions(text):
@@ -180,6 +181,12 @@ def ingest(dialog, text):
     if not found:
         return "passthrough"
     useful = {key: value for key, value in extracted.items() if current and key in _wanted(current)}
+    if current and current not in found and not dialog.get("fields"):
+        dialog["choices"] = None
+        dialog["current"] = found[0]
+        dialog["queue"] = found[1:]
+        dialog["fields"] = {key: value for key, value in extracted.items() if key in _wanted(found[0])}
+        return "active"
     if current and current not in found:
         dialog["queue"].extend(found)
         dialog["fields"].update(useful)
@@ -201,8 +208,9 @@ def step(dialog):
     missing = [field for field in _wanted(action) if field not in dialog["fields"]]
     name = BY_ID[action].name
     if missing:
+        question = _ASK.get((action, missing[0]), "「" + name + "」の" + QUESTIONS[missing[0]])
         return {"kind": "ask", "action": action,
-                "text": "「" + name + "」の" + QUESTIONS[missing[0]] + "実行はまだしていません。"}
+                "text": question + "実行はまだしていません。"}
     if action in LOCAL_CONFIRM:
         return {"kind": "confirm", "action": action, "fields": dict(dialog["fields"]),
                 "text": "「" + name + "」を実行します。確認を押すまで実行しません。"}
@@ -211,3 +219,160 @@ def step(dialog):
 
 def operation_names():
     return ",".join(item.action_id + ":" + item.name for item in CATALOG)
+
+
+_GOAL_ORDER = ("巡回", "投稿", "キャンペーン", "紹介", "集計", "メディア")
+_GOAL_START = {
+    "投稿": "publisher.01",
+    "キャンペーン": "campaign.04",
+    "紹介": "referral.08",
+    "集計": "analytics.01",
+    "メディア": "media.01",
+}
+_GOAL_OPTIONS = {
+    "巡回": (
+        ("フォロワー", "discovery.02"),
+        ("フォロー先", "discovery.03"),
+        ("フォロー中", "discovery.03"),
+        ("新着", "discovery.01"),
+        ("タグ", "discovery.05"),
+        ("差分", "discovery.07"),
+    ),
+}
+_PLAIN = (
+    ("フォロワー", "discovery.02"),
+    ("フォロー先", "discovery.03"),
+    ("保存候補", "media.01"),
+    ("容量", "media.07"),
+    ("応募状況", "campaign.04"),
+    ("付与履歴", "referral.08"),
+    ("未分類", "analytics.10"),
+    ("流入", "analytics.09"),
+)
+_ASK = {
+    ("discovery.01", "target"): "どのタグ、またはどのブログを巡回しますか。例: cats。",
+    ("discovery.04", "target"): "探すブログ名を書いてください。",
+    ("discovery.05", "target"): "探すタグを書いてください。例: cats。",
+    ("publisher.01", "text"): "投稿する本文を書いてください。",
+    ("campaign.04", "campaign_id"): "状況を見る企画IDを書いてください。",
+    ("referral.08", "campaign_id"): "履歴を見る企画IDを書いてください。",
+}
+_DO = re.compile(r"(して|しろ|してくれ|やれ|お願い|頼む|見せて|見たい|見て|確認して|確認しろ)")
+_PARTICLES = frozenset({"を", "は", "が", "に", "で", "と", "も", "から", "して", "しろ", "見て", "新着", "巡回", "タグ"})
+
+
+def choice_prompt(dialog):
+    choices = dialog.get("choices")
+    if choices == "several":
+        names = "、".join(dialog.get("goal_set") or ())
+        return "どれを実行しますか。" + names + " のどれか一言で書いてください。"
+    if choices == "巡回":
+        return "巡回を実行します。フォロワー、フォロー先、新着のどれを見ますか。新着ならタグかブログ名も書いてください。"
+    return None
+
+
+def _goals_in(text, selected):
+    if not text and selected:
+        return [goal for goal in _GOAL_ORDER if goal in selected]
+    if not text:
+        return []
+    compact = re.sub(r"[\sをはがにでも、。！!？?]+", "", text)
+    commands = {
+        goal + suffix
+        for goal in _GOAL_ORDER
+        for suffix in ("", "して", "しろ", "してくれ", "やれ", "お願い", "見せて", "見て", "確認して", "確認しろ", "開始")
+    }
+    if compact not in commands:
+        return []
+    return [goal for goal in _GOAL_ORDER if goal in text]
+
+
+def _option(choices, text):
+    if not text:
+        return None
+    for phrase, action in _GOAL_OPTIONS.get(choices, ()):
+        if phrase in text:
+            return action
+    return None
+
+
+def _plain(text):
+    if not text:
+        return None
+    for phrase, action in _PLAIN:
+        if phrase in text:
+            return action
+    return None
+
+
+def _fields_for(action, text):
+    fields = {key: value for key, value in extract(text).items() if key in FIELDS[action]}
+    if action in ("discovery.01", "discovery.05") and "target" not in fields:
+        tagged = re.search(r"タグ\s*[:：]?\s*([^\s、。]{1,40})", text or "")
+        if tagged and tagged.group(1) not in _PARTICLES:
+            fields["target"] = tagged.group(1)
+    if action == "discovery.01" and "target" not in fields:
+        tokens = [part for part in re.split(r"[\s、。]+", text or "") if part and part not in _PARTICLES]
+        if len(tokens) == 1 and len(tokens[0]) <= 64:
+            fields["target"] = tokens[0]
+    return fields
+
+
+def pick_waiting(dialog, text):
+    """Continue a goal question. Return True when the dialog changed."""
+    choices = dialog.get("choices")
+    if not choices or not text or find_actions(text):
+        if find_actions(text):
+            dialog["choices"] = None
+        return False
+    if choices == "several":
+        hits = [goal for goal in (dialog.get("goal_set") or ()) if goal in text]
+        if len(hits) != 1:
+            return False
+        dialog["choices"] = None
+        dialog["goal_set"] = ()
+        return everyday(dialog, hits[0], [hits[0]])
+    action = _option(choices, text) or _plain(text)
+    if not action:
+        return False
+    dialog["choices"] = None
+    dialog["current"] = action
+    dialog["fields"] = _fields_for(action, text)
+    return True
+
+
+def registered_patrol(text):
+    """「登録されている#を巡回してフォローして」is one concrete request."""
+    if not isinstance(text, str) or not text:
+        return None
+    registered = "登録" in text and ("#" in text or "タグ" in text or "ハッシュ" in text)
+    if not (registered and "巡回" in text):
+        return None
+    return {"follow": "フォロ" in text}
+
+
+def everyday(dialog, text, goals):
+    """Turn 「巡回をしろ」 into a concrete operation or one plain question."""
+    if find_actions(text or ""):
+        return False
+    action = _plain(text or "")
+    if action and not dialog.get("current"):
+        dialog["choices"] = None
+        dialog["current"] = action
+        dialog["fields"] = _fields_for(action, text or "")
+        return True
+    hits = _goals_in(text or "", goals or [])
+    if not hits or dialog.get("current"):
+        return False
+    if len(hits) > 1:
+        dialog["choices"] = "several"
+        dialog["goal_set"] = tuple(hits)
+        return True
+    goal = hits[0]
+    if goal == "巡回":
+        dialog["choices"] = "巡回"
+        return True
+    dialog["choices"] = None
+    dialog["current"] = _GOAL_START[goal]
+    dialog["fields"] = {}
+    return True

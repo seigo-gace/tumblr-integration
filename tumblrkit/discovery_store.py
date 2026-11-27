@@ -99,6 +99,21 @@ class DiscoveryStore:
             db.execute("ALTER TABLE discovery_posts ADD COLUMN media_json TEXT NOT NULL DEFAULT '[]'")
         return db
 
+    def registered_tags(self, limit=5):
+        """Tags the owner has already scanned, newest checkpoint first."""
+        if type(limit) is not int or not 1 <= limit <= 20:
+            raise ValueError("discovery_limit_invalid")
+        with closing(self._open()) as db:
+            rows = db.execute(
+                "SELECT source_key FROM discovery_sources WHERE source_key LIKE 'tag:%' "
+                "ORDER BY updated_at DESC LIMIT ?", (limit,)).fetchall()
+        tags = []
+        for (key,) in rows:
+            name = key[4:]
+            if name and len(name) <= 64 and name not in tags:
+                tags.append(name)
+        return tags
+
     def checkpoint(self,source):
         with closing(self._open()) as db:
             row=db.execute("SELECT cursor,watermark,complete FROM discovery_sources WHERE source_key=?",

@@ -187,7 +187,7 @@ class AssistantTests(unittest.TestCase):
             "巡回","投稿","キャンペーン","紹介","集計","メディア"])
         self.assertEqual(result["state"],"guidance")
         self.assertFalse(result["executed"])
-        self.assertIn("操作名", result["text"])
+        self.assertIn("どれを実行しますか", result["text"])
         self.assertEqual(result["plan"]["goals"],[
             "巡回","投稿","キャンペーン","紹介","集計","メディア"])
         self.assertEqual(result["plan"]["not_connected_goals"],[])
@@ -235,7 +235,7 @@ class AssistantTests(unittest.TestCase):
         goals=assistant.turn(goals=["キャンペーン","紹介","集計"])
         self.assertEqual(goals["plan"]["not_connected_goals"], [])
         self.assertEqual(goals["plan"]["recommendations"], [])
-        self.assertIn("操作名", goals["text"])
+        self.assertIn("どれを実行しますか", goals["text"])
         inflow=assistant.turn(catalog_action="analytics.09", catalog_payload={})
         self.assertEqual(inflow["state"], "completed")
         self.assertFalse(inflow["executed"])
@@ -256,7 +256,7 @@ class AssistantTests(unittest.TestCase):
         result=assistant.turn(goals=["キャンペーン","紹介"])
         self.assertEqual(result["plan"]["recommendations"],[])
         self.assertEqual(result["plan"]["not_connected_goals"],[])
-        self.assertIn("操作名", result["text"])
+        self.assertIn("どれを実行しますか", result["text"])
         self.assertFalse(result["executed"])
 
     def test_invalid_goal_data_is_rejected_without_dispatch(self):
@@ -293,7 +293,7 @@ class AssistantTests(unittest.TestCase):
                 status,planned=post(url,TOKEN,{"message":"","goals":["キャンペーン"]})
                 self.assertEqual(status,200)
                 self.assertEqual(planned["plan"]["recommendations"], [])
-                self.assertIn("操作名", planned["text"])
+                self.assertIn("企画ID", planned["text"])
                 status,asked=post(url,TOKEN,{"message":"企画文を作る","goals":["キャンペーン"]})
                 self.assertEqual(status,200)
                 self.assertIn("企画ID", asked["text"])
