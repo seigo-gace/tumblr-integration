@@ -41,9 +41,10 @@ class OperationAppTests(unittest.TestCase):
         self.assertIn('const goals=Array.from(selectedGoals)',self.js)
         self.assertIn('goals:goals,attachments:',self.js)
         self.assertIn('renderPlan(turn.plan)',self.js)
-        self.assertIn('selected_action:item.action,selected_target:target',self.js)
-        self.assertIn('plan.recommendations.slice(visibleStart,visibleStart+3)',self.js)
-        self.assertIn('if(visibleStart+3<plan.recommendations.length)',self.js)
+        self.assertNotIn('selected_action:item.action,selected_target:target',self.js)
+        self.assertNotIn('plan.recommendations.slice(visibleStart,visibleStart+3)',self.js)
+        self.assertNotIn('正式79操作カタログ',self.js)
+        self.assertNotIn('画面で入力',self.js)
         self.assertIn('.goal[aria-pressed="true"]',self.css)
         self.assertLess(self.html.index('id="messages"'),self.html.index('id="goal-grid"'))
         self.assertLess(self.html.index('id="chat-form"'),self.html.index('id="goal-grid"'))
@@ -86,8 +87,7 @@ class OperationAppTests(unittest.TestCase):
         self.assertIn('draft.publish_state==="changing"',self.js)
         self.assertIn('selected_action:"tumblr.reconcile_post"',self.js)
         self.assertIn('reconcile.textContent="投稿結果を再照合"',self.js)
-        self.assertIn('["tumblr.publish_draft","tumblr.edit_post","tumblr.delete_post",',self.js)
-        self.assertIn('"tumblr.reconcile_post"].includes(item.action)',self.js)
+        self.assertNotIn('["tumblr.publish_draft","tumblr.edit_post","tumblr.delete_post",',self.js)
         self.assertNotIn('input.placeholder="投稿ID"',self.js)
 
     def test_discovery_saved_pages_never_hide_rows_beyond_first_hundred(self):

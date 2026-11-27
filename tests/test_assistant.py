@@ -187,26 +187,12 @@ class AssistantTests(unittest.TestCase):
             "巡回","投稿","キャンペーン","紹介","集計","メディア"])
         self.assertEqual(result["state"],"guidance")
         self.assertFalse(result["executed"])
+        self.assertIn("操作名", result["text"])
         self.assertEqual(result["plan"]["goals"],[
             "巡回","投稿","キャンペーン","紹介","集計","メディア"])
-        self.assertEqual(result["plan"]["not_connected_goals"],["キャンペーン","紹介"])
-        self.assertEqual(result["plan"]["all_actions_count"],10)
-        self.assertEqual(len(result["plan"]["recommendations"]),10)
-        self.assertEqual(
-            {item["action"] for item in result["plan"]["recommendations"]},
-            {"tumblr.discover","tumblr.list_posts","tumblr.publish_draft",
-             "tumblr.edit_post","tumblr.delete_post","tumblr.reconcile_post",
-             "engagement.like","engagement.reblog","engagement.follow",
-             "analytics.get_summary"})
-        self.assertTrue(all(
-            item["confirmation_required"] for item in
-            result["plan"]["recommendations"] if item["action"].startswith("engagement.")))
-        self.assertTrue(all(
-            item["confirmation_required"] for item in
-            result["plan"]["recommendations"] if item["action"] in
-            ("tumblr.edit_post","tumblr.delete_post")))
-        self.assertTrue(all(item["basis"]=="既存Bridgeに登録された操作契約"
-                            for item in result["plan"]["recommendations"]))
+        self.assertEqual(result["plan"]["not_connected_goals"],[])
+        self.assertEqual(result["plan"]["recommendations"],[])
+        self.assertEqual(result["plan"]["all_actions_count"],0)
         self.assertEqual(adapter.calls,0)
 
     def test_goal_text_with_no_provider_must_plan_before_execution(self):
@@ -248,10 +234,8 @@ class AssistantTests(unittest.TestCase):
         assistant=Assistant(providers=[], catalog_perform=perform)
         goals=assistant.turn(goals=["キャンペーン","紹介","集計"])
         self.assertEqual(goals["plan"]["not_connected_goals"], [])
-        self.assertIn("campaign.02", {item["action"] for item in goals["plan"]["recommendations"]})
-        self.assertTrue(all(item["catalog"] is True and item["connected"] is True
-                            for item in goals["plan"]["recommendations"]
-                            if item["action"]=="campaign.02"))
+        self.assertEqual(goals["plan"]["recommendations"], [])
+        self.assertIn("操作名", goals["text"])
         inflow=assistant.turn(catalog_action="analytics.09", catalog_payload={})
         self.assertEqual(inflow["state"], "completed")
         self.assertFalse(inflow["executed"])
@@ -271,8 +255,8 @@ class AssistantTests(unittest.TestCase):
         assistant=Assistant(providers=[])
         result=assistant.turn(goals=["キャンペーン","紹介"])
         self.assertEqual(result["plan"]["recommendations"],[])
-        self.assertEqual(result["plan"]["not_connected_goals"],
-                         ["キャンペーン","紹介"])
+        self.assertEqual(result["plan"]["not_connected_goals"],[])
+        self.assertIn("操作名", result["text"])
         self.assertFalse(result["executed"])
 
     def test_invalid_goal_data_is_rejected_without_dispatch(self):
@@ -308,8 +292,12 @@ class AssistantTests(unittest.TestCase):
                 self.assertFalse(response["executed"])
                 status,planned=post(url,TOKEN,{"message":"","goals":["キャンペーン"]})
                 self.assertEqual(status,200)
-                self.assertIn("campaign.02", {item["action"] for item in planned["plan"]["recommendations"]})
-                self.assertEqual(planned["plan"]["not_connected_goals"], [])
+                self.assertEqual(planned["plan"]["recommendations"], [])
+                self.assertIn("操作名", planned["text"])
+                status,asked=post(url,TOKEN,{"message":"企画文を作る","goals":["キャンペーン"]})
+                self.assertEqual(status,200)
+                self.assertIn("企画ID", asked["text"])
+                self.assertNotEqual(asked["state"], "completed")
 
     def test_chat_does_not_require_a_module_and_does_not_execute(self):
         result = Assistant(providers=[]).turn("募集の状況を分析して 対象 campaign-1")

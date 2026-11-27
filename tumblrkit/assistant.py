@@ -16,6 +16,11 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from tumblrkit.bridge import ALLOWED, CONFIRM, Bridge, ActionRequest
+from tumblrkit.conversation import (
+    BRIDGE_TARGET_FIELD, FIELDS as OPERATION_FIELDS, blank_dialog, find_actions,
+    ingest, operation_names, step,
+)
+from tumblrkit.action_catalog import BRIDGE_ROUTES, resolve_bridge_action
 
 MODULES = (
     "account", "discovery", "library", "media", "engagement",
@@ -323,6 +328,7 @@ class Assistant:
         self.providers = providers
         self.transport = transport
         self.pending = {}
+        self.dialog = blank_dialog()
         # One durable Owner draft store; no second in-memory draft ledger.
         self.draft_store = draft_store
         self.catalog_perform = catalog_perform
@@ -337,6 +343,7 @@ class Assistant:
              catalog_payload=None, existing_buttons=None):
         if abort:
             self.pending.clear()
+            self.dialog = blank_dialog()
             return self._pack("aborted", "中断しました。実行していません。", False)
         if draft:
             if self.draft_store is None:
@@ -353,7 +360,8 @@ class Assistant:
             result["draft_id"]=stored["id"]
             return result
         if confirm:
-            return self._confirm(request_id)
+            response = self._confirm(request_id)
+            return self._after_dialog(response, goals if isinstance(goals, list) else [])
         if goals is None:
             goals=[]
         if (not isinstance(goals,list) or len(goals)>len(GOALS)
@@ -377,6 +385,11 @@ class Assistant:
             # Reuse exact selected action gate (same target constraints).
             return self.turn(message="",goals=goals,
                              selected_action=action,selected_target=target)
+        uttered = redact((message or "").strip())
+        if uttered or self.dialog.get("current") or self.dialog.get("queue") or self.dialog.get("paused"):
+            handled = self._conversation(uttered, goals)
+            if handled is not None:
+                return handled
         if existing_buttons is not None and selected_action!="telegram.publish_announcement":
             return self._pack("invalid_tool",
                 "既存ボタンはTelegram告知の投稿確認だけに指定できます。",False,recovery=True)
@@ -420,11 +433,26 @@ class Assistant:
             return self._pack("invalid_response", "AI応答形式が不正なため実行していません。" + omitted, False, recovery=True)
         if len(action) > 128 or len(target) > 256 or len(question) > 2000 or len(reply) > 4000:
             return self._pack("invalid_response", "AI応答が長すぎるため実行していません。" + omitted, False, recovery=True)
-        if action in CATALOG_FIELDS:
-            fields = plan.get("fields") if isinstance(plan.get("fields"), dict) else {}
-            response = self._catalog(action, fields, provider_name, owner_selected=False)
-            if goals:
-                response["plan"] = self._goal_plan(goals)
+        if action in OPERATION_FIELDS:
+            self.dialog = blank_dialog()
+            self.dialog["current"] = action
+            supplied = plan.get("fields") if isinstance(plan.get("fields"), dict) else {}
+            self.dialog["fields"] = {
+                key: value for key, value in supplied.items()
+                if key in OPERATION_FIELDS[action] and isinstance(value, (str, int))
+                and not isinstance(value, bool)
+            }
+            response = self._drain(goals)
+            if omitted:
+                response["text"] += omitted
+            return response
+        named = find_actions(reply)
+        if not action and len(named) == 1:
+            self.dialog = blank_dialog()
+            self.dialog["current"] = named[0]
+            response = self._drain(goals)
+            if omitted:
+                response["text"] += omitted
             return response
         if action and action not in ALLOWED:
             return self._pack("invalid_tool", "AIの応答に未登録の操作があったため捨てました。実行していません。" + omitted, False, recovery=True)
@@ -449,14 +477,13 @@ class Assistant:
             return None, "none"
         prompt = (
             "Tumblr運用のAIアシスタントとして日本語で要望を理解し誘導する。"
-            "JSONオブジェクトのみ返す。キーはaction,target,reply,question。"
+            "JSONオブジェクトのみ返す。キーはaction,target,reply,question,fields。"
             "操作しない相談・企画・説明はactionを空にしてreplyで案内する。"
             "不足情報はquestionで一つずつ確認する。接続・公開済みと推測で主張しない。"
             "実操作の提案は登録済アクションのみ。許可された操作: "
             + ",".join(sorted(ALLOWED))
-            + ("。運営画面に接続済みの操作: " + ",".join(sorted(CATALOG_FIELDS))
-               + "。その操作の入力はfieldsオブジェクトに入れる。"
-               if self.catalog_perform is not None else "")
+            + "。運営操作は次のIDから一つ選び、actionにそのID、分かった入力はfieldsへ入れる: "
+            + operation_names()
             + "。選択目的: " + "・".join(goals or [])
             + "。複数の目的は必ず考慮するが、未接続操作は実行済みと主張しない。"
             + "。利用者の文: " + cleaned
@@ -517,10 +544,141 @@ class Assistant:
     def _goal_guidance(self, goals):
         response=self._pack(
             "guidance",
-            "目的を確認しました。実行する操作と対象を選んでください。"
-            "候補は現在の接続契約に基づきます。未接続の目的を完了扱いにしません。",
+            "目的は「" + "・".join(goals) + "」です。"
+            "実行する操作名を会話で書いてください。足りない項目は一つずつ聞きます。",
             False,recovery=True)
-        response["plan"]=self._goal_plan(goals)
+        response["plan"]={"goals":list(goals),"recommendations":[],
+                          "not_connected_goals":[],"all_actions_count":0,
+                          "evidence":"existing_bridge_registry","executed":False}
+        return response
+
+    def _conversation(self, text, goals):
+        if self.dialog.get("paused"):
+            if not find_actions(text):
+                request_id = next(iter(self.pending), None)
+                return self._pack(
+                    "confirmation_required",
+                    "確認を押すまで実行しません。別の操作名を書くと、その操作に移ります。",
+                    False, recovery=True, request_id=request_id)
+            self.pending.clear()
+            self.dialog = blank_dialog()
+        if ingest(self.dialog, text) == "passthrough":
+            return None
+        return self._drain(goals)
+
+    def _drain(self, goals):
+        texts = []
+        executed = False
+        response = None
+        for _ in range(8):
+            if not self.dialog.get("current"):
+                if not self.dialog.get("queue"):
+                    break
+                self.dialog["current"] = self.dialog["queue"].pop(0)
+                self.dialog["fields"] = {}
+            decision = step(self.dialog)
+            if decision["kind"] == "done":
+                break
+            if decision["kind"] == "ask":
+                response = self._pack("guidance", "\n".join(texts + [decision["text"]]), False,
+                                      recovery=True, action=decision["action"], provider="conversation")
+                break
+            if decision["kind"] == "confirm":
+                response = self._hold(decision)
+                if texts:
+                    response["text"] = "\n".join(texts) + "\n" + response["text"]
+                break
+            response = self._run_decision(decision)
+            if response["state"] == "confirmation_required":
+                if texts:
+                    response["text"] = "\n".join(texts) + "\n" + response["text"]
+                break
+            if response["state"] != "completed":
+                if texts:
+                    response["text"] = "\n".join(texts) + "\n" + response["text"]
+                self.dialog["queue"] = []
+                self.dialog["current"] = None
+                self.dialog["fields"] = {}
+                break
+            executed = executed or response["executed"] is True
+            texts.append(response["text"])
+            self.dialog["current"] = None
+            self.dialog["fields"] = {}
+            if not self.dialog.get("queue"):
+                response["text"] = "\n".join(texts)
+                response["executed"] = executed
+                break
+        if response is None:
+            response = self._pack("guidance", "やりたい操作名を書いてください。実行はまだしていません。",
+                                  False, recovery=True, provider="conversation")
+        if goals:
+            response["plan"] = {"goals": list(goals), "recommendations": [],
+                                "not_connected_goals": [], "all_actions_count": 0,
+                                "evidence": "existing_bridge_registry", "executed": False}
+        return response
+
+    def _hold(self, decision):
+        request_id = uuid.uuid4().hex
+        self.pending[request_id] = {"kind": "catalog", "action": decision["action"],
+                                    "payload": decision["fields"]}
+        self.dialog["paused"] = True
+        return self._pack("confirmation_required", decision["text"], False,
+                          request_id=request_id, action=decision["action"], provider="conversation")
+
+    def _run_decision(self, decision):
+        action = decision["action"]
+        if action in BRIDGE_ROUTES:
+            field = BRIDGE_TARGET_FIELD.get(action, "")
+            supplied = decision["fields"].get(field, "") if field else ""
+            bridge_action, target = resolve_bridge_action(action, supplied)
+            response = self._propose(bridge_action, target, "", "", "", "conversation", ai=False)
+            if response["state"] == "confirmation_required":
+                self.dialog["paused"] = True
+            return response
+        return self._execute_owner(action, decision["fields"])
+
+    def _execute_owner(self, action, fields):
+        if self.catalog_perform is None:
+            return self._pack("not_connected", "この操作の保存先が未接続です。実行していません。",
+                              False, recovery=True, action=action, provider="conversation")
+        try:
+            result = self.catalog_perform(action, fields)
+        except ValueError as exc:
+            code = str(exc)
+            if not re.fullmatch(r"[A-Za-z0-9_]{1,80}", code):
+                code = "operation_failed"
+            return self._pack("failed", "操作を完了できませんでした（" + code + "）。完了扱いしません。",
+                              False, recovery=True, action=action, provider="conversation")
+        if not isinstance(result, dict) or result.get("verified") is not True:
+            return self._pack("failed", "操作の結果を確認できません。完了扱いしません。",
+                              False, recovery=True, action=action, provider="conversation")
+        text = result.get("summary") if isinstance(result.get("summary"), str) else "操作を実行しました。"
+        external = action in CATALOG_EXTERNAL or result.get("external") is True
+        return self._pack("completed", text[:2000], external, action=action, provider="conversation")
+
+    def _after_dialog(self, response, goals):
+        if not self.dialog.get("paused"):
+            return response
+        self.dialog["paused"] = False
+        if response.get("state") != "completed":
+            self.dialog["current"] = None
+            self.dialog["fields"] = {}
+            self.dialog["queue"] = []
+            return response
+        self.dialog["current"] = None
+        self.dialog["fields"] = {}
+        if not self.dialog.get("queue"):
+            return response
+        self.dialog["current"] = self.dialog["queue"].pop(0)
+        extra = self._drain(goals)
+        if extra and extra.get("text"):
+            response["text"] += "\n" + extra["text"]
+            if extra.get("state") == "confirmation_required":
+                response["state"] = extra["state"]
+                response["request_id"] = extra.get("request_id")
+                response["recovery"] = True
+                response["executed"] = False
+                response["action"] = extra.get("action")
         return response
 
     def _local(self, local, cleaned, omitted, question=""):
@@ -713,7 +871,7 @@ class Assistant:
     def _confirm(self, request_id):
         item = self.pending.pop(request_id or "", None)
         if isinstance(item, dict) and item.get("kind") == "catalog":
-            return self._catalog(item["action"], item["payload"], "confirmed", owner_selected=True)
+            return self._execute_owner(item["action"], item["payload"])
         if not item:
             return self._pack("failed", "確認できる提案がありません。実行していません。", False, recovery=True)
         self.pending[request_id] = item

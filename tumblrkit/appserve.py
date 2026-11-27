@@ -1534,20 +1534,27 @@ class AppServer:
 
         def catalog_perform(action, payload):
             from contextlib import closing
-            from tumblrkit.catalog_operations import perform as catalog_run
+            from tumblrkit.conversation_ops import perform as converse
             from tumblrkit.core import connect as campaign_connect
+            from tumblrkit.follower_analytics import FollowerAnalytics
             adapters = self.httpd.assistant.bridge.adapters
+            tumblr = adapters.get("tumblr")
             with closing(campaign_connect(str(self.httpd.draft_store.path))) as db:
-                return catalog_run(
-                    action, payload,
-                    drafts=self.httpd.draft_store,
-                    discovery=getattr(adapters.get("analytics"), "store", None),
-                    engagement=adapters.get("engagement"),
-                    campaign_db=db,
-                    attachments=self.httpd.attachment_store,
-                    media=self.httpd.media_save,
-                    telegram=adapters.get("telegram"),
-                    analytics=adapters.get("analytics"))
+                return converse(action, payload, {
+                    "drafts": self.httpd.draft_store,
+                    "discovery": self.httpd.discovery_store,
+                    "engagement": adapters.get("engagement"),
+                    "campaign_db": db,
+                    "attachments": self.httpd.attachment_store,
+                    "media": self.httpd.media_save,
+                    "telegram": adapters.get("telegram"),
+                    "analytics": adapters.get("analytics"),
+                    "account": self.httpd.owner_oauth,
+                    "library": self.httpd.library,
+                    "scheduler": self.httpd.scheduler,
+                    "followers": FollowerAnalytics(tumblr, self.httpd.discovery_store) if tumblr else None,
+                    "tumblr": tumblr,
+                })
 
         self.httpd.assistant.catalog_perform = catalog_perform
         if self.ticket:
