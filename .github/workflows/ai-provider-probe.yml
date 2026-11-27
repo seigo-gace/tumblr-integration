@@ -15,7 +15,7 @@ jobs:
     env:
       TUMBLR_AI_LIVE_ENABLED: "1"
       TUMBLR_AI_ROUTING_MODE: legacy_split
-      TUMBLR_GEMINI_API_KEY: ${{ secrets.TUMBLR_GEMINI_API_KEY }}
+      TUMBLR_AI_PROBE_ONLY: groq
       TUMBLR_GROQ_API_KEY: ${{ secrets.TUMBLR_GROQ_API_KEY }}
       TUMBLR_AI_QUOTA_DB: /tmp/ai-quota.sqlite3
     steps:

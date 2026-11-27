@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """One bounded live call per selected provider. Prints status codes only."""
 import os
+import re
 import stat
 import sys
 import time
@@ -24,7 +25,8 @@ SAFE_CODES = {
     "quota_unavailable",
     "paid_model_forbidden",
 }
-LAST_STATUS = {"value": None}
+LAST_STATUS = {"value": None, "detail": ""}
+_DETAIL = re.compile(r"[A-Za-z0-9_.-]{1,80}")
 
 
 def run(env, transport=None, sleep=time.sleep):
@@ -70,11 +72,12 @@ def run(env, transport=None, sleep=time.sleep):
         if index:
             sleep(61)
         LAST_STATUS["value"] = None
+        LAST_STATUS["detail"] = ""
         try:
             plan = provider.complete(PROMPT)
         except ProviderError as exc:
             code = exc.code if exc.code in SAFE_CODES else "failed"
-            print(f"CALL provider={provider.name} result={code}{_http()}")
+            print(f"CALL provider={provider.name} result={code}{_http()}{_detail()}")
             ok = False
             continue
         except Exception:
@@ -116,6 +119,7 @@ class _StatusTransport:
     def post(self, url, headers, body):
         status, payload = self.inner.post(url, headers, body)
         LAST_STATUS["value"] = status
+        LAST_STATUS["detail"] = _safe_detail(payload)
         return status, payload
 
 
@@ -123,6 +127,29 @@ def _http():
     status = LAST_STATUS["value"]
     if isinstance(status, int) and 100 <= status <= 599:
         return f" http={status}"
+    return ""
+
+
+def _safe_detail(payload):
+    if not isinstance(payload, dict) or not payload:
+        return "empty"
+    error = payload.get("error")
+    if error == "quota":
+        return "quota"
+    if not isinstance(error, dict):
+        return "unclassified"
+    parts = []
+    for key in ("status", "type", "code"):
+        value = error.get(key)
+        if isinstance(value, str) and _DETAIL.fullmatch(value):
+            parts.append(value)
+    return ",".join(parts) or "unclassified"
+
+
+def _detail():
+    detail = LAST_STATUS["detail"]
+    if detail and _DETAIL.fullmatch(detail.replace(",", "")):
+        return " detail=" + detail
     return ""
 
 
@@ -134,6 +161,7 @@ def main():
         def post(self, url, headers, body):
             status, payload = super().post(url, headers, body)
             LAST_STATUS["value"] = status
+            LAST_STATUS["detail"] = _safe_detail(payload)
             return status, payload
 
     assistant_mod.UrllibTransport = RecordingTransport
