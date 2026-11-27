@@ -1,21 +1,31 @@
 name: AI provider probe
 on:
-  push:
-    branches: [feat/initial-modular-core]
-    paths:
-      - tumblrkit/assistant.py
-      - scripts/tumblr_ai_probe.py
-      - tests/test_ai_probe.py
-      - tests/test_assistant.py
-      - .github/workflows/ai-provider-probe.yml
+  workflow_dispatch:
 jobs:
+  openrouter-free:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TUMBLR_AI_LIVE_ENABLED: "1"
+      TUMBLR_AI_ROUTING_MODE: free_router
+      TUMBLR_OPENROUTER_MODEL: openrouter/free
+      TUMBLR_OPENROUTER_API_KEY: ${{ secrets.TUMBLR_OPENROUTER_API_KEY }}
+      TUMBLR_AI_QUOTA_DB: /tmp/ai-quota.sqlite3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: PYTHONPATH=. python -m unittest tests.test_ai_probe -v
+      - run: PYTHONPATH=. python scripts/tumblr_ai_probe.py
   groq-gemini:
+    needs: openrouter-free
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
       TUMBLR_AI_LIVE_ENABLED: "1"
       TUMBLR_AI_ROUTING_MODE: legacy_split
-      TUMBLR_AI_PROBE_ONLY: groq
+      TUMBLR_GEMINI_API_KEY: ${{ secrets.TUMBLR_GEMINI_API_KEY }}
       TUMBLR_GROQ_API_KEY: ${{ secrets.TUMBLR_GROQ_API_KEY }}
       TUMBLR_AI_QUOTA_DB: /tmp/ai-quota.sqlite3
     steps:
